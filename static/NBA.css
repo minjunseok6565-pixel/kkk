@@ -2369,6 +2369,11 @@ body:has(#player-detail-screen.active) .app-shell {
   gap: 12px;
   margin: 12px 0 14px;
 }
+@media (min-width: 1201px) {
+  #my-team-screen .myteam-overview {
+    transform: translateX(calc((100% + 12px) / 4));
+  }
+}
 #my-team-screen .myteam-overview-block {
   padding: 14px 16px;
   border-radius: 14px;
