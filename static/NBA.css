@@ -2465,6 +2465,43 @@ body:has(#player-detail-screen.active) .app-shell {
   padding: 12px 14px;
 }
 
+#main-screen .home-pulse-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+#main-screen .pulse-card {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  background: linear-gradient(170deg, rgba(17, 24, 39, 0.84), rgba(12, 18, 30, 0.9));
+  padding: 14px;
+  min-height: 84px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+}
+
+#main-screen .pulse-label {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.71rem;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+}
+
+#main-screen .pulse-value {
+  margin: 0;
+  color: #f8fafc;
+  font-size: clamp(1.05rem, 1.6vw, 1.35rem);
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+#main-screen #pulse-form.is-hot { color: #6ee7b7; }
+#main-screen #pulse-form.is-cold { color: #fca5a5; }
+#main-screen #pulse-form.is-neutral { color: #cbd5e1; }
+
 #main-screen .btn-secondary {
   background: linear-gradient(180deg, #1e293b, #172233);
   border-color: rgba(148, 163, 184, 0.44);
@@ -2934,6 +2971,16 @@ body:has(#player-detail-screen.active) .app-shell {
   border-color: rgba(147, 197, 253, 0.72);
 }
 
+#main-screen .timeline-item.is-home .tag {
+  border-color: rgba(110, 231, 183, 0.42);
+  color: #a7f3d0;
+}
+
+#main-screen .timeline-item.is-away .tag {
+  border-color: rgba(253, 186, 116, 0.45);
+  color: #fdba74;
+}
+
 @media (max-width: 1200px) {
   #main-screen .executive-insight-bar,
   #main-screen .home-primary-grid,
@@ -2941,6 +2988,10 @@ body:has(#player-detail-screen.active) .app-shell {
   #main-screen .main-intel-grid,
   #main-screen .main-feed-grid {
     grid-template-columns: 1fr;
+  }
+
+  #main-screen .home-pulse-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   #main-screen .command-kpi-grid {
@@ -2980,6 +3031,10 @@ body:has(#player-detail-screen.active) .app-shell {
   #main-screen .franchise-date,
   #main-screen .franchise-header-actions .btn {
     width: 100%;
+  }
+
+  #main-screen .home-pulse-strip {
+    grid-template-columns: 1fr;
   }
 
   #main-screen .next-game-actions {
