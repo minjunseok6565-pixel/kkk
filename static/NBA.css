@@ -2059,6 +2059,114 @@ body:has(#player-detail-screen.active) .app-shell {
   box-shadow: 0 10px 20px rgba(15, 23, 42, 0.45);
 }
 
+
+#main-screen .executive-insight-bar {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+#main-screen .insight-kpi-card {
+  border: 1px solid var(--home-line);
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(17, 24, 39, 0.88), rgba(13, 21, 35, 0.92));
+  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.24);
+  padding: 14px;
+  display: grid;
+  gap: 6px;
+}
+
+#main-screen .insight-kpi-label {
+  margin: 0;
+  font-size: .72rem;
+  letter-spacing: .08em;
+  color: var(--home-muted);
+  font-weight: 700;
+}
+
+#main-screen .insight-kpi-value {
+  font-size: 1.25rem;
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+}
+
+#main-screen .insight-kpi-meta {
+  color: #9fb0c9;
+  font-size: .82rem;
+}
+
+#main-screen .home-primary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+#main-screen .franchise-focus-panel {
+  border: 1px solid var(--home-line);
+  border-radius: 16px;
+  background: linear-gradient(165deg, rgba(17, 24, 39, 0.92), rgba(10, 17, 29, 0.95));
+  box-shadow: 0 16px 28px rgba(2, 6, 23, 0.28);
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+#main-screen .focus-header {
+  display: grid;
+  gap: 6px;
+}
+
+#main-screen .focus-header h4 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1.2rem;
+}
+
+#main-screen .focus-role {
+  margin: 0;
+  color: #9fb0c9;
+  font-size: .88rem;
+}
+
+#main-screen .focus-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+#main-screen .focus-kpi {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.52);
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+#main-screen .focus-kpi span {
+  color: var(--home-muted);
+  font-size: .75rem;
+}
+
+#main-screen .focus-kpi strong {
+  color: #eef2ff;
+  font-size: 1.04rem;
+  font-variant-numeric: tabular-nums;
+}
+
+#main-screen .focus-list-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+#main-screen .focus-list-wrap h5 {
+  margin: 0;
+  font-size: .84rem;
+  color: #cdd9ee;
+  letter-spacing: .03em;
+}
+
 #main-screen .franchise-command-bar,
 #main-screen .next-game-panel,
 #main-screen .intel-card {
@@ -2410,6 +2518,8 @@ body:has(#player-detail-screen.active) .app-shell {
 }
 
 @media (max-width: 1200px) {
+  #main-screen .executive-insight-bar,
+  #main-screen .home-primary-grid,
   #main-screen .franchise-command-bar,
   #main-screen .main-intel-grid,
   #main-screen .main-feed-grid {
@@ -2417,6 +2527,10 @@ body:has(#player-detail-screen.active) .app-shell {
   }
 
   #main-screen .command-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #main-screen .executive-insight-bar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -2452,6 +2566,11 @@ body:has(#player-detail-screen.active) .app-shell {
   }
 
   #main-screen .next-game-actions {
+    grid-template-columns: 1fr;
+  }
+
+  #main-screen .executive-insight-bar,
+  #main-screen .focus-kpi-grid {
     grid-template-columns: 1fr;
   }
 }
