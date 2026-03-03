@@ -106,10 +106,33 @@
           <p id="next-game-datetime" class="next-game-datetime">YYYY-MM-DD --:-- PM</p>
 
           <div class="next-game-actions">
-            <button type="button" class="menu-card next-game-action-btn">경기 진행</button>
+            <button type="button" id="next-game-play-btn" class="menu-card next-game-action-btn">경기 진행</button>
             <button type="button" id="next-game-tactics-btn" class="menu-card next-game-action-btn">전술</button>
-            <button type="button" class="menu-card next-game-action-btn">빠른 진행</button>
+            <button type="button" id="next-game-quick-btn" class="menu-card next-game-action-btn">빠른 진행</button>
           </div>
+        </section>
+
+        <section class="home-kpi-strip" aria-label="프랜차이즈 스냅샷">
+          <article class="home-kpi-card"><p>SEASON</p><strong id="home-kpi-record">0-0</strong><span id="home-kpi-winpct">WIN% .000</span></article>
+          <article class="home-kpi-card"><p>STANDING</p><strong id="home-kpi-rank">#-</strong><span id="home-kpi-gb">GB -</span></article>
+          <article class="home-kpi-card"><p>FORM</p><strong id="home-kpi-l10">L10 0-0</strong><span id="home-kpi-streak">-</span></article>
+          <article class="home-kpi-card"><p>CONDITION</p><strong id="home-kpi-out">OUT 0</strong><span id="home-kpi-risk">HIGH 0</span></article>
+        </section>
+
+        <section class="home-intel-grid" aria-label="메인 인텔리전스">
+          <article class="home-panel">
+            <div class="home-panel-head"><h3>오늘의 우선 과제</h3></div>
+            <ul id="home-priority-list" class="home-priority-list"></ul>
+          </article>
+          <article class="home-panel">
+            <div class="home-panel-head"><h3>최근 활동</h3></div>
+            <ul id="home-activity-feed" class="home-activity-feed"></ul>
+          </article>
+        </section>
+
+        <section class="home-panel" aria-label="2주 리스크 캘린더">
+          <div class="home-panel-head"><h3>2주 일정/리스크 캘린더</h3></div>
+          <div id="home-risk-calendar" class="home-risk-calendar"></div>
         </section>
       </section>
     </section>

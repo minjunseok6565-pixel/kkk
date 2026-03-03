@@ -1474,6 +1474,167 @@ async def team_schedule(team_id: str):
     }
 
 
+@router.get("/api/home/dashboard/{team_id}")
+async def api_home_dashboard(team_id: str):
+    """Home 화면 렌더에 필요한 핵심 정보 묶음 조회.
+
+    Notes:
+    - 기존 조회 로직을 재사용해 Home에서 자주 필요한 카드 데이터를 한 번에 제공한다.
+    - 반환값은 UI 친화 포맷이며, 누락값은 None/기본값으로 안전하게 채운다.
+    """
+    tid = str(normalize_team_id(team_id, strict=True))
+
+    schedule = await team_schedule(tid)
+    team_detail = get_team_detail(tid)
+    standings_table = get_conference_standings_table()
+    medical_overview = await api_medical_team_overview(tid)
+    medical_alerts = await api_medical_team_alerts(tid)
+    risk_calendar = await api_medical_team_risk_calendar(tid, days=14)
+
+    current_date = str(schedule.get("current_date") or "")[:10]
+    games = schedule.get("games") or []
+    next_game = next(
+        (
+            g
+            for g in games
+            if str(g.get("date") or "")[:10] >= current_date and not bool(g.get("is_completed"))
+        ),
+        None,
+    )
+    recent_results = [g for g in games if bool(g.get("is_completed"))][-5:]
+    recent_results = list(reversed(recent_results))
+
+    east_rows = standings_table.get("east") if isinstance(standings_table, dict) else []
+    west_rows = standings_table.get("west") if isinstance(standings_table, dict) else []
+    all_rows = [r for r in (east_rows or []) + (west_rows or []) if isinstance(r, dict)]
+    my_standing = next((r for r in all_rows if str(r.get("team_id") or "").upper() == tid), None)
+
+    opponent_standing = None
+    if isinstance(next_game, dict):
+        opp_id = str(next_game.get("opponent_team_id") or "").upper()
+        opponent_standing = next((r for r in all_rows if str(r.get("team_id") or "").upper() == opp_id), None)
+
+    med_summary = (medical_overview.get("summary") or {}) if isinstance(medical_overview, dict) else {}
+    injury_counts = med_summary.get("injury_status_counts") or {}
+    risk_counts = med_summary.get("risk_tier_counts") or {}
+
+    feed_items: List[Dict[str, Any]] = []
+    for g in recent_results:
+        result = g.get("result") if isinstance(g.get("result"), dict) else {}
+        feed_items.append(
+            {
+                "type": "GAME_RESULT",
+                "date": str(g.get("date") or "")[:10],
+                "title": f"{g.get('opponent_label') or ''} {result.get('display') or '-'}",
+                "meta": {
+                    "opponent_team_id": g.get("opponent_team_id"),
+                    "opponent_team_name": g.get("opponent_team_name"),
+                    "result": result,
+                },
+            }
+        )
+
+    recent_events = (((medical_overview.get("watchlists") or {}).get("recent_injury_events")) or []) if isinstance(medical_overview, dict) else []
+    for e in recent_events[:5]:
+        feed_items.append(
+            {
+                "type": "INJURY_EVENT",
+                "date": str(e.get("date") or "")[:10],
+                "title": f"{e.get('player_name') or 'Unknown'} · {e.get('injury_type') or 'Injury'}",
+                "meta": {
+                    "player_id": e.get("player_id"),
+                    "severity": e.get("severity"),
+                    "body_part": e.get("body_part"),
+                    "recovery_status": e.get("recovery_status"),
+                },
+            }
+        )
+
+    feed_items.sort(key=lambda x: str(x.get("date") or ""), reverse=True)
+    feed_items = feed_items[:7]
+
+    priorities: List[Dict[str, Any]] = []
+    alert_level = str((medical_alerts or {}).get("alert_level") or "info")
+    primary_alert_player = (medical_alerts or {}).get("primary_alert_player") if isinstance(medical_alerts, dict) else None
+    if primary_alert_player:
+        priorities.append(
+            {
+                "kind": "MEDICAL_ALERT",
+                "severity": alert_level,
+                "text": (
+                    f"{primary_alert_player.get('name') or '선수'} "
+                    f"({primary_alert_player.get('risk_tier') or '-'}) "
+                    f"리스크 모니터링 필요"
+                ),
+                "cta": "메디컬 확인",
+            }
+        )
+
+    load_ctx = (medical_alerts or {}).get("team_load_context") if isinstance(medical_alerts, dict) else {}
+    b2b_count = int((load_ctx or {}).get("next_7d_back_to_back_count") or 0)
+    game_count_7d = int((load_ctx or {}).get("next_7d_game_count") or 0)
+    if b2b_count > 0:
+        priorities.append(
+            {
+                "kind": "SCHEDULE_LOAD",
+                "severity": "warn",
+                "text": f"향후 7일 {game_count_7d}경기 · 백투백 {b2b_count}회",
+                "cta": "훈련 조정",
+            }
+        )
+
+    out_count = int((injury_counts or {}).get("OUT") or 0)
+    high_risk_count = int((risk_counts or {}).get("HIGH") or 0)
+    if out_count > 0 or high_risk_count > 0:
+        priorities.append(
+            {
+                "kind": "ROSTER_RISK",
+                "severity": "critical" if out_count >= 2 else "warn",
+                "text": f"결장 {out_count}명 · 고위험 {high_risk_count}명",
+                "cta": "로테이션 점검",
+            }
+        )
+
+    priorities = priorities[:3]
+
+    return {
+        "team_id": tid,
+        "current_date": current_date,
+        "snapshot": {
+            "team_name": TEAM_FULL_NAMES.get(tid, tid),
+            "record": {
+                "wins": (team_detail.get("summary") or {}).get("wins"),
+                "losses": (team_detail.get("summary") or {}).get("losses"),
+                "win_pct": (team_detail.get("summary") or {}).get("win_pct"),
+            },
+            "standing": {
+                "rank": (my_standing or {}).get("rank"),
+                "gb_display": (my_standing or {}).get("gb_display"),
+                "l10": (my_standing or {}).get("l10"),
+                "streak": (my_standing or {}).get("strk"),
+            },
+            "finance": {
+                "payroll": (team_detail.get("summary") or {}).get("payroll"),
+                "cap_space": (team_detail.get("summary") or {}).get("cap_space"),
+            },
+            "health": {
+                "out_count": out_count,
+                "high_risk_count": high_risk_count,
+                "returning_count": int((injury_counts or {}).get("RETURNING") or 0),
+            },
+        },
+        "next_game": {
+            "game": next_game,
+            "my_team_standing": my_standing,
+            "opponent_standing": opponent_standing,
+        },
+        "priorities": priorities,
+        "activity_feed": feed_items,
+        "risk_calendar": risk_calendar.get("days") if isinstance(risk_calendar, dict) else [],
+        "medical_alerts": medical_alerts,
+    }
+
+
 # -------------------------------------------------------------------------
 # STATE 요약 조회 API (프론트/디버그용)
 # -------------------------------------------------------------------------
