@@ -91,6 +91,10 @@ const els = {
   kpiWinRate: document.getElementById("kpi-win-rate"),
   kpiLast10: document.getElementById("kpi-last10"),
   kpiStreak: document.getElementById("kpi-streak"),
+  pulseRank: document.getElementById("pulse-rank"),
+  pulseGb: document.getElementById("pulse-gb"),
+  pulseNet: document.getElementById("pulse-net"),
+  pulseForm: document.getElementById("pulse-form"),
   statusInjury: document.getElementById("status-injury"),
   statusFatigue: document.getElementById("status-fatigue"),
   statusSchedule: document.getElementById("status-schedule"),
@@ -480,6 +484,32 @@ function normalizeRecord(row) {
   };
 }
 
+function parseWlPair(wl) {
+  const [w, l] = String(wl || "0-0").split("-").map((v) => Number(v || 0));
+  return { w: Number.isFinite(w) ? w : 0, l: Number.isFinite(l) ? l : 0 };
+}
+
+function computeFormIndex(row) {
+  const diff = num(row?.diff, 0);
+  const { w, l } = parseWlPair(row?.l10);
+  const games = w + l;
+  const l10Pct = games > 0 ? w / games : 0.5;
+  const streakRaw = String(row?.strk || "-");
+  const streakSign = streakRaw.startsWith("W") ? 1 : streakRaw.startsWith("L") ? -1 : 0;
+  const streakLen = Number(streakRaw.slice(1)) || 0;
+  const score = (l10Pct - 0.5) * 50 + diff * 2.5 + streakSign * Math.min(streakLen, 6) * 1.8;
+  if (score >= 8) return { label: "HOT", cls: "is-hot" };
+  if (score <= -8) return { label: "COLD", cls: "is-cold" };
+  return { label: "NEUTRAL", cls: "is-neutral" };
+}
+
+function setPulseState(el, text, cls = "") {
+  if (!el) return;
+  el.textContent = text;
+  el.classList.remove("is-hot", "is-cold", "is-neutral");
+  if (cls) el.classList.add(cls);
+}
+
 function setBadgeState(el, text, cls = "") {
   if (!el) return;
   el.textContent = text;
@@ -560,6 +590,10 @@ function resetNextGameCard() {
   if (els.kpiWinRate) els.kpiWinRate.textContent = "--";
   if (els.kpiLast10) els.kpiLast10.textContent = "--";
   if (els.kpiStreak) els.kpiStreak.textContent = "--";
+  if (els.pulseRank) els.pulseRank.textContent = "--위";
+  if (els.pulseGb) els.pulseGb.textContent = "GB -";
+  if (els.pulseNet) els.pulseNet.textContent = "DIFF 0.0";
+  setPulseState(els.pulseForm, "NEUTRAL", "is-neutral");
   setBadgeState(els.statusInjury, "부상 --명");
   setBadgeState(els.statusFatigue, "피로 주의 --명");
   setBadgeState(els.statusSchedule, "일정 강도 확인중");
@@ -685,6 +719,12 @@ async function refreshMainDashboard() {
     if (els.kpiLast10) els.kpiLast10.textContent = recentResults.length ? `${wins}-${losses}` : baseRecord.l10;
     if (els.kpiStreak) els.kpiStreak.textContent = baseRecord.strk !== "-" ? baseRecord.strk : streakFromRecent(recentResults);
 
+    if (els.pulseRank) els.pulseRank.textContent = standingsRow?.rank ? `${standingsRow.rank}위` : "--위";
+    if (els.pulseGb) els.pulseGb.textContent = `GB ${standingsRow?.gb_display ?? "-"}`;
+    if (els.pulseNet) els.pulseNet.textContent = `DIFF ${formatSignedDiff(standingsRow?.diff)}`;
+    const form = computeFormIndex(standingsRow || { l10: baseRecord.l10, strk: baseRecord.strk, diff: 0 });
+    setPulseState(els.pulseForm, form.label, form.cls);
+
     const seasonYear = Number(currentDate.slice(0, 4));
     if (els.commandSeasonStage) {
       els.commandSeasonStage.textContent = Number.isFinite(seasonYear) ? `${seasonYear}-${String((seasonYear + 1) % 100).padStart(2, "0")} 정규 시즌` : "정규 시즌";
@@ -776,7 +816,9 @@ async function refreshMainDashboard() {
           const tDate = formatIsoDate(g?.date);
           const isHome = String(g?.home_team_id || "").toUpperCase() === teamId;
           const opp = TEAM_FULL_NAMES[String(isHome ? g?.away_team_id : g?.home_team_id || "").toUpperCase()] || "상대 미정";
-          return `<div class="timeline-item ${idx === 0 ? "is-next" : ""}"><span>${tDate}</span><span>${isHome ? "vs" : "@"} ${opp}</span><span class="tag">${idx === 0 ? "NEXT" : "UPCOMING"}</span></div>`;
+          const locTag = isHome ? "HOME" : "AWAY";
+          const itemCls = `${idx === 0 ? "is-next " : ""}${isHome ? "is-home" : "is-away"}`.trim();
+          return `<div class="timeline-item ${itemCls}"><span>${tDate}</span><span>${isHome ? "vs" : "@"} ${opp}</span><span class="tag">${idx === 0 ? `NEXT · ${locTag}` : locTag}</span></div>`;
         }).join("")
         : '<div class="timeline-item"><span>-</span><span>예정 일정이 없습니다.</span><span class="tag">INFO</span></div>';
     }
