@@ -179,6 +179,50 @@
         <button id="back-to-main-btn" class="btn btn-secondary" type="button">메인으로</button>
       </div>
 
+      <section class="myteam-overview" aria-label="팀 요약">
+        <div class="myteam-overview-block">
+          <p class="myteam-overview-label">SEASON</p>
+          <div class="myteam-overview-row">
+            <strong id="myteam-record">0-0</strong>
+            <span id="myteam-winpct">WIN% .000</span>
+          </div>
+        </div>
+        <div class="myteam-overview-block">
+          <p class="myteam-overview-label">STANDING</p>
+          <div class="myteam-overview-row">
+            <strong id="myteam-rank">#-</strong>
+            <span id="myteam-gb">GB -</span>
+          </div>
+        </div>
+        <div class="myteam-overview-block">
+          <p class="myteam-overview-label">FINANCE</p>
+          <div class="myteam-overview-row">
+            <strong id="myteam-payroll">$0</strong>
+            <span id="myteam-capspace">CAP $0</span>
+          </div>
+        </div>
+        <div class="myteam-overview-block">
+          <p class="myteam-overview-label">TEAM CONDITION</p>
+          <div class="myteam-overview-row">
+            <strong id="myteam-avg-sharp">Sharp 0</strong>
+            <span id="myteam-risk-count">주의 0명</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="myteam-command" aria-label="로스터 정렬 및 필터">
+        <div class="myteam-command-group" id="myteam-sort-controls">
+          <button type="button" class="myteam-chip is-active" data-sort="ovr">OVR</button>
+          <button type="button" class="myteam-chip" data-sort="sharpness">Sharp</button>
+          <button type="button" class="myteam-chip" data-sort="salary">Salary</button>
+          <button type="button" class="myteam-chip" data-sort="pts">PTS</button>
+        </div>
+        <div class="myteam-command-group" id="myteam-filter-controls">
+          <button type="button" class="myteam-chip" data-filter="risk">컨디션 주의</button>
+          <button type="button" class="myteam-chip" data-filter="highsalary">고액 계약</button>
+        </div>
+      </section>
+
       <div class="roster-shell">
         <div class="roster-table-wrap">
           <table class="roster-table">
@@ -186,10 +230,15 @@
               <tr>
                 <th>선수명</th>
                 <th>포지션</th>
+                <th>OVR</th>
                 <th>나이</th>
                 <th>키</th>
                 <th>몸무게</th>
                 <th>샐러리</th>
+                <th>PTS</th>
+                <th>AST</th>
+                <th>REB</th>
+                <th>3PM</th>
                 <th class="condition-col">컨디션</th>
                 <th>경기력</th>
               </tr>

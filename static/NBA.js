@@ -63,6 +63,8 @@ const state = {
   tacticsDraft: null,
   medicalOverview: null,
   medicalSelectedPlayerId: null,
+  myTeamSortKey: "ovr",
+  myTeamFilters: { risk: false, highsalary: false },
 };
 
 const els = {
@@ -147,6 +149,16 @@ const els = {
   playerDetailTitle: document.getElementById("player-detail-title"),
   playerDetailPanel: document.getElementById("player-detail-panel"),
   playerDetailContent: document.getElementById("player-detail-content"),
+  myTeamRecord: document.getElementById("myteam-record"),
+  myTeamWinPct: document.getElementById("myteam-winpct"),
+  myTeamRank: document.getElementById("myteam-rank"),
+  myTeamGb: document.getElementById("myteam-gb"),
+  myTeamPayroll: document.getElementById("myteam-payroll"),
+  myTeamCapspace: document.getElementById("myteam-capspace"),
+  myTeamAvgSharp: document.getElementById("myteam-avg-sharp"),
+  myTeamRiskCount: document.getElementById("myteam-risk-count"),
+  myTeamSortControls: document.getElementById("myteam-sort-controls"),
+  myTeamFilterControls: document.getElementById("myteam-filter-controls"),
   medicalTitle: document.getElementById("medical-title"),
   medicalAsOf: document.getElementById("medical-as-of"),
   medicalRosterCount: document.getElementById("medical-roster-count"),
@@ -581,6 +593,88 @@ function renderConditionRing(longStamina, shortStamina) {
   return `<div class="condition-ring" style="--long-pct:${longPct};--short-pct:${shortPct};--long-color:${longColor};--short-color:${shortColor};" title="장기 ${Math.round(longPct)}% · 단기 ${Math.round(shortPct)}%"></div>`;
 }
 
+
+function formatWinPct(pct) {
+  const v = clamp(num(pct, 0), 0, 1);
+  return `WIN% ${v.toFixed(3).replace(/^0/, "")}`;
+}
+
+function renderMyTeamOverview(summary, rows) {
+  const wins = num(summary?.wins, 0);
+  const losses = num(summary?.losses, 0);
+  const rank = summary?.rank != null ? `#${num(summary.rank, 0)}` : "#-";
+  const gb = summary?.gb != null ? Number(summary.gb).toFixed(1) : "-";
+  const payroll = formatMoney(summary?.payroll);
+  const cap = formatMoney(summary?.cap_space);
+
+  const roster = rows || [];
+  const avgSharp = roster.length
+    ? Math.round(roster.reduce((acc, r) => acc + clamp(num(r.sharpness, 0), 0, 100), 0) / roster.length)
+    : 0;
+  const riskCount = roster.filter((r) => {
+    const st = num(r.short_term_stamina, 0);
+    const lt = num(r.long_term_stamina, 0);
+    const sharp = clamp(num(r.sharpness, 0), 0, 100);
+    return sharp < 55 || st < 0.55 || lt < 0.6;
+  }).length;
+
+  if (els.myTeamRecord) els.myTeamRecord.textContent = `${wins}-${losses}`;
+  if (els.myTeamWinPct) els.myTeamWinPct.textContent = formatWinPct(summary?.win_pct);
+  if (els.myTeamRank) els.myTeamRank.textContent = rank;
+  if (els.myTeamGb) els.myTeamGb.textContent = `GB ${gb}`;
+  if (els.myTeamPayroll) els.myTeamPayroll.textContent = payroll;
+  if (els.myTeamCapspace) els.myTeamCapspace.textContent = `CAP ${cap}`;
+  if (els.myTeamAvgSharp) els.myTeamAvgSharp.textContent = `Sharp ${avgSharp}`;
+  if (els.myTeamRiskCount) els.myTeamRiskCount.textContent = `주의 ${riskCount}명`;
+}
+
+function myTeamRowMetric(row, key) {
+  if (key === "sharpness") return clamp(num(row.sharpness, 0), 0, 100);
+  if (key === "salary") return num(row.salary, 0);
+  if (key === "pts") return num(row.pts, 0);
+  return num(row.ovr, 0);
+}
+
+function getMyTeamDisplayRows(rows) {
+  let out = [...(rows || [])];
+  if (state.myTeamFilters.risk) {
+    out = out.filter((r) => {
+      const st = num(r.short_term_stamina, 0);
+      const lt = num(r.long_term_stamina, 0);
+      const sharp = clamp(num(r.sharpness, 0), 0, 100);
+      return sharp < 60 || st < 0.6 || lt < 0.65;
+    });
+  }
+  if (state.myTeamFilters.highsalary) {
+    const avgSalary = out.length ? out.reduce((acc, r) => acc + num(r.salary, 0), 0) / out.length : 0;
+    const threshold = Math.max(avgSalary * 1.35, 12000000);
+    out = out.filter((r) => num(r.salary, 0) >= threshold);
+  }
+
+  const sortKey = state.myTeamSortKey || "ovr";
+  out.sort((a, b) => myTeamRowMetric(b, sortKey) - myTeamRowMetric(a, sortKey));
+  return out;
+}
+
+function syncMyTeamControlState() {
+  if (els.myTeamSortControls) {
+    [...els.myTeamSortControls.querySelectorAll(".myteam-chip[data-sort]")].forEach((btn) => {
+      btn.classList.toggle("is-active", btn.dataset.sort === state.myTeamSortKey);
+    });
+  }
+  if (els.myTeamFilterControls) {
+    [...els.myTeamFilterControls.querySelectorAll(".myteam-chip[data-filter]")].forEach((btn) => {
+      const key = btn.dataset.filter;
+      btn.classList.toggle("is-active", !!state.myTeamFilters[key]);
+    });
+  }
+}
+
+function rerenderMyTeamBoard() {
+  renderRosterRows(getMyTeamDisplayRows(state.rosterRows));
+  syncMyTeamControlState();
+}
+
 function renderRosterRows(rows) {
   els.rosterBody.innerHTML = "";
   for (const row of rows) {
@@ -591,16 +685,27 @@ function renderRosterRows(rows) {
     const shortStamina = row.short_term_stamina ?? (1 - num(row.short_term_fatigue, 0));
     const longStamina = row.long_term_stamina ?? (1 - num(row.long_term_fatigue, 0));
     const sharpness = clamp(num(row.sharpness, 50), 0, 100);
+    const riskClass = sharpness < 60 || shortStamina < 0.6 || longStamina < 0.65 ? "is-risk" : "";
 
     tr.innerHTML = `
-      <td>${row.name || "-"}</td>
+      <td>
+        <div class="myteam-name-cell">
+          <strong>${row.name || "-"}</strong>
+          <span>${row.player_id || "-"}</span>
+        </div>
+      </td>
       <td>${row.pos || "-"}</td>
+      <td><span class="myteam-ovr-pill">${Math.round(num(row.ovr, 0))}</span></td>
       <td>${num(row.age, 0)}</td>
       <td>${formatHeightIn(row.height_in)}</td>
       <td>${formatWeightLb(row.weight_lb)}</td>
       <td>${formatMoney(row.salary)}</td>
+      <td>${num(row.pts, 0).toFixed(1)}</td>
+      <td>${num(row.ast, 0).toFixed(1)}</td>
+      <td>${num(row.reb, 0).toFixed(1)}</td>
+      <td>${num(row.three_pm, 0).toFixed(1)}</td>
       <td class="condition-cell">${renderConditionRing(longStamina, shortStamina)}</td>
-      <td><span class="sharpness-badge" style="background:${ratioToColor(sharpness / 100)}">${Math.round(sharpness)}%</span></td>
+      <td><span class="sharpness-badge ${riskClass}" style="background:${ratioToColor(sharpness / 100)}">${Math.round(sharpness)}%</span></td>
     `;
 
     tr.addEventListener("click", () => {
@@ -692,6 +797,46 @@ function buildContractRows(contractActive, fallbackSalary) {
   return rows.concat(outstandingOptionRows);
 }
 
+function attrCategoryKey(name) {
+  const k = String(name || "").toLowerCase();
+  if (["shot", "shoot", "free_throw", "layup", "inside", "outside", "close"].some((x) => k.includes(x))) return "Shooting";
+  if (["pass", "handle", "play", "iq", "vision"].some((x) => k.includes(x))) return "Playmaking";
+  if (["def", "rebound", "block", "steal", "hustle"].some((x) => k.includes(x))) return "Defense";
+  if (["agility", "athletic", "durability", "injury", "strength", "speed"].some((x) => k.includes(x))) return "Physical";
+  return "Mental";
+}
+
+function buildAttrIntelligence(attrs) {
+  const entries = Object.entries(attrs || {}).map(([k, v]) => ({
+    key: k,
+    value: Math.abs(num(v, 0)) <= 1 ? num(v, 0) * 100 : num(v, 0),
+  }));
+
+  if (!entries.length) {
+    return {
+      categoryHtml: '<p class="empty-copy">능력치 데이터가 없습니다.</p>',
+      strengthsHtml: '<p class="empty-copy">데이터 없음</p>',
+      weaknessesHtml: '<p class="empty-copy">데이터 없음</p>',
+    };
+  }
+
+  const grouped = { Shooting: [], Playmaking: [], Defense: [], Physical: [], Mental: [] };
+  entries.forEach((it) => grouped[attrCategoryKey(it.key)].push(it.value));
+
+  const categoryHtml = Object.entries(grouped)
+    .map(([name, vals]) => {
+      const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+      return `<div class="attr-intel-row"><span>${name}</span><div class="attr-meter"><i style="width:${clamp(avg, 0, 100)}%"></i></div><strong>${Math.round(avg)}</strong></div>`;
+    })
+    .join("");
+
+  const sorted = [...entries].sort((a, b) => b.value - a.value);
+  const strengthsHtml = `<ul class="intel-list">${sorted.slice(0, 5).map((x) => `<li><span>${x.key}</span><strong>${Math.round(x.value)}</strong></li>`).join("")}</ul>`;
+  const weaknessesHtml = `<ul class="intel-list">${sorted.slice(-3).reverse().map((x) => `<li><span>${x.key}</span><strong>${Math.round(x.value)}</strong></li>`).join("")}</ul>`;
+
+  return { categoryHtml, strengthsHtml, weaknessesHtml };
+}
+
 function renderPlayerDetail(detail) {
   const p = detail.player || {};
   const contract = detail.contract || {};
@@ -716,6 +861,13 @@ function renderPlayerDetail(detail) {
   ].filter(Boolean);
 
   const totalsEntries = Object.entries(totals || {});
+  const highlightStats = [
+    ["PTS", num(totals.PTS, 0)],
+    ["AST", num(totals.AST, 0)],
+    ["REB", num(totals.REB, 0)],
+    ["3PM", num(totals["3PM"], 0)],
+  ];
+
   const statsSummary = totalsEntries.length
     ? `<div class="stats-grid">${totalsEntries
       .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
@@ -727,23 +879,32 @@ function renderPlayerDetail(detail) {
     ? `${injury.status || "부상"} · ${(injury.state?.injury_type || "")}`
     : "건강함";
 
-
   const playerName = p.name || "선수";
+  const ovr = Math.round(num(p.ovr, 0));
+  const sharp = clamp(num(condition.sharpness, 50), 0, 100);
+  const { categoryHtml, strengthsHtml, weaknessesHtml } = buildAttrIntelligence(p.attrs || {});
+
   els.playerDetailTitle.textContent = `${playerName} 상세 정보`;
   els.playerDetailContent.innerHTML = `
-    <div class="player-layout">
-      <section class="detail-card detail-card-header">
+    <div class="player-layout player-layout-v2">
+      <section class="detail-card detail-card-header detail-card-hero">
         <div class="detail-head detail-head-main">
           <div>
+            <p class="detail-eyebrow">FRANCHISE PLAYER CARD</p>
             <h3>${playerName}</h3>
             <p class="detail-subline">${p.pos || "-"} · ${num(p.age, 0)}세 · ${formatHeightIn(p.height_in)} / ${formatWeightLb(p.weight_lb)}</p>
+            <p class="hero-summary">${injury.is_injured ? "건강 관리 필요" : "출전 가능"} · Sharp ${Math.round(sharp)} · ${detail.dissatisfaction?.is_dissatisfied ? "불만 관리 필요" : "불만 낮음"}</p>
           </div>
-          <span class="sharpness-badge" style="background:${ratioToColor(num(condition.sharpness, 50) / 100)}">경기력 ${Math.round(num(condition.sharpness, 50))}%</span>
+          <div class="hero-kpi-stack">
+            <span class="ovr-medal">OVR ${ovr}</span>
+            <span class="sharpness-badge" style="background:${ratioToColor(sharp / 100)}">경기력 ${Math.round(sharp)}%</span>
+            <span class="status-line ${injury.is_injured ? "status-danger" : "status-ok"}">${injury.is_injured ? "Injured" : "Available"}</span>
+          </div>
         </div>
       </section>
 
       <section class="detail-card detail-card-contract">
-        <h4>계약 정보</h4>
+        <h4>계약 트랙</h4>
         <ul class="compact-kv-list">
           ${contractRows.map((row) => `<li><span>${row.label}</span><strong${row.emphasis ? ' class="text-accent"' : ""}>${row.value}</strong></li>`).join("")}
         </ul>
@@ -751,15 +912,19 @@ function renderPlayerDetail(detail) {
       </section>
 
       <section class="detail-card detail-card-dissatisfaction">
-        <h4>불만 여부</h4>
+        <h4>만족도 리스크</h4>
         <p class="status-line ${detail.dissatisfaction?.is_dissatisfied ? "status-danger" : "status-ok"}">${detail.dissatisfaction?.is_dissatisfied ? "불만 있음" : "불만 없음"}</p>
         <p class="section-copy">${diss.text}</p>
         ${dissatisfactionDescription.length ? `<ul class="kv-list">${dissatisfactionDescription.map((x) => `<li>${x}</li>`).join("")}</ul>` : ""}
       </section>
 
       <section class="detail-card detail-card-attr">
-        <h4>능력치 (ATTR)</h4>
-        <div class="attr-grid">${renderAttrGrid(p.attrs || {})}</div>
+        <h4>능력치 인텔리전스</h4>
+        <div class="attr-intel-grid">${categoryHtml}</div>
+        <div class="attr-intel-columns">
+          <div><p class="detail-eyebrow">TOP STRENGTHS</p>${strengthsHtml}</div>
+          <div><p class="detail-eyebrow">NEEDS ATTENTION</p>${weaknessesHtml}</div>
+        </div>
       </section>
 
       <section class="detail-card detail-card-health">
@@ -774,7 +939,10 @@ function renderPlayerDetail(detail) {
       </section>
 
       <section class="detail-card detail-card-stats">
-        <h4>누적 스탯</h4>
+        <h4>시즌 퍼포먼스</h4>
+        <div class="hero-stat-grid">
+          ${highlightStats.map(([k, v]) => `<article class="hero-stat"><p>${k}</p><strong>${Math.round(v * 10) / 10}</strong></article>`).join("")}
+        </div>
         <p class="section-copy">출전 경기 수: ${num(seasonStats.games, 0)}경기</p>
         ${statsSummary}
       </section>
@@ -808,7 +976,8 @@ async function showMyTeamScreen() {
     const teamName = state.selectedTeamName || TEAM_FULL_NAMES[state.selectedTeamId] || state.selectedTeamId;
     els.myTeamTitle.textContent = `${teamName} 선수단`;
 
-    renderRosterRows(state.rosterRows);
+    renderMyTeamOverview(detail.summary || {}, state.rosterRows);
+    rerenderMyTeamBoard();
     els.playerDetailContent.innerHTML = "";
     els.playerDetailTitle.textContent = "선수 상세 정보";
     activateScreen(els.myTeamScreen);
@@ -1738,6 +1907,24 @@ els.trainingTypeButtons.querySelectorAll("button[data-training-type]").forEach((
 });
 els.backToMainBtn.addEventListener("click", () => showMainScreen());
 els.backToRosterBtn.addEventListener("click", () => activateScreen(els.myTeamScreen));
+
+if (els.myTeamSortControls) {
+  els.myTeamSortControls.querySelectorAll('.myteam-chip[data-sort]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.myTeamSortKey = btn.dataset.sort || 'ovr';
+      rerenderMyTeamBoard();
+    });
+  });
+}
+if (els.myTeamFilterControls) {
+  els.myTeamFilterControls.querySelectorAll('.myteam-chip[data-filter]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.filter;
+      state.myTeamFilters[key] = !state.myTeamFilters[key];
+      rerenderMyTeamBoard();
+    });
+  });
+}
 
 loadSavesStatus();
 
