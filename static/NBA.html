@@ -264,17 +264,27 @@
         <button id="player-training-tab-btn" type="button" class="btn btn-secondary" disabled aria-disabled="true">개인 훈련 (준비중)</button>
       </div>
 
-      <section class="training-calendar-panel">
-        <div id="training-calendar-grid" class="training-calendar-grid"></div>
-      </section>
+      <section id="training-summary-strip" class="training-summary-strip" aria-live="polite"></section>
 
-      <div class="training-type-buttons" id="training-type-buttons">
-        <button type="button" data-training-type="OFF_TACTICS" class="btn btn-secondary">공격 전술 훈련</button>
-        <button type="button" data-training-type="DEF_TACTICS" class="btn btn-secondary">수비 전술 훈련</button>
-        <button type="button" data-training-type="FILM" class="btn btn-secondary">필름/영상 훈련</button>
-        <button type="button" data-training-type="SCRIMMAGE" class="btn btn-secondary">청백전</button>
-        <button type="button" data-training-type="RECOVERY" class="btn btn-secondary">휴식 훈련</button>
-        <button type="button" data-training-type="REST" class="btn btn-secondary">훈련 없음</button>
+      <div class="training-layout">
+        <div class="training-main-col">
+          <section class="training-calendar-panel">
+            <div id="training-calendar-grid" class="training-calendar-grid"></div>
+          </section>
+
+          <div class="training-type-buttons" id="training-type-buttons">
+            <button type="button" data-training-type="OFF_TACTICS" class="btn btn-secondary">⚔ 공격 전술</button>
+            <button type="button" data-training-type="DEF_TACTICS" class="btn btn-secondary">🛡 수비 전술</button>
+            <button type="button" data-training-type="FILM" class="btn btn-secondary">🎬 필름/영상</button>
+            <button type="button" data-training-type="SCRIMMAGE" class="btn btn-secondary">🏀 청백전</button>
+            <button type="button" data-training-type="RECOVERY" class="btn btn-secondary">🧊 회복 훈련</button>
+            <button type="button" data-training-type="REST" class="btn btn-secondary">⏸ 훈련 없음</button>
+          </div>
+        </div>
+
+        <aside id="training-context-panel" class="training-context-panel" aria-live="polite">
+          <p class="empty-copy">캘린더에서 날짜를 선택하면 일정 맥락과 추천 훈련이 표시됩니다.</p>
+        </aside>
       </div>
 
       <section id="training-detail-panel" class="training-detail-panel">
