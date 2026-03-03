@@ -1,0 +1,116 @@
+# API Endpoint Inventory (GET/POST)
+
+Source of truth: FastAPI route decorators in `app/api/routes/*.py` (wired via `app/api/router.py` and mounted by `app/main.py`).
+
+- Total GET: 38
+- Total POST: 62
+- Total endpoints: 100
+
+## GET
+
+- `/` (`root`) - `app/api/routes/core.py:23`
+- `/api/agency/events` (`api_agency_get_events`) - `app/api/routes/offseason.py:460`
+- `/api/agency/player/{player_id}` (`api_agency_get_player`) - `app/api/routes/offseason.py:397`
+- `/api/agency/team/{team_id}/events` (`api_agency_get_team_events`) - `app/api/routes/offseason.py:426`
+- `/api/college/draft-pool/{draft_year}` (`api_college_draft_pool`) - `app/api/routes/college.py:108`
+- `/api/college/meta` (`api_college_meta`) - `app/api/routes/college.py:22`
+- `/api/college/player/{player_id}` (`api_college_player`) - `app/api/routes/college.py:90`
+- `/api/college/players` (`api_college_players`) - `app/api/routes/college.py:56`
+- `/api/college/team-detail/{college_team_id}` (`api_college_team_detail`) - `app/api/routes/college.py:38`
+- `/api/college/teams` (`api_college_teams`) - `app/api/routes/college.py:30`
+- `/api/contracts/free-agents` (`api_contracts_free_agents`) - `app/api/routes/contracts.py:63`
+- `/api/debug/schedule-summary` (`debug_schedule_summary`) - `app/api/routes/game_saves.py:106`
+- `/api/game/saves` (`api_game_saves`) - `app/api/routes/game_saves.py:54`
+- `/api/game/saves/{slot_id}` (`api_game_save_detail`) - `app/api/routes/game_saves.py:64`
+- `/api/offseason/draft/bigboard/expert` (`api_offseason_draft_bigboard_expert`) - `app/api/routes/offseason.py:937`
+- `/api/offseason/draft/bundle` (`api_offseason_draft_bundle`) - `app/api/routes/offseason.py:1016`
+- `/api/offseason/draft/experts` (`api_offseason_draft_experts`) - `app/api/routes/offseason.py:920`
+- `/api/offseason/draft/interviews/questions` (`api_offseason_draft_interview_questions`) - `app/api/routes/offseason.py:819`
+- `/api/player-detail/{player_id}` (`api_player_detail`) - `app/api/routes/core.py:115`
+- `/api/postseason/field` (`api_postseason_field`) - `app/api/routes/postseason.py:21`
+- `/api/postseason/state` (`api_postseason_state`) - `app/api/routes/postseason.py:26`
+- `/api/practice/team/{team_id}/plan` (`api_get_team_practice_plan`) - `app/api/routes/training.py:113`
+- `/api/practice/team/{team_id}/session` (`api_get_team_practice_session`) - `app/api/routes/training.py:152`
+- `/api/practice/team/{team_id}/sessions` (`api_list_team_practice_sessions`) - `app/api/routes/training.py:225`
+- `/api/readiness/team/{team_id}/familiarity` (`api_get_team_familiarity_status`) - `app/api/routes/training.py`
+- `/api/readiness/team/{team_id}/sharpness` (`api_get_team_sharpness_distribution`) - `app/api/routes/training.py`
+- `/api/roster-summary/{team_id}` (`roster_summary`) - `app/api/routes/core.py:306`
+- `/api/scouting/reports` (`api_scouting_reports`) - `app/api/routes/scouting.py:325`
+- `/api/scouting/scouts/{team_id}` (`api_scouting_list_scouts`) - `app/api/routes/scouting.py:22`
+- `/api/standings` (`api_standings`) - `app/api/routes/core.py:90`
+- `/api/state/summary` (`state_summary`) - `app/api/routes/core.py:459`
+- `/api/stats/leaders` (`api_stats_leaders`) - `app/api/routes/core.py:31`
+- `/api/stats/playoffs/leaders` (`api_playoff_stats_leaders`) - `app/api/routes/core.py:60`
+- `/api/team-detail/{team_id}` (`api_team_detail`) - `app/api/routes/core.py:100`
+- `/api/team-schedule/{team_id}` (`team_schedule`) - `app/api/routes/core.py:403`
+- `/api/teams` (`api_teams`) - `app/api/routes/core.py:95`
+- `/api/trade/block/{team_id}` (`api_trade_block_get`) - `app/api/routes/trades.py:162`
+- `/api/training/player/{player_id}` (`api_get_player_training_plan`) - `app/api/routes/training.py:63`
+- `/api/training/team/{team_id}` (`api_get_team_training_plan`) - `app/api/routes/training.py:24`
+- `/api/two-way/summary/{team_id}` (`two_way_summary`) - `app/api/routes/core.py:335`
+
+## POST
+
+- `/api/advance-league` (`api_advance_league`) - `app/api/routes/sim.py:41`
+- `/api/agency/actions/apply` (`api_agency_actions_apply`) - `app/api/routes/offseason.py:534`
+- `/api/agency/events/respond` (`api_agency_events_respond`) - `app/api/routes/offseason.py:488`
+- `/api/chat-main` (`chat_main`) - `app/api/routes/news.py:101`
+- `/api/college/draft-watch/recompute` (`api_college_draft_watch_recompute`) - `app/api/routes/college.py:130`
+- `/api/contracts/negotiation/accept-counter` (`api_contracts_negotiation_accept_counter`) - `app/api/routes/contracts.py:207`
+- `/api/contracts/negotiation/cancel` (`api_contracts_negotiation_cancel`) - `app/api/routes/contracts.py:258`
+- `/api/contracts/negotiation/commit` (`api_contracts_negotiation_commit`) - `app/api/routes/contracts.py:232`
+- `/api/contracts/negotiation/offer` (`api_contracts_negotiation_offer`) - `app/api/routes/contracts.py:181`
+- `/api/contracts/negotiation/start` (`api_contracts_negotiation_start`) - `app/api/routes/contracts.py:153`
+- `/api/contracts/re-sign-or-extend` (`api_contracts_re_sign_or_extend`) - `app/api/routes/contracts.py:303`
+- `/api/contracts/release-to-fa` (`api_contracts_release_to_fa`) - `app/api/routes/contracts.py:123`
+- `/api/contracts/sign-free-agent` (`api_contracts_sign_free_agent`) - `app/api/routes/contracts.py:274`
+- `/api/contracts/two-way/negotiation/commit` (`api_two_way_negotiation_commit`) - `app/api/routes/contracts.py:368`
+- `/api/contracts/two-way/negotiation/decision` (`api_two_way_negotiation_decision`) - `app/api/routes/contracts.py:353`
+- `/api/contracts/two-way/negotiation/start` (`api_two_way_negotiation_start`) - `app/api/routes/contracts.py:332`
+- `/api/game/load` (`api_game_load`) - `app/api/routes/game_saves.py:76`
+- `/api/game/new` (`api_game_new`) - `app/api/routes/game_saves.py:26`
+- `/api/game/save` (`api_game_save`) - `app/api/routes/game_saves.py:44`
+- `/api/game/set-user-team` (`api_game_set_user_team`) - `app/api/routes/game_saves.py:94`
+- `/api/main-llm` (`chat_main_legacy`) - `app/api/routes/news.py:126`
+- `/api/news/playoffs` (`api_playoff_news`) - `app/api/routes/news.py:57`
+- `/api/news/week` (`api_news_week`) - `app/api/routes/news.py:45`
+- `/api/offseason/college/finalize` (`api_offseason_college_finalize`) - `app/api/routes/offseason.py:126`
+- `/api/offseason/contracts/process` (`api_offseason_contracts_process`) - `app/api/routes/offseason.py:154`
+- `/api/offseason/draft/apply` (`api_offseason_draft_apply`) - `app/api/routes/offseason.py:1180`
+- `/api/offseason/draft/combine` (`api_offseason_draft_combine`) - `app/api/routes/offseason.py:744`
+- `/api/offseason/draft/interviews` (`api_offseason_draft_interviews`) - `app/api/routes/offseason.py:831`
+- `/api/offseason/draft/lottery` (`api_offseason_draft_lottery`) - `app/api/routes/offseason.py:694`
+- `/api/offseason/draft/selections/auto` (`api_offseason_draft_selections_auto`) - `app/api/routes/offseason.py:1063`
+- `/api/offseason/draft/selections/pick` (`api_offseason_draft_selections_pick`) - `app/api/routes/offseason.py:1130`
+- `/api/offseason/draft/settle` (`api_offseason_draft_settle`) - `app/api/routes/offseason.py:717`
+- `/api/offseason/draft/withdrawals` (`api_offseason_draft_withdrawals`) - `app/api/routes/offseason.py:893`
+- `/api/offseason/draft/workouts` (`api_offseason_draft_workouts`) - `app/api/routes/offseason.py:766`
+- `/api/offseason/options/team/decide` (`api_offseason_team_options_decide`) - `app/api/routes/offseason.py:617`
+- `/api/offseason/options/team/pending` (`api_offseason_team_options_pending`) - `app/api/routes/offseason.py:581`
+- `/api/offseason/retirement/preview` (`api_offseason_retirement_preview`) - `app/api/routes/offseason.py:242`
+- `/api/offseason/retirement/process` (`api_offseason_retirement_process`) - `app/api/routes/offseason.py:273`
+- `/api/offseason/training/apply-growth` (`api_offseason_training_apply_growth`) - `app/api/routes/offseason.py:313`
+- `/api/postseason/play-in/my-team-game` (`api_play_in_my_team_game`) - `app/api/routes/postseason.py:44`
+- `/api/postseason/playoffs/advance-my-team-game` (`api_playoffs_advance_my_team_game`) - `app/api/routes/postseason.py:52`
+- `/api/postseason/playoffs/auto-advance-round` (`api_playoffs_auto_advance_round`) - `app/api/routes/postseason.py:60`
+- `/api/postseason/reset` (`api_postseason_reset`) - `app/api/routes/postseason.py:31`
+- `/api/postseason/setup` (`api_postseason_setup`) - `app/api/routes/postseason.py:36`
+- `/api/practice/team/plan/set` (`api_set_team_practice_plan`) - `app/api/routes/training.py:130`
+- `/api/practice/team/session/set` (`api_set_team_practice_session`) - `app/api/routes/training.py:253`
+- `/api/practice/team/{team_id}/preview` (`api_preview_team_practice_effect`) - `app/api/routes/training.py`
+- `/api/scouting/assign` (`api_scouting_assign`) - `app/api/routes/scouting.py:98`
+- `/api/scouting/unassign` (`api_scouting_unassign`) - `app/api/routes/scouting.py:232`
+- `/api/season/enter-offseason` (`api_enter_offseason`) - `app/api/routes/offseason.py:62`
+- `/api/season-report` (`api_season_report`) - `app/api/routes/news.py:67`
+- `/api/season/start-regular-season` (`api_start_regular_season`) - `app/api/routes/offseason.py:1309`
+- `/api/simulate-game` (`api_simulate_game`) - `app/api/routes/sim.py:16`
+- `/api/trade/block/list` (`api_trade_block_list`) - `app/api/routes/trades.py:112`
+- `/api/trade/block/unlist` (`api_trade_block_unlist`) - `app/api/routes/trades.py:141`
+- `/api/trade/evaluate` (`api_trade_evaluate`) - `app/api/routes/trades.py:734`
+- `/api/trade/negotiation/commit` (`api_trade_negotiation_commit`) - `app/api/routes/trades.py:267`
+- `/api/trade/negotiation/start` (`api_trade_negotiation_start`) - `app/api/routes/trades.py:240`
+- `/api/trade/submit` (`api_trade_submit`) - `app/api/routes/trades.py:173`
+- `/api/trade/submit-committed` (`api_trade_submit_committed`) - `app/api/routes/trades.py:206`
+- `/api/training/player/set` (`api_set_player_training_plan`) - `app/api/routes/training.py:85`
+- `/api/training/team/set` (`api_set_team_training_plan`) - `app/api/routes/training.py:41`
+- `/api/validate-key` (`api_validate_key`) - `app/api/routes/news.py:82`
