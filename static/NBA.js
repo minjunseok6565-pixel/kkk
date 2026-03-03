@@ -59,6 +59,8 @@ const state = {
   trainingRoster: [],
   trainingFamiliarity: { offense: [], defense: [] },
   trainingDraftSession: null,
+  trainingRiskCalendarByDate: {},
+  trainingKpi: null,
   standingsData: null,
   tacticsDraft: null,
   tacticsSnapshot: null,
@@ -201,6 +203,20 @@ const els = {
   trainingCalendarGrid: document.getElementById("training-calendar-grid"),
   trainingTypeButtons: document.getElementById("training-type-buttons"),
   trainingDetailPanel: document.getElementById("training-detail-panel"),
+  trainingContextRange: document.getElementById("training-context-range"),
+  trainingSelectionSummary: document.getElementById("training-selection-summary"),
+  trainingKpiSharpnessCard: document.getElementById("training-kpi-sharpness-card"),
+  trainingKpiLowCard: document.getElementById("training-kpi-low-card"),
+  trainingKpiLoadCard: document.getElementById("training-kpi-load-card"),
+  trainingKpiRiskCard: document.getElementById("training-kpi-risk-card"),
+  trainingKpiSharpness: document.getElementById("training-kpi-sharpness"),
+  trainingKpiSharpnessMeta: document.getElementById("training-kpi-sharpness-meta"),
+  trainingKpiLow: document.getElementById("training-kpi-low"),
+  trainingKpiLowMeta: document.getElementById("training-kpi-low-meta"),
+  trainingKpiLoad: document.getElementById("training-kpi-load"),
+  trainingKpiLoadMeta: document.getElementById("training-kpi-load-meta"),
+  trainingKpiRisk: document.getElementById("training-kpi-risk"),
+  trainingKpiRiskMeta: document.getElementById("training-kpi-risk-meta"),
   standingsEastBody: document.getElementById("standings-east-body"),
   standingsWestBody: document.getElementById("standings-west-body"),
   backToMainBtn: document.getElementById("back-to-main-btn"),
@@ -1415,6 +1431,75 @@ function trainingTypeLabel(t) {
   return m[String(t || "").toUpperCase()] || "-";
 }
 
+
+
+function setTrainingCardState(el, level) {
+  if (!el) return;
+  el.classList.remove("is-warn", "is-danger");
+  if (level === "danger") el.classList.add("is-danger");
+  else if (level === "warn") el.classList.add("is-warn");
+}
+
+function trainingRangeLabel(days) {
+  if (!days || !days.length) return "기간 정보 없음";
+  const first = parseIsoDate(days[0]);
+  const last = parseIsoDate(days[days.length - 1]);
+  if (!first || !last) return `${days[0]} ~ ${days[days.length - 1]}`;
+  return `REG SEASON · ${first.getMonth() + 1}/${first.getDate()} ~ ${last.getMonth() + 1}/${last.getDate()}`;
+}
+
+function getTrainingRiskInfo(iso) {
+  const row = state.trainingRiskCalendarByDate?.[iso] || {};
+  const riskPlayers = Number(row.high_risk_player_count || 0);
+  const outPlayers = Number(row.out_player_count || 0);
+  const score = Math.min(100, riskPlayers * 28 + outPlayers * 18 + (row.is_back_to_back ? 18 : 0) + (row.injury_event_count ? 12 : 0));
+  const cls = score >= 65 ? "risk-high" : score >= 35 ? "risk-mid" : "risk-low";
+  return { score, cls, row };
+}
+
+function updateTrainingSelectionSummary() {
+  if (!els.trainingSelectionSummary) return;
+  const selected = [...state.trainingSelectedDates].sort();
+  if (!selected.length) {
+    els.trainingSelectionSummary.textContent = "선택한 날짜가 없습니다. 캘린더에서 훈련 적용 날짜를 선택하세요.";
+    return;
+  }
+  const gameAdj = selected.filter((d) => {
+    const dt = parseIsoDate(d);
+    if (!dt) return false;
+    const prev = dateToIso(addDays(dt, -1));
+    const next = dateToIso(addDays(dt, 1));
+    return !!state.trainingGameByDate?.[prev] || !!state.trainingGameByDate?.[next];
+  }).length;
+  els.trainingSelectionSummary.textContent = `선택 ${selected.length}일 · 경기 인접일 ${gameAdj}일 · 기간 ${selected[0]} ~ ${selected[selected.length - 1]}`;
+}
+
+function renderTrainingKpiBar() {
+  const k = state.trainingKpi || {};
+  if (els.trainingContextRange) els.trainingContextRange.textContent = trainingRangeLabel(state.trainingCalendarDays);
+
+  const sharpAvg = Number(k.sharpnessAvg || 0);
+  const lowCount = Number(k.lowSharpCount || 0);
+  const games7d = Number(k.games7d || 0);
+  const b2b7d = Number(k.b2b7d || 0);
+  const highRisk = Number(k.highRisk || 0);
+  const out = Number(k.out || 0);
+  const ret = Number(k.returning || 0);
+
+  if (els.trainingKpiSharpness) els.trainingKpiSharpness.textContent = sharpAvg ? sharpAvg.toFixed(1) : "-";
+  if (els.trainingKpiSharpnessMeta) els.trainingKpiSharpnessMeta.textContent = `최저 ${Number(k.sharpnessMin || 0).toFixed(1)} · 최고 ${Number(k.sharpnessMax || 0).toFixed(1)}`;
+  if (els.trainingKpiLow) els.trainingKpiLow.textContent = `${lowCount}명`;
+  if (els.trainingKpiLowMeta) els.trainingKpiLowMeta.textContent = lowCount > 3 ? "경기력 저하 구간" : "관리 가능 범위";
+  if (els.trainingKpiLoad) els.trainingKpiLoad.textContent = `${games7d} / ${b2b7d}`;
+  if (els.trainingKpiLoadMeta) els.trainingKpiLoadMeta.textContent = "경기수 / 백투백";
+  if (els.trainingKpiRisk) els.trainingKpiRisk.textContent = `${highRisk}/${out}/${ret}`;
+  if (els.trainingKpiRiskMeta) els.trainingKpiRiskMeta.textContent = "HIGH / OUT / RETURN";
+
+  setTrainingCardState(els.trainingKpiSharpnessCard, sharpAvg < 53 ? "warn" : "normal");
+  setTrainingCardState(els.trainingKpiLowCard, lowCount >= 4 ? "danger" : lowCount >= 2 ? "warn" : "normal");
+  setTrainingCardState(els.trainingKpiLoadCard, games7d >= 4 || b2b7d >= 2 ? "warn" : "normal");
+  setTrainingCardState(els.trainingKpiRiskCard, out >= 2 || highRisk >= 4 ? "danger" : highRisk >= 2 ? "warn" : "normal");
+}
 function buildCalendar4Weeks(currentDateIso) {
   const today = parseIsoDate(currentDateIso) || new Date();
   const first = startOfWeek(today);
@@ -1461,14 +1546,42 @@ async function loadTrainingData() {
   const teamDetail = await fetchJson(`/api/team-detail/${encodeURIComponent(state.selectedTeamId)}`);
   state.trainingRoster = teamDetail.roster || [];
 
-  const [offFam, defFam] = await Promise.all([
+  const [offFam, defFam, sharpness, alerts, riskCalendar] = await Promise.all([
     fetchJson(`/api/readiness/team/${encodeURIComponent(state.selectedTeamId)}/familiarity?scheme_type=offense`).catch(() => ({ items: [] })),
     fetchJson(`/api/readiness/team/${encodeURIComponent(state.selectedTeamId)}/familiarity?scheme_type=defense`).catch(() => ({ items: [] })),
+    fetchJson(`/api/readiness/team/${encodeURIComponent(state.selectedTeamId)}/sharpness`).catch(() => ({ distribution: {} })),
+    fetchJson(`/api/medical/team/${encodeURIComponent(state.selectedTeamId)}/alerts`).catch(() => ({ team_load_context: {}, primary_alert_player: null })),
+    fetchJson(`/api/medical/team/${encodeURIComponent(state.selectedTeamId)}/risk-calendar?date_from=${encodeURIComponent(from)}&days=28`).catch(() => ({ days: [] })),
   ]);
   state.trainingFamiliarity = { offense: offFam.items || [], defense: defFam.items || [] };
 
+  const riskByDate = {};
+  (riskCalendar.days || []).forEach((row) => {
+    if (!row?.date) return;
+    riskByDate[String(row.date).slice(0, 10)] = row;
+  });
+
+  const riskRows = Object.values(riskByDate);
+  const highRisk = riskRows.reduce((a, x) => a + Number(x.high_risk_player_count || 0), 0);
+  const out = riskRows.reduce((a, x) => a + Number(x.out_player_count || 0), 0);
+  const ret = riskRows.reduce((a, x) => a + Number(x.returning_player_count || 0), 0);
+
+  const dist = sharpness.distribution || {};
+  state.trainingKpi = {
+    sharpnessAvg: Number(dist.avg || 0),
+    sharpnessMin: Number(dist.min || 0),
+    sharpnessMax: Number(dist.max || 0),
+    lowSharpCount: Number(dist.low_sharp_count || 0),
+    games7d: Number(alerts.team_load_context?.next_7d_game_count || 0),
+    b2b7d: Number(alerts.team_load_context?.next_7d_back_to_back_count || 0),
+    highRisk,
+    out,
+    returning: ret,
+  };
+
   state.trainingSessionsByDate = sessions;
   state.trainingGameByDate = gameByDate;
+  state.trainingRiskCalendarByDate = riskByDate;
 }
 
 function renderTrainingCalendar() {
@@ -1491,16 +1604,30 @@ function renderTrainingCalendar() {
     if (isGameDay) btn.classList.add("is-game");
     if (state.trainingSelectedDates.has(iso)) btn.classList.add("is-selected");
 
+    const risk = getTrainingRiskInfo(iso);
+    if (risk.cls) btn.classList.add(risk.cls);
+
     const sessInfo = state.trainingSessionsByDate?.[iso];
     const sessType = sessInfo?.session?.type;
-    const sessionLine = sessInfo
-      ? (sessInfo.is_user_set ? `지정 · ${trainingTypeLabel(sessType)}` : `AUTO · ${trainingTypeLabel(sessType)}`)
-      : "";
+    const isUserSet = !!sessInfo?.is_user_set;
+    const tags = [];
+    if (isGameDay) tags.push('<span class="training-chip is-game">GAME</span>');
+    if (risk.row?.is_back_to_back) tags.push('<span class="training-chip is-b2b">B2B</span>');
+    if (!isGameDay && sessInfo) tags.push(`<span class="training-chip ${isUserSet ? "is-user" : "is-auto"}">${isUserSet ? "USER" : "AUTO"}</span>`);
+
+    const sessionLine = sessInfo ? `${trainingTypeLabel(sessType)}${risk.score >= 65 ? " · 리스크 높음" : ""}` : "";
+    const riskWidth = Math.max(4, Math.round(risk.score));
 
     btn.innerHTML = `
-      <div class="training-day-date">${label}</div>
-      <div class="training-day-note">${gameOpp ? `vs ${gameOpp}` : ""}</div>
-      <div class="training-day-sub">${!gameOpp ? sessionLine : ""}</div>
+      <div class="training-day-top">
+        <div>
+          <div class="training-day-date">${label}</div>
+          <div class="training-day-note">${gameOpp ? `vs ${gameOpp}` : ""}</div>
+        </div>
+        <div class="training-day-tags">${tags.join("")}</div>
+      </div>
+      <div class="training-day-sub">${!gameOpp ? sessionLine : "경기일 · 훈련 비활성"}</div>
+      <div class="training-risk-track"><div class="training-risk-bar" style="width:${riskWidth}%;"></div></div>
     `;
 
     if (!selectable) {
@@ -1510,6 +1637,7 @@ function renderTrainingCalendar() {
         if (state.trainingSelectedDates.has(iso)) state.trainingSelectedDates.delete(iso);
         else state.trainingSelectedDates.add(iso);
         renderTrainingCalendar();
+        updateTrainingSelectionSummary();
       });
     }
 
@@ -1593,10 +1721,22 @@ async function renderTrainingDetail(type) {
     ? `<ul class="kv-list"><li>공격 익숙도 gain: ${preview.preview?.familiarity_gain?.offense_gain ?? 0}</li><li>수비 익숙도 gain: ${preview.preview?.familiarity_gain?.defense_gain ?? 0}</li><li>평균 샤프니스 delta: ${Object.values(preview.preview?.intensity_mult_by_pid || {}).length ? (Object.values(preview.preview.intensity_mult_by_pid).reduce((a, x) => a + Number(x.sharpness_delta || 0), 0) / Object.values(preview.preview.intensity_mult_by_pid).length).toFixed(2) : "0.00"}</li></ul>`
     : '<p class="empty-copy">효과 프리뷰를 불러오지 못했습니다.</p>';
 
+  const selectedRiskStats = selected.reduce((acc, iso) => {
+    const r = state.trainingRiskCalendarByDate?.[iso] || {};
+    acc.highRisk += Number(r.high_risk_player_count || 0);
+    acc.out += Number(r.out_player_count || 0);
+    return acc;
+  }, { highRisk: 0, out: 0 });
+
+  const warningText = selectedRiskStats.highRisk > 0 || selectedRiskStats.out > 0
+    ? `<p class="training-detail-meta">주의: 선택 구간에 고위험 누적 ${selectedRiskStats.highRisk}명, 결장 누적 ${selectedRiskStats.out}명이 포함됩니다.</p>`
+    : '<p class="training-detail-meta">선택 구간은 상대적으로 안정적입니다.</p>';
+
   els.trainingDetailPanel.innerHTML = `
     <div class="training-detail-grid">
       <h3>${trainingTypeLabel(type)} 훈련 설정</h3>
-      <p>선택 날짜: ${selected.join(", ")}</p>
+      <p class="training-detail-meta">선택 날짜: ${selected.join(", ")}</p>
+      ${warningText}
       ${extra}
       <div><strong>연습 효과 프리뷰</strong>${prevText}</div>
       <div class="training-inline-row"><button id="training-apply-btn" class="btn btn-primary" type="button">선택 날짜에 적용</button></div>
@@ -1625,7 +1765,9 @@ async function renderTrainingDetail(type) {
       })
     })));
     await loadTrainingData();
+    renderTrainingKpiBar();
     renderTrainingCalendar();
+    updateTrainingSelectionSummary();
     alert(`${dates.length}일에 훈련을 적용했습니다.`);
   });
 }
@@ -1639,7 +1781,9 @@ async function showTrainingScreen() {
   try {
     state.trainingSelectedDates = new Set();
     await loadTrainingData();
+    renderTrainingKpiBar();
     renderTrainingCalendar();
+    updateTrainingSelectionSummary();
     els.trainingDetailPanel.innerHTML = '<p class="empty-copy">캘린더에서 날짜를 선택하고 훈련 버튼을 눌러 세부 설정을 확인하세요.</p>';
     activateScreen(els.trainingScreen);
   } finally {

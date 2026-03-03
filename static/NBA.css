@@ -1431,16 +1431,103 @@ h1, h2, h3 { margin: 0 0 12px; }
 }
 
 /* Training screen */
+.training-command-bar {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 2.2fr);
+  gap: 16px;
+  margin-top: 16px;
+  margin-bottom: 16px;
+}
+
+.training-command-context {
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: linear-gradient(140deg, rgba(15, 23, 42, 0.94), rgba(30, 41, 59, 0.9));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 10px 22px rgba(15, 23, 42, 0.22);
+}
+
+.training-context-label {
+  margin: 0;
+  color: #93c5fd;
+  font-size: .74rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.training-context-range {
+  margin: 8px 0 0;
+  color: #f8fafc;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.training-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.training-kpi-card {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  padding: 12px;
+  background: linear-gradient(160deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.93));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 8px 20px rgba(2, 6, 23, 0.24);
+}
+
+.training-kpi-card.is-warn { border-color: rgba(245, 158, 11, 0.55); }
+.training-kpi-card.is-danger { border-color: rgba(239, 68, 68, 0.6); }
+
+.training-kpi-label {
+  margin: 0;
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: #9fb2d4;
+}
+
+.training-kpi-value {
+  margin: 6px 0 2px;
+  color: #f8fafc;
+  font-size: 1.66rem;
+  line-height: 1.1;
+  font-weight: 800;
+}
+
+.training-kpi-meta {
+  margin: 0;
+  font-size: .78rem;
+  color: #b6c4dd;
+}
+
 .training-top-tabs {
   display: flex;
-  gap: 14px;
+  gap: 12px;
   justify-content: flex-start;
-  margin: 18px 0;
+  margin: 12px 0;
 }
 
 .training-top-tabs .is-active {
-  border-color: #2f4f8f;
-  box-shadow: 0 0 0 2px rgba(47, 79, 143, 0.18) inset;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18) inset;
+}
+
+.training-selection-summary {
+  margin-bottom: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 12px;
+  padding: 10px 14px;
+  color: #334155;
+  font-size: .9rem;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+}
+
+.training-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(320px, 0.92fr);
+  gap: 16px;
+  align-items: start;
 }
 
 .training-calendar-panel {
@@ -1450,6 +1537,41 @@ h1, h2, h3 { margin: 0 0 12px; }
   padding: 14px;
 }
 
+.training-calendar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.training-calendar-header h3 {
+  margin: 0;
+  font-size: 1.06rem;
+}
+
+.training-legend {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.training-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  font-size: .68rem;
+  color: #334155;
+  background: #f8fafc;
+}
+
+.training-chip.is-game { background: rgba(59, 130, 246, 0.14); color: #1e40af; border-color: rgba(59, 130, 246, 0.36); }
+.training-chip.is-auto { background: rgba(100, 116, 139, 0.15); color: #475569; }
+.training-chip.is-user { background: rgba(236, 72, 153, 0.12); color: #9d174d; border-color: rgba(236, 72, 153, 0.3); }
+.training-chip.is-b2b { background: rgba(245, 158, 11, 0.16); color: #92400e; border-color: rgba(245, 158, 11, 0.34); }
+
 .training-calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -1457,55 +1579,119 @@ h1, h2, h3 { margin: 0 0 12px; }
 }
 
 .training-day-cell {
-  min-height: 74px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 10px;
-  background: linear-gradient(145deg, rgba(36, 42, 57, 0.9), rgba(23, 27, 37, 0.95));
+  min-height: 104px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 12px;
+  background: linear-gradient(150deg, rgba(248, 250, 252, 0.96), rgba(241, 245, 249, 0.95));
   font-size: 14px;
-  color: var(--text-main);
+  color: #0f172a;
   text-align: left;
-  padding: 8px;
+  padding: 10px;
   cursor: pointer;
+  transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease;
+}
+
+.training-day-cell:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.4);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.14);
 }
 
 .training-day-cell:disabled {
   cursor: not-allowed;
-  opacity: 0.75;
+  opacity: 0.72;
 }
 
-.training-day-date { font-weight: 700; margin-bottom: 6px; }
-.training-day-note { font-size: 13px; color: #9db8ef; }
-.training-day-sub { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+.training-day-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.training-day-date {
+  font-weight: 800;
+  font-size: 1.02rem;
+  margin-bottom: 2px;
+}
+
+.training-day-note { font-size: .83rem; color: #2563eb; font-weight: 700; }
+.training-day-sub { font-size: .76rem; color: #64748b; margin-top: 4px; }
 
 .training-day-cell.is-selected {
-  border: 2px solid rgba(248, 93, 122, 0.7);
-  background: linear-gradient(140deg, rgba(203, 18, 54, 0.28), rgba(47, 92, 168, 0.3));
+  border: 2px solid rgba(236, 72, 153, 0.65);
+  background: linear-gradient(145deg, rgba(251, 207, 232, 0.35), rgba(219, 234, 254, 0.6));
+  box-shadow: 0 0 0 2px rgba(236,72,153,0.12);
 }
 
 .training-day-cell.is-game {
-  background: linear-gradient(145deg, rgba(65, 72, 91, 0.88), rgba(33, 38, 51, 0.94));
+  background: linear-gradient(145deg, rgba(219, 234, 254, 0.68), rgba(226, 232, 240, 0.94));
+}
+
+.training-day-cell.risk-mid { border-color: rgba(245, 158, 11, 0.45); }
+.training-day-cell.risk-high { border-color: rgba(239, 68, 68, 0.52); }
+
+.training-risk-track {
+  margin-top: 8px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.26);
+  overflow: hidden;
+}
+
+.training-risk-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #22c55e, #f59e0b, #ef4444);
+}
+
+.training-day-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
 .training-type-buttons {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 18px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
 }
 
-.training-type-buttons .btn { white-space: nowrap; }
+.training-type-buttons .btn {
+  white-space: normal;
+  min-height: 62px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.training-type-buttons .btn span {
+  font-size: .73rem;
+  color: #64748b;
+}
 
 .training-detail-panel {
-  margin-top: 18px;
   border: 1px solid var(--card-border);
   border-radius: 14px;
   background: var(--card-bg);
   padding: 14px;
+  min-height: 520px;
+  position: sticky;
+  top: 14px;
 }
 
 .training-detail-grid {
   display: grid;
-  gap: 10px;
+  gap: 12px;
+}
+
+.training-detail-meta {
+  margin: 0;
+  font-size: .82rem;
+  color: #64748b;
 }
 
 .training-inline-row {
@@ -1528,9 +1714,26 @@ h1, h2, h3 { margin: 0 0 12px; }
 
 .training-player-table th,
 .training-player-table td {
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(148, 163, 184, 0.3);
   padding: 6px;
   text-align: left;
+}
+
+@media (max-width: 1200px) {
+  .training-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-layout { grid-template-columns: 1fr; }
+  .training-detail-panel { position: static; min-height: 0; }
+}
+
+@media (max-width: 900px) {
+  .training-command-bar { grid-template-columns: 1fr; }
+  .training-type-buttons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-calendar-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .training-calendar-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-type-buttons { grid-template-columns: 1fr; }
 }
 
 /* Standings screen */
