@@ -1519,9 +1519,33 @@ function renderTrainingCalendar() {
   });
 }
 
-function optionsHtml(list, fallback = []) {
-  const merged = [...new Set([...(list || []), ...fallback])];
-  return merged.map((x) => `<option value="${x}">${x}</option>`).join("");
+function displaySchemeName(key) {
+  return String(key || "-").replaceAll("_", " ");
+}
+
+function buildSchemeRows(schemeType) {
+  const baseList = schemeType === "offense" ? TACTICS_OFFENSE_SCHEMES : TACTICS_DEFENSE_SCHEMES;
+  const famList = schemeType === "offense" ? state.trainingFamiliarity.offense : state.trainingFamiliarity.defense;
+  const famMap = new Map((famList || []).map((r) => [String(r.scheme_key), Number(r.value || 0)]));
+  return (baseList || []).map((s) => ({
+    key: s.key,
+    value: famMap.has(s.key) ? famMap.get(s.key) : 0,
+  }));
+}
+
+function renderPreviewText(preview) {
+  if (!preview) return '<p class="empty-copy">효과 프리뷰를 불러오지 못했습니다.</p>';
+  const multByPid = Object.values(preview.preview?.intensity_mult_by_pid || {});
+  const avgSharpness = multByPid.length
+    ? (multByPid.reduce((a, x) => a + Number(x.sharpness_delta || 0), 0) / multByPid.length).toFixed(2)
+    : "0.00";
+  return `
+    <ul class="kv-list training-preview-list">
+      <li>공격 익숙도 gain: <strong>${preview.preview?.familiarity_gain?.offense_gain ?? 0}</strong></li>
+      <li>수비 익숙도 gain: <strong>${preview.preview?.familiarity_gain?.defense_gain ?? 0}</strong></li>
+      <li>평균 샤프니스 delta: <strong>${avgSharpness}</strong></li>
+    </ul>
+  `;
 }
 
 async function renderTrainingDetail(type) {
@@ -1541,14 +1565,16 @@ async function renderTrainingDetail(type) {
     non_participant_type: "RECOVERY"
   };
 
-  const offSchemes = state.trainingFamiliarity.offense.map((x) => x.scheme_key);
-  const defSchemes = state.trainingFamiliarity.defense.map((x) => x.scheme_key);
+  const offSchemeRows = buildSchemeRows("offense");
+  const defSchemeRows = buildSchemeRows("defense");
+  const offSchemes = offSchemeRows.map((x) => x.key);
+  const defSchemes = defSchemeRows.map((x) => x.key);
 
-  if (type === "OFF_TACTICS") baseSession.offense_scheme_key = offSchemes[0] || "PACE_5OUT";
-  if (type === "DEF_TACTICS") baseSession.defense_scheme_key = defSchemes[0] || "MAN_TO_MAN";
+  if (type === "OFF_TACTICS") baseSession.offense_scheme_key = offSchemes[0] || "Spread_HeavyPnR";
+  if (type === "DEF_TACTICS") baseSession.defense_scheme_key = defSchemes[0] || "Drop";
   if (type === "FILM") {
-    baseSession.offense_scheme_key = offSchemes[0] || "PACE_5OUT";
-    baseSession.defense_scheme_key = defSchemes[0] || "MAN_TO_MAN";
+    baseSession.offense_scheme_key = offSchemes[0] || "Spread_HeavyPnR";
+    baseSession.defense_scheme_key = defSchemes[0] || "Drop";
   }
   if (type === "SCRIMMAGE") {
     baseSession.participant_pids = state.trainingRoster.slice(0, 10).map((r) => String(r.player_id));
@@ -1564,17 +1590,37 @@ async function renderTrainingDetail(type) {
     body: JSON.stringify({ season_year: null, date_iso: firstDate, ...baseSession })
   }).catch(() => null);
 
-  const famRows = (type === "OFF_TACTICS" ? state.trainingFamiliarity.offense : type === "DEF_TACTICS" ? state.trainingFamiliarity.defense : []);
-  const famHtml = famRows.length
-    ? `<ul class="kv-list">${famRows.map((r) => `<li>${r.scheme_key}: ${Math.round(Number(r.value || 0))}</li>`).join("")}</ul>`
-    : '<p class="empty-copy">숙련도 데이터가 없습니다.</p>';
-
   let extra = "";
   if (type === "OFF_TACTICS") {
-    extra = `<div class="training-inline-row"><label>공격 스킴</label><select id="training-off-scheme">${optionsHtml(offSchemes, ["PACE_5OUT"])}</select></div>${famHtml}`;
+    extra = `
+      <div>
+        <p class="training-section-title">공격 스킴 선택 (8개)</p>
+        <div class="training-scheme-grid" id="training-off-scheme-grid">
+          ${offSchemeRows.map((r) => `
+            <button type="button" class="training-scheme-card ${r.key === baseSession.offense_scheme_key ? "is-selected" : ""}" data-off-scheme="${r.key}">
+              <strong>${displaySchemeName(r.key)}</strong>
+              <span>적응도 ${Math.round(r.value)}%</span>
+            </button>
+          `).join("")}
+        </div>
+      </div>
+    `;
   } else if (type === "DEF_TACTICS") {
-    extra = `<div class="training-inline-row"><label>수비 스킴</label><select id="training-def-scheme">${optionsHtml(defSchemes, ["MAN_TO_MAN"])}</select></div>${famHtml}`;
+    extra = `
+      <div>
+        <p class="training-section-title">수비 스킴 선택 (7개)</p>
+        <div class="training-scheme-grid" id="training-def-scheme-grid">
+          ${defSchemeRows.map((r) => `
+            <button type="button" class="training-scheme-card ${r.key === baseSession.defense_scheme_key ? "is-selected" : ""}" data-def-scheme="${r.key}">
+              <strong>${displaySchemeName(r.key)}</strong>
+              <span>적응도 ${Math.round(r.value)}%</span>
+            </button>
+          `).join("")}
+        </div>
+      </div>
+    `;
   } else if (type === "SCRIMMAGE") {
+    const selectedSet = new Set(baseSession.participant_pids);
     const rosterRows = state.trainingRoster.map((r) => `
       <tr>
         <td>${r.name || r.player_id}</td>
@@ -1584,8 +1630,14 @@ async function renderTrainingDetail(type) {
       </tr>
     `).join("");
     extra = `
-      <p>5대5 라인업(참가자 PID 콤마 구분, 기본 10명):</p>
-      <textarea id="training-scrimmage-pids" rows="3" style="width:100%;">${baseSession.participant_pids.join(",")}</textarea>
+      <p class="training-section-title">5대5 라인업 선택 (기본 10명)</p>
+      <div class="training-player-select-grid" id="training-scrimmage-player-grid">
+        ${state.trainingRoster.map((r) => {
+          const pid = String(r.player_id);
+          return `<button type="button" class="training-player-chip ${selectedSet.has(pid) ? "is-selected" : ""}" data-scrimmage-pid="${pid}">${r.name || pid}</button>`;
+        }).join("")}
+      </div>
+      <p class="training-selected-copy">선택 선수: <strong id="training-scrimmage-selected-count">${baseSession.participant_pids.length}</strong>명</p>
       <table class="training-player-table">
         <thead><tr><th>선수</th><th>단기 체력</th><th>장기 체력</th><th>샤프니스</th></tr></thead>
         <tbody>${rosterRows}</tbody>
@@ -1593,28 +1645,55 @@ async function renderTrainingDetail(type) {
     `;
   }
 
-  const prevText = preview
-    ? `<ul class="kv-list"><li>공격 익숙도 gain: ${preview.preview?.familiarity_gain?.offense_gain ?? 0}</li><li>수비 익숙도 gain: ${preview.preview?.familiarity_gain?.defense_gain ?? 0}</li><li>평균 샤프니스 delta: ${Object.values(preview.preview?.intensity_mult_by_pid || {}).length ? (Object.values(preview.preview.intensity_mult_by_pid).reduce((a, x) => a + Number(x.sharpness_delta || 0), 0) / Object.values(preview.preview.intensity_mult_by_pid).length).toFixed(2) : "0.00"}</li></ul>`
-    : '<p class="empty-copy">효과 프리뷰를 불러오지 못했습니다.</p>';
-
   els.trainingDetailPanel.innerHTML = `
     <div class="training-detail-grid">
       <h3>${trainingTypeLabel(type)} 훈련 설정</h3>
       <p>선택 날짜: ${selected.join(", ")}</p>
       ${extra}
-      <div><strong>연습 효과 프리뷰</strong>${prevText}</div>
+      <div class="training-preview-box"><strong>연습 효과 프리뷰</strong><div id="training-preview-body">${renderPreviewText(preview)}</div></div>
       <div class="training-inline-row"><button id="training-apply-btn" class="btn btn-primary" type="button">선택 날짜에 적용</button></div>
     </div>
   `;
   renderTrainingContextPanel(type);
 
-  const offSel = document.getElementById("training-off-scheme");
-  const defSel = document.getElementById("training-def-scheme");
-  const scrimmagePids = document.getElementById("training-scrimmage-pids");
-  if (offSel) offSel.addEventListener("change", () => { state.trainingDraftSession.offense_scheme_key = offSel.value; });
-  if (defSel) defSel.addEventListener("change", () => { state.trainingDraftSession.defense_scheme_key = defSel.value; });
-  if (scrimmagePids) scrimmagePids.addEventListener("input", () => {
-    state.trainingDraftSession.participant_pids = scrimmagePids.value.split(",").map((x) => x.trim()).filter(Boolean);
+  async function refreshTrainingPreview() {
+    const currentPreview = await fetchJson(`/api/practice/team/${encodeURIComponent(state.selectedTeamId)}/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ season_year: null, date_iso: firstDate, ...state.trainingDraftSession })
+    }).catch(() => null);
+    const previewBody = document.getElementById("training-preview-body");
+    if (previewBody) previewBody.innerHTML = renderPreviewText(currentPreview);
+  }
+
+  document.querySelectorAll("[data-off-scheme]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      state.trainingDraftSession.offense_scheme_key = btn.dataset.offScheme;
+      document.querySelectorAll("[data-off-scheme]").forEach((el) => el.classList.toggle("is-selected", el === btn));
+      await refreshTrainingPreview();
+    });
+  });
+
+  document.querySelectorAll("[data-def-scheme]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      state.trainingDraftSession.defense_scheme_key = btn.dataset.defScheme;
+      document.querySelectorAll("[data-def-scheme]").forEach((el) => el.classList.toggle("is-selected", el === btn));
+      await refreshTrainingPreview();
+    });
+  });
+
+  document.querySelectorAll("[data-scrimmage-pid]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const pid = btn.dataset.scrimmagePid;
+      const set = new Set(state.trainingDraftSession.participant_pids || []);
+      if (set.has(pid)) set.delete(pid);
+      else set.add(pid);
+      state.trainingDraftSession.participant_pids = [...set];
+      btn.classList.toggle("is-selected", set.has(pid));
+      const count = document.getElementById("training-scrimmage-selected-count");
+      if (count) count.textContent = String(state.trainingDraftSession.participant_pids.length);
+      await refreshTrainingPreview();
+    });
   });
 
   const applyBtn = document.getElementById("training-apply-btn");

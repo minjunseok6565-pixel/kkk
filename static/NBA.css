@@ -1687,6 +1687,82 @@ h1, h2, h3 { margin: 0 0 12px; }
   padding: 6px;
 }
 
+.training-section-title {
+  margin: 0 0 8px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.training-scheme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.training-scheme-card {
+  border: 1px solid rgba(59, 130, 246, 0.32);
+  border-radius: 10px;
+  background: #f8fbff;
+  color: #0f172a;
+  padding: 10px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+}
+
+.training-scheme-card span {
+  color: #334155;
+  font-size: 12px;
+}
+
+.training-scheme-card.is-selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  background: #eff6ff;
+}
+
+.training-player-select-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.training-player-chip {
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #0f172a;
+  padding: 7px 11px;
+  font-size: 12px;
+}
+
+.training-player-chip.is-selected {
+  border-color: #0ea5e9;
+  background: #e0f2fe;
+  color: #0c4a6e;
+}
+
+.training-selected-copy {
+  margin: 2px 0 2px;
+  color: #334155;
+}
+
+.training-preview-box {
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 10px;
+  color: #0f172a;
+}
+
+.training-preview-list li {
+  color: #0f172a;
+}
+
+.training-preview-list strong {
+  color: #1d4ed8;
+}
+
 .training-player-table {
   width: 100%;
   border-collapse: collapse;
@@ -2254,11 +2330,22 @@ body:has(#player-detail-screen.active) .app-shell {
 #tactics-screen .tactics-lineup-row select,
 #tactics-screen .tactics-lineup-row input,
 #training-screen .empty-copy,
+#training-screen .training-day-sub,
 #medical-screen .medical-sub,
 #college-screen label,
 #player-detail-screen .detail-subline,
 #player-detail-screen .compact-kv-list span {
   color: #64748b;
+}
+
+#training-screen .training-preview-box,
+#training-screen .training-preview-box strong,
+#training-screen .training-preview-box li,
+#training-screen .training-scheme-card,
+#training-screen .training-player-chip,
+#training-screen .training-section-title,
+#training-screen .training-selected-copy {
+  color: #0f172a;
 }
 
 @media (max-width: 980px) {
