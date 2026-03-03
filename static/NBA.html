@@ -99,6 +99,31 @@
           <article class="pulse-card pulse-card-form">
             <p class="pulse-label">FORM INDEX</p>
             <p id="pulse-form" class="pulse-value">NEUTRAL</p>
+        <section class="executive-insight-bar" aria-label="팀 요약 인사이트">
+          <article class="insight-kpi-card">
+            <p class="insight-kpi-label">평균 OVR</p>
+            <strong id="home-kpi-ovr" class="insight-kpi-value">--</strong>
+            <span class="insight-kpi-meta">로스터 경쟁력</span>
+          </article>
+          <article class="insight-kpi-card">
+            <p class="insight-kpi-label">평균 나이</p>
+            <strong id="home-kpi-age" class="insight-kpi-value">--</strong>
+            <span class="insight-kpi-meta">세대 밸런스</span>
+          </article>
+          <article class="insight-kpi-card">
+            <p class="insight-kpi-label">총 연봉</p>
+            <strong id="home-kpi-salary" class="insight-kpi-value">--</strong>
+            <span class="insight-kpi-meta">캡 관리 포지션</span>
+          </article>
+          <article class="insight-kpi-card">
+            <p class="insight-kpi-label">캡 여유</p>
+            <strong id="home-kpi-cap" class="insight-kpi-value">--</strong>
+            <span class="insight-kpi-meta">유연성 지표</span>
+          </article>
+          <article class="insight-kpi-card">
+            <p class="insight-kpi-label">핵심 경보</p>
+            <strong id="home-kpi-alert" class="insight-kpi-value">--</strong>
+            <span class="insight-kpi-meta">부상/피로/일정</span>
           </article>
         </section>
 
@@ -121,10 +146,12 @@
           </article>
         </section>
 
-        <section class="next-game-panel" aria-label="다음 경기">
-          <header class="next-game-header">
+        <section class="home-primary-grid" aria-label="핵심 브리핑">
+          <section class="next-game-panel" aria-label="다음 경기">
+            <header class="next-game-header">
             <p class="next-game-kicker">NEXT GAME PREVIEW</p>
             <h3 class="next-game-title">다음 경기</h3>
+            <p id="next-game-subline" class="next-game-subline">경기 준비 데이터를 분석 중입니다.</p>
           </header>
 
           <div class="next-game-team-row">
@@ -173,13 +200,35 @@
             <section class="preview-panel" data-preview-panel="strategy">
               <ul id="strategy-list" class="insight-list"></ul>
             </section>
-          </div>
+            </div>
 
-          <div class="next-game-actions">
-            <button type="button" class="menu-card next-game-action-btn next-game-action-primary">경기 진행</button>
-            <button type="button" id="next-game-tactics-btn" class="menu-card next-game-action-btn">전술</button>
-            <button type="button" class="menu-card next-game-action-btn">빠른 진행</button>
-          </div>
+            <div class="next-game-actions">
+              <button type="button" class="menu-card next-game-action-btn next-game-action-primary">경기 진행</button>
+              <button type="button" id="next-game-tactics-btn" class="menu-card next-game-action-btn">전술</button>
+              <button type="button" class="menu-card next-game-action-btn">빠른 진행</button>
+            </div>
+          </section>
+
+          <aside class="franchise-focus-panel" aria-label="핵심 선수 브리핑">
+            <header class="focus-header">
+              <p class="command-label">PLAYER BRIEFING</p>
+              <h4 id="quick-focus-player">핵심 선수 분석 대기</h4>
+              <p id="quick-focus-role" class="focus-role">로스터 로딩 중...</p>
+            </header>
+            <div class="focus-kpi-grid">
+              <article class="focus-kpi"><span>컨디션</span><strong id="quick-focus-condition">--</strong></article>
+              <article class="focus-kpi"><span>건강 지수</span><strong id="quick-focus-health">--</strong></article>
+              <article class="focus-kpi"><span>계약 가치</span><strong id="quick-focus-contract">--</strong></article>
+            </div>
+            <div class="focus-list-wrap">
+              <h5>강점 TOP3</h5>
+              <ul id="quick-focus-strengths" class="intel-mini-list"></ul>
+            </div>
+            <div class="focus-list-wrap">
+              <h5>리스크 TOP2</h5>
+              <ul id="quick-focus-risks" class="intel-mini-list"></ul>
+            </div>
+          </aside>
         </section>
 
         <section class="main-intel-grid" aria-label="운영 인텔리전스">
@@ -312,41 +361,94 @@
       <div class="screen-header-row">
         <div>
           <p class="eyebrow">TACTICS</p>
-          <h2>전술 설정</h2>
-          <p class="subtitle">공/수 스킴, 라인업, 역할, 출전 시간을 설정합니다.</p>
+          <h2>코칭 전술 콘솔</h2>
+          <p class="subtitle">공/수 스킴, 라인업, 역할, 출전 시간을 실시간 인사이트와 함께 조정합니다.</p>
         </div>
         <button id="tactics-back-btn" class="btn btn-secondary" type="button">메인으로</button>
       </div>
 
       <section class="tactics-shell">
+        <section class="tactics-hero" aria-label="전술 개요">
+          <article class="tactics-hero-main">
+            <p class="eyebrow">COACHING COMMAND</p>
+            <h3 id="tactics-team-context">팀 전술 개요</h3>
+            <p class="tactics-hero-sub">현재 스킴과 로테이션 밸런스를 점검하고 최적의 출전 시간 분배를 구성하세요.</p>
+          </article>
+          <div class="tactics-hero-actions">
+            <span id="tactics-dirty-badge" class="tactics-dirty-badge">초기 상태</span>
+            <button type="button" id="tactics-save-btn" class="btn btn-secondary" disabled aria-disabled="true" title="저장 API 연동 전까지 임시 비활성화">저장 예정</button>
+            <button type="button" id="tactics-undo-btn" class="btn btn-secondary">되돌리기</button>
+          </div>
+        </section>
+
+        <section class="tactics-kpi-strip" aria-label="전술 핵심 지표">
+          <article class="tactics-kpi-card">
+            <p>총 출전시간</p>
+            <strong id="tactics-kpi-total-minutes">0</strong>
+            <small id="tactics-kpi-total-caption">목표 240분</small>
+          </article>
+          <article class="tactics-kpi-card">
+            <p>스타터 평균 MIN</p>
+            <strong id="tactics-kpi-starter-minutes">0.0</strong>
+            <small>선발 5인 평균</small>
+          </article>
+          <article class="tactics-kpi-card">
+            <p>벤치 평균 MIN</p>
+            <strong id="tactics-kpi-bench-minutes">0.0</strong>
+            <small>로테이션 5인 평균</small>
+          </article>
+          <article class="tactics-kpi-card">
+            <p>공격 역할 다양성</p>
+            <strong id="tactics-kpi-role-diversity">0%</strong>
+            <small>고유 역할 분산</small>
+          </article>
+        </section>
+
         <div class="tactics-scheme-row">
           <div class="tactics-scheme-picker">
-            <button type="button" id="tactics-offense-btn" class="btn btn-secondary">공격 스킴</button>
+            <button type="button" id="tactics-offense-btn" class="btn btn-secondary tactics-scheme-btn">팀 공격 아이덴티티</button>
             <div id="tactics-offense-options" class="tactics-options hidden"></div>
             <p id="tactics-offense-current" class="tactics-current-copy"></p>
           </div>
           <div class="tactics-scheme-picker">
-            <button type="button" id="tactics-defense-btn" class="btn btn-secondary">수비 스킴</button>
+            <button type="button" id="tactics-defense-btn" class="btn btn-secondary tactics-scheme-btn">기본 수비 커버리지</button>
             <div id="tactics-defense-options" class="tactics-options hidden"></div>
             <p id="tactics-defense-current" class="tactics-current-copy"></p>
           </div>
         </div>
 
-        <div class="tactics-lineup-grid">
-          <article>
+        <div class="tactics-workbench">
+          <div class="tactics-lineup-grid">
+          <article class="tactics-lineup-panel">
             <h3>선발</h3>
             <div class="tactics-lineup-head"><span>선수</span><span>공격 역할</span><span>수비 역할</span><span>출전 시간</span></div>
             <div id="tactics-starters" class="tactics-lineup-body"></div>
           </article>
-          <article>
+          <article class="tactics-lineup-panel">
             <h3>로테이션</h3>
             <div class="tactics-lineup-head"><span>선수</span><span>공격 역할</span><span>수비 역할</span><span>출전 시간</span></div>
             <div id="tactics-rotation" class="tactics-lineup-body"></div>
           </article>
+          </div>
+
+          <aside class="tactics-insight-panel" aria-label="실시간 인사이트">
+            <h3>실시간 인사이트</h3>
+            <div class="tactics-insight-meters">
+              <div>
+                <div class="tactics-insight-label"><span>선발 출전 비중</span><strong id="tactics-starter-share">0%</strong></div>
+                <div class="tactics-meter"><span id="tactics-starter-share-bar" style="width:0%"></span></div>
+              </div>
+              <div>
+                <div class="tactics-insight-label"><span>벤치 출전 비중</span><strong id="tactics-bench-share">0%</strong></div>
+                <div class="tactics-meter tactics-meter-bench"><span id="tactics-bench-share-bar" style="width:0%"></span></div>
+              </div>
+            </div>
+            <ul id="tactics-alert-feed" class="tactics-alert-feed"></ul>
+          </aside>
         </div>
 
         <section class="tactics-roster-box">
-          <h3>로스터 선수</h3>
+          <h3>로스터 선수 풀</h3>
           <div id="tactics-roster-list" class="tactics-roster-list"></div>
         </section>
       </section>
@@ -358,31 +460,75 @@
         <div>
           <p class="eyebrow">TRAINING</p>
           <h2>훈련 설정</h2>
-          <p class="subtitle">팀 훈련 캘린더와 세션을 설정합니다.</p>
+          <p class="subtitle">일정·컨디션·리스크를 함께 고려해 팀 훈련을 운영하세요.</p>
         </div>
         <button id="training-back-btn" class="btn btn-secondary" type="button">메인으로</button>
       </div>
+
+      <section class="training-command-bar" aria-label="훈련 운영 지표">
+        <div class="training-command-context">
+          <p class="training-context-label">Training War Room</p>
+          <p id="training-context-range" class="training-context-range">-</p>
+        </div>
+        <div class="training-kpi-grid">
+          <article class="training-kpi-card" id="training-kpi-sharpness-card">
+            <p class="training-kpi-label">Team Sharpness Avg</p>
+            <p id="training-kpi-sharpness" class="training-kpi-value">-</p>
+            <p id="training-kpi-sharpness-meta" class="training-kpi-meta">팀 평균 경기력 컨디션</p>
+          </article>
+          <article class="training-kpi-card" id="training-kpi-low-card">
+            <p class="training-kpi-label">Low Sharpness</p>
+            <p id="training-kpi-low" class="training-kpi-value">-</p>
+            <p id="training-kpi-low-meta" class="training-kpi-meta">45 미만 선수 수</p>
+          </article>
+          <article class="training-kpi-card" id="training-kpi-load-card">
+            <p class="training-kpi-label">Next 7D Load</p>
+            <p id="training-kpi-load" class="training-kpi-value">-</p>
+            <p id="training-kpi-load-meta" class="training-kpi-meta">다음 7일 경기수 / B2B</p>
+          </article>
+          <article class="training-kpi-card" id="training-kpi-risk-card">
+            <p class="training-kpi-label">Risk Overview</p>
+            <p id="training-kpi-risk" class="training-kpi-value">-</p>
+            <p id="training-kpi-risk-meta" class="training-kpi-meta">HIGH / OUT / RETURNING</p>
+          </article>
+        </div>
+      </section>
 
       <div class="training-top-tabs">
         <button id="team-training-tab-btn" type="button" class="btn btn-secondary is-active">팀 훈련</button>
         <button id="player-training-tab-btn" type="button" class="btn btn-secondary" disabled aria-disabled="true">개인 훈련 (준비중)</button>
       </div>
 
-      <section class="training-calendar-panel">
-        <div id="training-calendar-grid" class="training-calendar-grid"></div>
-      </section>
+      <div id="training-selection-summary" class="training-selection-summary">선택한 날짜가 없습니다.</div>
 
-      <div class="training-type-buttons" id="training-type-buttons">
-        <button type="button" data-training-type="OFF_TACTICS" class="btn btn-secondary">공격 전술 훈련</button>
-        <button type="button" data-training-type="DEF_TACTICS" class="btn btn-secondary">수비 전술 훈련</button>
-        <button type="button" data-training-type="FILM" class="btn btn-secondary">필름/영상 훈련</button>
-        <button type="button" data-training-type="SCRIMMAGE" class="btn btn-secondary">청백전</button>
-        <button type="button" data-training-type="RECOVERY" class="btn btn-secondary">휴식 훈련</button>
-        <button type="button" data-training-type="REST" class="btn btn-secondary">훈련 없음</button>
-      </div>
+      <section class="training-layout">
+        <div>
+          <section class="training-calendar-panel">
+            <div class="training-calendar-header">
+              <h3>4주 훈련 캘린더</h3>
+              <div class="training-legend" aria-label="상태 범례">
+                <span class="training-chip is-game">GAME</span>
+                <span class="training-chip is-auto">AUTO</span>
+                <span class="training-chip is-user">USER</span>
+                <span class="training-chip is-b2b">B2B</span>
+              </div>
+            </div>
+            <div id="training-calendar-grid" class="training-calendar-grid"></div>
+          </section>
 
-      <section id="training-detail-panel" class="training-detail-panel">
-        <p class="empty-copy">캘린더에서 날짜를 선택하고 훈련 버튼을 눌러 세부 설정을 확인하세요.</p>
+          <div class="training-type-buttons" id="training-type-buttons">
+            <button type="button" data-training-type="OFF_TACTICS" class="btn btn-secondary">공격 전술 훈련 <span>익숙도↑</span></button>
+            <button type="button" data-training-type="DEF_TACTICS" class="btn btn-secondary">수비 전술 훈련 <span>조직력↑</span></button>
+            <button type="button" data-training-type="FILM" class="btn btn-secondary">필름/영상 훈련 <span>균형</span></button>
+            <button type="button" data-training-type="SCRIMMAGE" class="btn btn-secondary">청백전 <span>실전 강도</span></button>
+            <button type="button" data-training-type="RECOVERY" class="btn btn-secondary">휴식 훈련 <span>회복</span></button>
+            <button type="button" data-training-type="REST" class="btn btn-secondary">훈련 없음 <span>보존</span></button>
+          </div>
+        </div>
+
+        <section id="training-detail-panel" class="training-detail-panel">
+          <p class="empty-copy">캘린더에서 날짜를 선택하고 훈련 버튼을 눌러 세부 설정을 확인하세요.</p>
+        </section>
       </section>
     </section>
 
@@ -436,11 +582,25 @@
     </section>
 
     <section id="college-screen" class="panel" aria-hidden="true">
-      <div class="screen-header-row">
-        <div>
+      <div class="screen-header-row college-screen-header">
+        <div class="college-screen-header-main">
           <p class="eyebrow">COLLEGE LEAGUE</p>
           <h2>대학 리그</h2>
           <p class="subtitle" id="college-meta-line">대학 팀 순위, 리더보드, 빅보드, 스카우팅을 관리합니다.</p>
+          <div class="college-kpi-row" aria-label="대학 리그 핵심 지표">
+            <div class="college-kpi-chip">
+              <span>시즌</span>
+              <strong id="college-kpi-season">-</strong>
+            </div>
+            <div class="college-kpi-chip">
+              <span>대학팀</span>
+              <strong id="college-kpi-teams">0개</strong>
+            </div>
+            <div class="college-kpi-chip">
+              <span>예정 드래프트</span>
+              <strong id="college-kpi-draft">-</strong>
+            </div>
+          </div>
         </div>
         <button id="college-back-btn" class="btn btn-secondary" type="button">메인으로</button>
       </div>
@@ -491,6 +651,9 @@
               <select id="college-leader-sort"></select>
             </label>
           </div>
+          <div id="college-leaders-preseason-note" class="college-inline-note" hidden>
+            시즌 개막 전 데이터입니다. 시뮬레이션 진행 후 통계가 갱신됩니다.
+          </div>
           <div class="college-table-wrap">
             <table class="college-table">
               <thead>
@@ -505,24 +668,49 @@
       </section>
 
       <section id="college-panel-bigboard" class="college-panel" aria-hidden="true">
-        <article class="college-card">
-          <div class="college-card-head-inline">
-            <h3>전문가 빅보드</h3>
-            <label>전문가
-              <select id="college-expert-select"></select>
-            </label>
-          </div>
-          <div class="college-table-wrap">
-            <table class="college-table">
-              <thead>
-                <tr>
-                  <th>RANK</th><th>선수</th><th>POS</th><th>TIER</th><th>요약</th>
-                </tr>
-              </thead>
-              <tbody id="college-bigboard-body"></tbody>
-            </table>
-          </div>
-        </article>
+        <div class="college-two-col college-two-col--wide">
+          <article class="college-card">
+            <div class="college-card-head-inline">
+              <h3>전문가 빅보드</h3>
+              <label>전문가
+                <select id="college-expert-select"></select>
+              </label>
+            </div>
+            <div class="college-table-wrap">
+              <table class="college-table">
+                <thead>
+                  <tr>
+                    <th>RANK</th><th>선수</th><th>POS</th><th>TIER</th><th>요약</th>
+                  </tr>
+                </thead>
+                <tbody id="college-bigboard-body"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="college-card college-prospect-card" aria-label="선택 선수 요약">
+            <p class="college-prospect-kicker">PROSPECT FOCUS</p>
+            <h3 id="college-prospect-name">선수를 선택하세요</h3>
+            <div class="college-prospect-meta">
+              <span id="college-prospect-rank" class="college-badge">RANK -</span>
+              <span id="college-prospect-pos" class="college-badge">POS -</span>
+              <span id="college-prospect-tier" class="college-badge">TIER -</span>
+            </div>
+            <div class="college-prospect-section">
+              <h4>강점</h4>
+              <div id="college-prospect-strengths" class="college-tag-list">
+                <span class="college-tag">선수 선택 시 표시</span>
+              </div>
+            </div>
+            <div class="college-prospect-section">
+              <h4>우려</h4>
+              <div id="college-prospect-concerns" class="college-tag-list">
+                <span class="college-tag college-tag-danger">선수 선택 시 표시</span>
+              </div>
+            </div>
+            <p id="college-prospect-summary" class="college-prospect-summary">요약 정보가 여기에 표시됩니다.</p>
+          </article>
+        </div>
       </section>
 
       <section id="college-panel-scouting" class="college-panel" aria-hidden="true">
@@ -531,6 +719,7 @@
             <h3>스카우터 배정</h3>
             <div class="college-form-grid">
               <label>스카우터<select id="college-scout-select"></select></label>
+              <p id="college-scout-hint" class="college-form-hint">스카우터를 선택하면 전문 분야를 확인할 수 있습니다.</p>
               <label>대상 선수<select id="college-scout-player-select"></select></label>
               <div class="college-actions-row">
                 <button id="college-assign-btn" type="button" class="btn btn-primary">배정</button>
