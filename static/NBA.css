@@ -1756,11 +1756,69 @@ h1, h2, h3 { margin: 0 0 12px; }
 }
 
 .training-preview-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 2px 0;
   color: #0f172a;
+}
+
+.training-preview-list li span {
+  color: #334155;
 }
 
 .training-preview-list strong {
   color: #1d4ed8;
+}
+
+.training-preview-report {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.training-preview-row {
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.65);
+  padding: 8px 10px;
+}
+
+.training-preview-head {
+  margin: 0 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: #475569;
+  font-weight: 700;
+}
+
+.training-preview-copy {
+  margin: 0;
+  color: #0f172a;
+}
+
+.training-preview-subcopy {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.training-preview-coach {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+#training-screen .training-preview-box strong.is-positive {
+  color: #166534;
+}
+
+#training-screen .training-preview-box strong.is-neutral {
+  color: #1d4ed8;
+}
+
+#training-screen .training-preview-box strong.is-caution {
+  color: #b45309;
 }
 
 .training-player-table {
