@@ -417,11 +417,25 @@
     </section>
 
     <section id="college-screen" class="panel" aria-hidden="true">
-      <div class="screen-header-row">
-        <div>
+      <div class="screen-header-row college-screen-header">
+        <div class="college-screen-header-main">
           <p class="eyebrow">COLLEGE LEAGUE</p>
           <h2>대학 리그</h2>
           <p class="subtitle" id="college-meta-line">대학 팀 순위, 리더보드, 빅보드, 스카우팅을 관리합니다.</p>
+          <div class="college-kpi-row" aria-label="대학 리그 핵심 지표">
+            <div class="college-kpi-chip">
+              <span>시즌</span>
+              <strong id="college-kpi-season">-</strong>
+            </div>
+            <div class="college-kpi-chip">
+              <span>대학팀</span>
+              <strong id="college-kpi-teams">0개</strong>
+            </div>
+            <div class="college-kpi-chip">
+              <span>예정 드래프트</span>
+              <strong id="college-kpi-draft">-</strong>
+            </div>
+          </div>
         </div>
         <button id="college-back-btn" class="btn btn-secondary" type="button">메인으로</button>
       </div>
@@ -472,6 +486,9 @@
               <select id="college-leader-sort"></select>
             </label>
           </div>
+          <div id="college-leaders-preseason-note" class="college-inline-note" hidden>
+            시즌 개막 전 데이터입니다. 시뮬레이션 진행 후 통계가 갱신됩니다.
+          </div>
           <div class="college-table-wrap">
             <table class="college-table">
               <thead>
@@ -486,24 +503,49 @@
       </section>
 
       <section id="college-panel-bigboard" class="college-panel" aria-hidden="true">
-        <article class="college-card">
-          <div class="college-card-head-inline">
-            <h3>전문가 빅보드</h3>
-            <label>전문가
-              <select id="college-expert-select"></select>
-            </label>
-          </div>
-          <div class="college-table-wrap">
-            <table class="college-table">
-              <thead>
-                <tr>
-                  <th>RANK</th><th>선수</th><th>POS</th><th>TIER</th><th>요약</th>
-                </tr>
-              </thead>
-              <tbody id="college-bigboard-body"></tbody>
-            </table>
-          </div>
-        </article>
+        <div class="college-two-col college-two-col--wide">
+          <article class="college-card">
+            <div class="college-card-head-inline">
+              <h3>전문가 빅보드</h3>
+              <label>전문가
+                <select id="college-expert-select"></select>
+              </label>
+            </div>
+            <div class="college-table-wrap">
+              <table class="college-table">
+                <thead>
+                  <tr>
+                    <th>RANK</th><th>선수</th><th>POS</th><th>TIER</th><th>요약</th>
+                  </tr>
+                </thead>
+                <tbody id="college-bigboard-body"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="college-card college-prospect-card" aria-label="선택 선수 요약">
+            <p class="college-prospect-kicker">PROSPECT FOCUS</p>
+            <h3 id="college-prospect-name">선수를 선택하세요</h3>
+            <div class="college-prospect-meta">
+              <span id="college-prospect-rank" class="college-badge">RANK -</span>
+              <span id="college-prospect-pos" class="college-badge">POS -</span>
+              <span id="college-prospect-tier" class="college-badge">TIER -</span>
+            </div>
+            <div class="college-prospect-section">
+              <h4>강점</h4>
+              <div id="college-prospect-strengths" class="college-tag-list">
+                <span class="college-tag">선수 선택 시 표시</span>
+              </div>
+            </div>
+            <div class="college-prospect-section">
+              <h4>우려</h4>
+              <div id="college-prospect-concerns" class="college-tag-list">
+                <span class="college-tag college-tag-danger">선수 선택 시 표시</span>
+              </div>
+            </div>
+            <p id="college-prospect-summary" class="college-prospect-summary">요약 정보가 여기에 표시됩니다.</p>
+          </article>
+        </div>
       </section>
 
       <section id="college-panel-scouting" class="college-panel" aria-hidden="true">
@@ -512,6 +554,7 @@
             <h3>스카우터 배정</h3>
             <div class="college-form-grid">
               <label>스카우터<select id="college-scout-select"></select></label>
+              <p id="college-scout-hint" class="college-form-hint">스카우터를 선택하면 전문 분야를 확인할 수 있습니다.</p>
               <label>대상 선수<select id="college-scout-player-select"></select></label>
               <div class="college-actions-row">
                 <button id="college-assign-btn" type="button" class="btn btn-primary">배정</button>
