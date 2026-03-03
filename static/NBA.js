@@ -59,11 +59,8 @@ const state = {
   trainingRoster: [],
   trainingFamiliarity: { offense: [], defense: [] },
   trainingDraftSession: null,
-  trainingRiskCalendarByDate: {},
-  trainingKpi: null,
   standingsData: null,
   tacticsDraft: null,
-  tacticsSnapshot: null,
   medicalOverview: null,
   medicalSelectedPlayerId: null,
 };
@@ -84,46 +81,6 @@ const els = {
   teamAName: document.getElementById("team-a-name"),
   teamBName: document.getElementById("team-b-name"),
   nextGameDatetime: document.getElementById("next-game-datetime"),
-  teamALogo: document.getElementById("team-a-logo"),
-  teamBLogo: document.getElementById("team-b-logo"),
-  nextGameArena: document.getElementById("next-game-arena"),
-  nextGameCountdown: document.getElementById("next-game-countdown"),
-  nextGameSubline: document.getElementById("next-game-subline"),
-  commandSeasonStage: document.getElementById("command-season-stage"),
-  commandTeamSummary: document.getElementById("command-team-summary"),
-  kpiRecord: document.getElementById("kpi-record"),
-  kpiWinRate: document.getElementById("kpi-win-rate"),
-  kpiLast10: document.getElementById("kpi-last10"),
-  kpiStreak: document.getElementById("kpi-streak"),
-  pulseRank: document.getElementById("pulse-rank"),
-  pulseGb: document.getElementById("pulse-gb"),
-  pulseNet: document.getElementById("pulse-net"),
-  pulseForm: document.getElementById("pulse-form"),
-  statusInjury: document.getElementById("status-injury"),
-  statusFatigue: document.getElementById("status-fatigue"),
-  statusSchedule: document.getElementById("status-schedule"),
-  homeKpiOvr: document.getElementById("home-kpi-ovr"),
-  homeKpiAge: document.getElementById("home-kpi-age"),
-  homeKpiSalary: document.getElementById("home-kpi-salary"),
-  homeKpiCap: document.getElementById("home-kpi-cap"),
-  homeKpiAlert: document.getElementById("home-kpi-alert"),
-  quickFocusPlayer: document.getElementById("quick-focus-player"),
-  quickFocusRole: document.getElementById("quick-focus-role"),
-  quickFocusCondition: document.getElementById("quick-focus-condition"),
-  quickFocusHealth: document.getElementById("quick-focus-health"),
-  quickFocusContract: document.getElementById("quick-focus-contract"),
-  quickFocusStrengths: document.getElementById("quick-focus-strengths"),
-  quickFocusRisks: document.getElementById("quick-focus-risks"),
-  compareWinrateBar: document.getElementById("compare-winrate-bar"),
-  compareWinrateText: document.getElementById("compare-winrate-text"),
-  compareLast10Bar: document.getElementById("compare-last10-bar"),
-  compareLast10Text: document.getElementById("compare-last10-text"),
-  conditionList: document.getElementById("condition-list"),
-  strategyList: document.getElementById("strategy-list"),
-  priorityList: document.getElementById("priority-list"),
-  quickIntelList: document.getElementById("quick-intel-list"),
-  timelineList: document.getElementById("timeline-list"),
-  activityFeed: document.getElementById("activity-feed"),
   myTeamTitle: document.getElementById("my-team-title"),
   myTeamBtn: document.getElementById("my-team-btn"),
   tacticsMenuBtn: document.getElementById("tactics-menu-btn"),
@@ -145,19 +102,6 @@ const els = {
   tacticsStarters: document.getElementById("tactics-starters"),
   tacticsRotation: document.getElementById("tactics-rotation"),
   tacticsRosterList: document.getElementById("tactics-roster-list"),
-  tacticsTeamContext: document.getElementById("tactics-team-context"),
-  tacticsDirtyBadge: document.getElementById("tactics-dirty-badge"),
-  tacticsUndoBtn: document.getElementById("tactics-undo-btn"),
-  tacticsKpiTotalMinutes: document.getElementById("tactics-kpi-total-minutes"),
-  tacticsKpiTotalCaption: document.getElementById("tactics-kpi-total-caption"),
-  tacticsKpiStarterMinutes: document.getElementById("tactics-kpi-starter-minutes"),
-  tacticsKpiBenchMinutes: document.getElementById("tactics-kpi-bench-minutes"),
-  tacticsKpiRoleDiversity: document.getElementById("tactics-kpi-role-diversity"),
-  tacticsStarterShare: document.getElementById("tactics-starter-share"),
-  tacticsBenchShare: document.getElementById("tactics-bench-share"),
-  tacticsStarterShareBar: document.getElementById("tactics-starter-share-bar"),
-  tacticsBenchShareBar: document.getElementById("tactics-bench-share-bar"),
-  tacticsAlertFeed: document.getElementById("tactics-alert-feed"),
   standingsMenuBtn: document.getElementById("standings-menu-btn"),
   trainingScreen: document.getElementById("training-screen"),
   standingsScreen: document.getElementById("standings-screen"),
@@ -190,37 +134,11 @@ const els = {
   collegeAssignBtn: document.getElementById("college-assign-btn"),
   collegeUnassignBtn: document.getElementById("college-unassign-btn"),
   collegeReportsBody: document.getElementById("college-reports-body"),
-  collegeKpiSeason: document.getElementById("college-kpi-season"),
-  collegeKpiTeams: document.getElementById("college-kpi-teams"),
-  collegeKpiDraft: document.getElementById("college-kpi-draft"),
-  collegeLeadersPreseasonNote: document.getElementById("college-leaders-preseason-note"),
-  collegeProspectName: document.getElementById("college-prospect-name"),
-  collegeProspectRank: document.getElementById("college-prospect-rank"),
-  collegeProspectPos: document.getElementById("college-prospect-pos"),
-  collegeProspectTier: document.getElementById("college-prospect-tier"),
-  collegeProspectStrengths: document.getElementById("college-prospect-strengths"),
-  collegeProspectConcerns: document.getElementById("college-prospect-concerns"),
-  collegeProspectSummary: document.getElementById("college-prospect-summary"),
-  collegeScoutHint: document.getElementById("college-scout-hint"),
   teamTrainingTabBtn: document.getElementById("team-training-tab-btn"),
   playerTrainingTabBtn: document.getElementById("player-training-tab-btn"),
   trainingCalendarGrid: document.getElementById("training-calendar-grid"),
   trainingTypeButtons: document.getElementById("training-type-buttons"),
   trainingDetailPanel: document.getElementById("training-detail-panel"),
-  trainingContextRange: document.getElementById("training-context-range"),
-  trainingSelectionSummary: document.getElementById("training-selection-summary"),
-  trainingKpiSharpnessCard: document.getElementById("training-kpi-sharpness-card"),
-  trainingKpiLowCard: document.getElementById("training-kpi-low-card"),
-  trainingKpiLoadCard: document.getElementById("training-kpi-load-card"),
-  trainingKpiRiskCard: document.getElementById("training-kpi-risk-card"),
-  trainingKpiSharpness: document.getElementById("training-kpi-sharpness"),
-  trainingKpiSharpnessMeta: document.getElementById("training-kpi-sharpness-meta"),
-  trainingKpiLow: document.getElementById("training-kpi-low"),
-  trainingKpiLowMeta: document.getElementById("training-kpi-low-meta"),
-  trainingKpiLoad: document.getElementById("training-kpi-load"),
-  trainingKpiLoadMeta: document.getElementById("training-kpi-load-meta"),
-  trainingKpiRisk: document.getElementById("training-kpi-risk"),
-  trainingKpiRiskMeta: document.getElementById("training-kpi-risk-meta"),
   standingsEastBody: document.getElementById("standings-east-body"),
   standingsWestBody: document.getElementById("standings-west-body"),
   backToMainBtn: document.getElementById("back-to-main-btn"),
@@ -299,75 +217,6 @@ function collegeStat(player, key) {
   return Number.isFinite(n) ? n : 0;
 }
 
-
-function collegeInitials(name) {
-  const tokens = String(name || "").trim().split(/\s+/).filter(Boolean);
-  if (!tokens.length) return "CL";
-  return tokens.slice(0, 2).map((t) => t[0].toUpperCase()).join("");
-}
-
-function normalize(value, min, max) {
-  if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max) || max <= min) return 0;
-  return ((value - min) / (max - min)) * 100;
-}
-
-function classYearLabel(v) {
-  const n = Number(v);
-  if (n === 1) return "FR";
-  if (n === 2) return "SO";
-  if (n === 3) return "JR";
-  if (n === 4) return "SR";
-  return "-";
-}
-
-function tierClassName(tier) {
-  const v = String(tier || "").toLowerCase();
-  if (v.includes("tier 1")) return "tier-top";
-  if (v.includes("lottery")) return "tier-lottery";
-  return "tier-other";
-}
-
-function reportStatusClass(status) {
-  const v = String(status || "").toLowerCase();
-  if (v.includes("done") || v.includes("complete") || v.includes("완료")) return "status-completed";
-  if (v.includes("progress") || v.includes("assigned") || v.includes("진행")) return "status-progress";
-  return "status-default";
-}
-
-function parseBigboardSummary(summary) {
-  const text = String(summary || "");
-  const strengthMatch = text.match(/Strengths?:\s*([^\.]+)/i);
-  const concernMatch = text.match(/Concern[s]?:\s*([^\.]+)/i);
-  const strengths = (strengthMatch?.[1] || "").split(",").map((v) => v.trim()).filter(Boolean);
-  const concerns = (concernMatch?.[1] || "").split(",").map((v) => v.trim()).filter(Boolean);
-  return { strengths, concerns };
-}
-
-function renderCollegeProspectFocus(row) {
-  if (!row) {
-    els.collegeProspectName.textContent = "선수를 선택하세요";
-    els.collegeProspectRank.textContent = "RANK -";
-    els.collegeProspectPos.textContent = "POS -";
-    els.collegeProspectTier.textContent = "TIER -";
-    els.collegeProspectStrengths.innerHTML = '<span class="college-tag">선수 선택 시 표시</span>';
-    els.collegeProspectConcerns.innerHTML = '<span class="college-tag college-tag-danger">선수 선택 시 표시</span>';
-    els.collegeProspectSummary.textContent = "요약 정보가 여기에 표시됩니다.";
-    return;
-  }
-  const parsed = parseBigboardSummary(row.summary);
-  els.collegeProspectName.textContent = row.name || "-";
-  els.collegeProspectRank.textContent = `RANK ${row.rank ?? "-"}`;
-  els.collegeProspectPos.textContent = `POS ${row.pos || "-"}`;
-  els.collegeProspectTier.textContent = `TIER ${row.tier || "-"}`;
-  els.collegeProspectStrengths.innerHTML = parsed.strengths.length
-    ? parsed.strengths.map((t) => `<span class="college-tag">${t}</span>`).join("")
-    : '<span class="college-tag">명시된 강점 없음</span>';
-  els.collegeProspectConcerns.innerHTML = parsed.concerns.length
-    ? parsed.concerns.map((t) => `<span class="college-tag college-tag-danger">${t}</span>`).join("")
-    : '<span class="college-tag college-tag-danger">명시된 우려 없음</span>';
-  els.collegeProspectSummary.textContent = row.summary || "요약 정보가 없습니다.";
-}
-
 function switchCollegeTab(tab) {
   const mapping = {
     teams: [els.collegeTabTeams, els.collegePanelTeams],
@@ -397,25 +246,17 @@ function renderCollegeTeams(teams) {
     if (la !== lb) return la - lb;
     return Number(b?.srs ?? -9999) - Number(a?.srs ?? -9999);
   });
-  const srsValues = sorted.map((t) => Number(t?.srs ?? 0)).filter((n) => Number.isFinite(n));
-  const minSrs = srsValues.length ? Math.min(...srsValues) : 0;
-  const maxSrs = srsValues.length ? Math.max(...srsValues) : 1;
-
   els.collegeTeamsBody.innerHTML = "";
   sorted.forEach((team, idx) => {
     const tr = document.createElement("tr");
-    const isSelected = state.selectedCollegeTeamId && team?.college_team_id === state.selectedCollegeTeamId;
-    tr.className = `roster-row ${idx < 4 ? "college-row-top" : ""} ${isSelected ? "college-row-active" : ""}`.trim();
-    const teamName = team?.name || team?.college_team_id || "-";
-    const srs = Number(team?.srs ?? 0);
-    const srsPct = normalize(srs, minSrs, maxSrs);
+    tr.className = "roster-row";
     tr.innerHTML = `
-      <td><span class="college-rank-chip">${idx + 1}<small>—</small></span></td>
-      <td class="standings-team-cell"><span class="college-team-cell"><span class="college-team-avatar">${collegeInitials(teamName)}</span>${teamName}</span></td>
+      <td>${idx + 1}</td>
+      <td class="standings-team-cell">${team?.name || team?.college_team_id || "-"}</td>
       <td>${team?.conference || "-"}</td>
       <td>${team?.wins ?? "-"}</td>
       <td>${team?.losses ?? "-"}</td>
-      <td class="college-srs-cell college-num-cell"><span class="college-srs-track"><span style="width:${srsPct.toFixed(1)}%"></span></span>${srs.toFixed(2)}</td>
+      <td>${Number(team?.srs ?? 0).toFixed(2)}</td>
     `;
     tr.addEventListener("click", () => loadCollegeTeamDetail(team?.college_team_id).catch((e) => alert(e.message)));
     els.collegeTeamsBody.appendChild(tr);
@@ -435,82 +276,51 @@ async function loadCollegeTeamDetail(teamId) {
   els.collegeRosterBody.innerHTML = roster.length ? roster.map((p) => `
     <tr>
       <td>${p?.name || "-"}</td>
-      <td><span class="college-pos-pill">${p?.pos || "-"}</span></td>
-      <td>${p?.class_year || "-"} <small>${classYearLabel(p?.class_year)}</small></td>
-      <td class="college-num-cell">${collegeStat(p, "pts").toFixed(1)}</td>
-      <td class="college-num-cell">${collegeStat(p, "reb").toFixed(1)}</td>
-      <td class="college-num-cell">${collegeStat(p, "ast").toFixed(1)}</td>
+      <td>${p?.pos || "-"}</td>
+      <td>${p?.class_year || "-"}</td>
+      <td>${collegeStat(p, "pts").toFixed(1)}</td>
+      <td>${collegeStat(p, "reb").toFixed(1)}</td>
+      <td>${collegeStat(p, "ast").toFixed(1)}</td>
     </tr>
   `).join("") : `<tr><td class="schedule-empty" colspan="6">로스터 데이터가 없습니다.</td></tr>`;
-  renderCollegeTeams(state.collegeTeams || []);
 }
 
 async function loadCollegeLeaders() {
   const sort = state.collegeLeadersSort || "pts";
   const payload = await fetchJson(`/api/college/players?sort=${encodeURIComponent(sort)}&order=desc&limit=100`);
   const players = payload?.players || [];
-  const statKeys = ["pts", "reb", "ast", "stl", "blk"];
-  const valuesByKey = Object.fromEntries(statKeys.map((k) => [k, players.map((p) => collegeStat(p, k))]));
-  const minByKey = Object.fromEntries(statKeys.map((k) => [k, Math.min(...valuesByKey[k], 0)]));
-  const maxByKey = Object.fromEntries(statKeys.map((k) => [k, Math.max(...valuesByKey[k], 1)]));
-  const isPreseason = players.length > 0 && players.every((p) => statKeys.every((k) => collegeStat(p, k) === 0));
-  els.collegeLeadersPreseasonNote.hidden = !isPreseason;
-
-  els.collegeLeadersBody.innerHTML = players.length ? players.map((p, idx) => {
-    const medals = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : "";
-    const heat = (k) => normalize(collegeStat(p, k), minByKey[k], maxByKey[k]);
-    return `
-      <tr>
-        <td>${medals ? `${medals} ${idx + 1}` : idx + 1}</td>
-        <td>${p?.name || "-"}</td>
-        <td title="${p?.college_team_name || p?.college_team_id || "-"}">${p?.college_team_name || p?.college_team_id || "-"}</td>
-        <td><span class="college-pos-pill">${p?.pos || "-"}</span></td>
-        <td class="college-num-cell" style="background:linear-gradient(90deg, rgba(37,99,235,0.14) ${heat("pts").toFixed(1)}%, transparent 0)">${collegeStat(p, "pts").toFixed(1)}</td>
-        <td class="college-num-cell" style="background:linear-gradient(90deg, rgba(14,165,233,0.14) ${heat("reb").toFixed(1)}%, transparent 0)">${collegeStat(p, "reb").toFixed(1)}</td>
-        <td class="college-num-cell" style="background:linear-gradient(90deg, rgba(124,58,237,0.14) ${heat("ast").toFixed(1)}%, transparent 0)">${collegeStat(p, "ast").toFixed(1)}</td>
-        <td class="college-num-cell" style="background:linear-gradient(90deg, rgba(245,158,11,0.14) ${heat("stl").toFixed(1)}%, transparent 0)">${collegeStat(p, "stl").toFixed(1)}</td>
-        <td class="college-num-cell" style="background:linear-gradient(90deg, rgba(239,68,68,0.14) ${heat("blk").toFixed(1)}%, transparent 0)">${collegeStat(p, "blk").toFixed(1)}</td>
-      </tr>
-    `;
-  }).join("") : `<tr><td class="schedule-empty" colspan="9">리더보드 데이터가 없습니다.</td></tr>`;
+  els.collegeLeadersBody.innerHTML = players.length ? players.map((p, idx) => `
+    <tr>
+      <td>${idx + 1}</td>
+      <td>${p?.name || "-"}</td>
+      <td>${p?.college_team_name || p?.college_team_id || "-"}</td>
+      <td>${p?.pos || "-"}</td>
+      <td>${collegeStat(p, "pts").toFixed(1)}</td>
+      <td>${collegeStat(p, "reb").toFixed(1)}</td>
+      <td>${collegeStat(p, "ast").toFixed(1)}</td>
+      <td>${collegeStat(p, "stl").toFixed(1)}</td>
+      <td>${collegeStat(p, "blk").toFixed(1)}</td>
+    </tr>
+  `).join("") : `<tr><td class="schedule-empty" colspan="9">리더보드 데이터가 없습니다.</td></tr>`;
 }
 
 async function loadCollegeBigboard() {
   const expertId = state.selectedCollegeExpertId;
   if (!expertId) {
     renderCollegeEmpty(els.collegeBigboardBody, 5, "전문가를 선택하세요.");
-    renderCollegeProspectFocus(null);
     return;
   }
   const payload = await fetchJson(`/api/offseason/draft/bigboard/expert?expert_id=${encodeURIComponent(expertId)}&pool_mode=auto`);
   const board = payload?.board || [];
-  els.collegeBigboardBody.innerHTML = board.length ? board.map((r, idx) => {
-    const tierCls = tierClassName(r?.tier);
-    return `
-      <tr class="roster-row" data-bigboard-index="${idx}">
-        <td>${r?.rank ?? "-"}</td>
-        <td>${r?.name || "-"}</td>
-        <td><span class="college-pos-pill">${r?.pos || "-"}</span></td>
-        <td><span class="college-tier-pill ${tierCls}">${r?.tier || "-"}</span></td>
-        <td title="${r?.summary || "-"}">${r?.summary || "-"}</td>
-      </tr>
-    `;
-  }).join("") : `<tr><td class="schedule-empty" colspan="5">빅보드 데이터가 없습니다.</td></tr>`;
-
-  const rows = [...els.collegeBigboardBody.querySelectorAll("tr[data-bigboard-index]")];
-  rows.forEach((tr) => {
-    tr.addEventListener("click", () => {
-      const idx = Number(tr.getAttribute("data-bigboard-index"));
-      renderCollegeProspectFocus(board[idx]);
-      rows.forEach((r) => r.classList.remove("college-row-active"));
-      tr.classList.add("college-row-active");
-    });
-  });
-  if (rows[0]) {
-    rows[0].click();
-  } else {
-    renderCollegeProspectFocus(null);
-  }
+  els.collegeBigboardBody.innerHTML = board.length ? board.map((r) => `
+    <tr>
+      <td>${r?.rank ?? "-"}</td>
+      <td>${r?.name || "-"}</td>
+      <td>${r?.pos || "-"}</td>
+      <td>${r?.tier || "-"}</td>
+      <td>${r?.summary || "-"}</td>
+    </tr>
+  `).join("") : `<tr><td class="schedule-empty" colspan="5">빅보드 데이터가 없습니다.</td></tr>`;
 }
 
 async function loadCollegeScouting() {
@@ -527,18 +337,13 @@ async function loadCollegeScouting() {
   els.collegeScoutSelect.innerHTML = state.scoutingScouts.map((s) => `<option value="${s.scout_id}">${s.display_name} (${s.specialty_key})</option>`).join("");
   els.collegeScoutPlayerSelect.innerHTML = players.map((p) => `<option value="${p.player_id}">${p.name} · ${p.college_team_name || p.college_team_id}</option>`).join("");
 
-  const selectedScout = state.scoutingScouts.find((x) => x.scout_id === els.collegeScoutSelect.value) || state.scoutingScouts[0];
-  els.collegeScoutHint.textContent = selectedScout
-    ? `전문 분야: ${selectedScout.specialty_key || "-"} · 리포트 생성은 월말 진행 시 반영됩니다.`
-    : "스카우터를 선택하면 전문 분야를 확인할 수 있습니다.";
-
   els.collegeReportsBody.innerHTML = state.scoutingReports.length ? state.scoutingReports.map((r) => `
     <tr>
       <td>${String(r?.as_of_date || "-").slice(0, 10)}</td>
       <td>${r?.scout?.display_name || r?.scout?.scout_id || "-"}</td>
       <td>${r?.player_snapshot?.name || r?.target_player_id || "-"}</td>
-      <td><span class="college-status-pill ${reportStatusClass(r?.status)}">${r?.status || "-"}</span></td>
-      <td title="${r?.report_text || ""}">${(r?.report_text || "").slice(0, 80) || "(텍스트 리포트 없음)"}</td>
+      <td>${r?.status || "-"}</td>
+      <td>${(r?.report_text || "").slice(0, 80) || "(텍스트 리포트 없음)"}</td>
     </tr>
   `).join("") : `<tr><td class="schedule-empty" colspan="5">리포트가 없습니다. 배정 후 월말 진행 시 생성됩니다.</td></tr>`;
 }
@@ -560,9 +365,6 @@ async function showCollegeScreen() {
     state.collegeExperts = experts?.experts || [];
 
     els.collegeMetaLine.textContent = `시즌 ${meta?.season_year || "-"} · 대학팀 ${meta?.college?.teams || 0}개 · 예정 드래프트 ${meta?.upcoming_draft_year || "-"}`;
-    els.collegeKpiSeason.textContent = String(meta?.season_year || "-");
-    els.collegeKpiTeams.textContent = `${meta?.college?.teams || 0}개`;
-    els.collegeKpiDraft.textContent = String(meta?.upcoming_draft_year || "-");
     renderCollegeTeams(state.collegeTeams);
     if (state.selectedCollegeTeamId) {
       await loadCollegeTeamDetail(state.selectedCollegeTeamId);
@@ -594,140 +396,12 @@ function showMainScreen() {
   activateScreen(els.mainScreen);
   const teamName = state.selectedTeamName || state.selectedTeamId || "선택 팀";
   els.mainTeamTitle.textContent = teamName;
-  bindMainPreviewTabs();
   void refreshMainDashboard();
 }
 
 function formatIsoDate(dateString) {
   const raw = String(dateString || "").slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "YYYY-MM-DD";
-}
-
-function formatCountdownLabel(gameDate) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(gameDate || ""))) return "TIP-OFF 예정";
-  const today = new Date();
-  const target = new Date(`${gameDate}T00:00:00`);
-  const todayMidnight = new Date(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}T00:00:00`);
-  const days = Math.round((target - todayMidnight) / (1000 * 60 * 60 * 24));
-  if (days <= 0) return "TODAY · GAME DAY";
-  return `D-${days}`;
-}
-
-function teamInitial(teamName) {
-  const name = String(teamName || "").trim();
-  if (!name) return "NBA";
-  const parts = name.split(/\s+/).filter(Boolean);
-  const token = (parts[0]?.[0] || "") + (parts[1]?.[0] || "");
-  return token.toUpperCase() || name.slice(0, 2).toUpperCase();
-}
-
-function setLogoPlaceholder(el, teamName) {
-  if (!el) return;
-  el.textContent = teamInitial(teamName);
-}
-
-function classifyScheduleStress(upcomingGames) {
-  const cnt = (upcomingGames || []).slice(0, 4).length;
-  if (cnt >= 4) return { label: "일정 강도 높음", cls: "danger" };
-  if (cnt >= 3) return { label: "일정 강도 주의", cls: "warn" };
-  return { label: "일정 강도 안정", cls: "" };
-}
-
-function streakFromRecent(results) {
-  if (!results.length) return "-";
-  const first = results[0];
-  let n = 0;
-  for (const r of results) {
-    if (r === first) n += 1;
-    else break;
-  }
-  return `${first}${n}`;
-}
-
-function normalizeRecord(row) {
-  if (!row) return { wins: 0, losses: 0, pct: 0, l10: "0-0", strk: "-" };
-  return {
-    wins: Number(row?.wins || 0),
-    losses: Number(row?.losses || 0),
-    pct: Number(row?.pct || 0),
-    l10: row?.l10 || "0-0",
-    strk: row?.strk || "-",
-  };
-}
-
-function parseWlPair(wl) {
-  const [w, l] = String(wl || "0-0").split("-").map((v) => Number(v || 0));
-  return { w: Number.isFinite(w) ? w : 0, l: Number.isFinite(l) ? l : 0 };
-}
-
-function computeFormIndex(row) {
-  const diff = num(row?.diff, 0);
-  const { w, l } = parseWlPair(row?.l10);
-  const games = w + l;
-  const l10Pct = games > 0 ? w / games : 0.5;
-  const streakRaw = String(row?.strk || "-");
-  const streakSign = streakRaw.startsWith("W") ? 1 : streakRaw.startsWith("L") ? -1 : 0;
-  const streakLen = Number(streakRaw.slice(1)) || 0;
-  const score = (l10Pct - 0.5) * 50 + diff * 2.5 + streakSign * Math.min(streakLen, 6) * 1.8;
-  if (score >= 8) return { label: "HOT", cls: "is-hot" };
-  if (score <= -8) return { label: "COLD", cls: "is-cold" };
-  return { label: "NEUTRAL", cls: "is-neutral" };
-}
-
-function setPulseState(el, text, cls = "") {
-  if (!el) return;
-  el.textContent = text;
-  el.classList.remove("is-hot", "is-cold", "is-neutral");
-  if (cls) el.classList.add(cls);
-}
-
-function setBadgeState(el, text, cls = "") {
-  if (!el) return;
-  el.textContent = text;
-  el.classList.remove("warn", "danger");
-  if (cls) el.classList.add(cls);
-}
-
-function updatePreviewCompare(homeRecord, awayRecord) {
-  const homePct = clamp(num(homeRecord?.pct, 0.5), 0, 1);
-  const awayPct = clamp(num(awayRecord?.pct, 0.5), 0, 1);
-  const share = (homePct + awayPct) > 0 ? (homePct / (homePct + awayPct)) * 100 : 50;
-  if (els.compareWinrateBar) els.compareWinrateBar.style.width = `${share.toFixed(1)}%`;
-  if (els.compareWinrateText) {
-    els.compareWinrateText.textContent = `${Math.round(homePct * 100)} : ${Math.round(awayPct * 100)}`;
-  }
-
-  const [homeL10W, homeL10L] = String(homeRecord?.l10 || "0-0").split("-").map((v) => Number(v || 0));
-  const [awayL10W, awayL10L] = String(awayRecord?.l10 || "0-0").split("-").map((v) => Number(v || 0));
-  const homeL10Pct = (homeL10W + homeL10L) > 0 ? homeL10W / (homeL10W + homeL10L) : 0.5;
-  const awayL10Pct = (awayL10W + awayL10L) > 0 ? awayL10W / (awayL10W + awayL10L) : 0.5;
-  const l10Share = (homeL10Pct + awayL10Pct) > 0 ? (homeL10Pct / (homeL10Pct + awayL10Pct)) * 100 : 50;
-  if (els.compareLast10Bar) els.compareLast10Bar.style.width = `${l10Share.toFixed(1)}%`;
-  if (els.compareLast10Text) {
-    els.compareLast10Text.textContent = `${homeL10W} : ${awayL10W}`;
-  }
-}
-
-function renderListItems(el, items, emptyText) {
-  if (!el) return;
-  const rows = (items || []).filter(Boolean);
-  el.innerHTML = rows.length
-    ? rows.map((text) => `<li>${text}</li>`).join("")
-    : `<li>${emptyText}</li>`;
-}
-
-function bindMainPreviewTabs() {
-  const tabs = document.querySelectorAll('#main-screen [data-preview-tab]');
-  const panels = document.querySelectorAll('#main-screen [data-preview-panel]');
-  tabs.forEach((tab) => {
-    if (tab.dataset.bound === "true") return;
-    tab.dataset.bound = "true";
-    tab.addEventListener("click", () => {
-      const key = tab.dataset.previewTab;
-      tabs.forEach((btn) => btn.classList.toggle("is-active", btn === tab));
-      panels.forEach((panel) => panel.classList.toggle("is-active", panel.dataset.previewPanel === key));
-    });
-  });
 }
 
 function randomTipoffTime() {
@@ -747,138 +421,10 @@ async function fetchInGameDate() {
   return formatIsoDate(currentDate);
 }
 
-function formatCompactMoney(value) {
-  const n = num(value, 0);
-  const abs = Math.abs(n);
-  if (abs >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(2)}B`;
-  if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${Math.round(n)}`;
-}
-
-function formatSignedCompactMoney(value) {
-  const n = num(value, 0);
-  const sign = n > 0 ? '+' : '';
-  return `${sign}${formatCompactMoney(n)}`;
-}
-
-function average(arr, key) {
-  if (!arr.length) return 0;
-  const total = arr.reduce((sum, row) => sum + num(row?.[key], 0), 0);
-  return total / arr.length;
-}
-
-function topRosterFocus(rosterRows) {
-  if (!rosterRows.length) return null;
-  const sorted = [...rosterRows].sort((a, b) => num(b.ovr, 0) - num(a.ovr, 0));
-  return sorted[0] || null;
-}
-
-function roleLabelByScore(ovr) {
-  const score = num(ovr, 0);
-  if (score >= 86) return 'Franchise Core';
-  if (score >= 79) return 'Primary Rotation';
-  if (score >= 73) return 'Core Bench';
-  return 'Development Unit';
-}
-
-function renderQuickFocusList(el, items, empty) {
-  if (!el) return;
-  const rows = (items || []).filter(Boolean);
-  el.innerHTML = rows.length ? rows.map((item) => `<li>${item}</li>`).join('') : `<li>${empty}</li>`;
-}
-
-function renderHomeInsightBar(rosterRows, teamSummary, injuryCount, fatigueCount, stressLabel) {
-  const avgOvr = average(rosterRows, 'ovr');
-  const avgAge = average(rosterRows, 'age');
-  const totalSalary = rosterRows.reduce((sum, row) => sum + num(row?.salary, 0), 0);
-  const capSpace = num(teamSummary?.cap_space, 0);
-
-  if (els.homeKpiOvr) els.homeKpiOvr.textContent = rosterRows.length ? avgOvr.toFixed(1) : '--';
-  if (els.homeKpiAge) els.homeKpiAge.textContent = rosterRows.length ? `${avgAge.toFixed(1)}세` : '--';
-  if (els.homeKpiSalary) els.homeKpiSalary.textContent = formatCompactMoney(totalSalary);
-  if (els.homeKpiCap) els.homeKpiCap.textContent = formatSignedCompactMoney(capSpace);
-  if (els.homeKpiAlert) els.homeKpiAlert.textContent = `부상 ${injuryCount} · 피로 ${fatigueCount}`;
-
-  const focus = topRosterFocus(rosterRows);
-  if (!focus) {
-    if (els.quickFocusPlayer) els.quickFocusPlayer.textContent = '핵심 선수 분석 대기';
-    if (els.quickFocusRole) els.quickFocusRole.textContent = stressLabel || '로스터 로딩 중...';
-    if (els.quickFocusCondition) els.quickFocusCondition.textContent = '--';
-    if (els.quickFocusHealth) els.quickFocusHealth.textContent = '--';
-    if (els.quickFocusContract) els.quickFocusContract.textContent = '--';
-    renderQuickFocusList(els.quickFocusStrengths, [], '강점 데이터 없음');
-    renderQuickFocusList(els.quickFocusRisks, [], '리스크 데이터 없음');
-    return;
-  }
-
-  const shortSt = num(focus.short_term_stamina, 1);
-  const longSt = num(focus.long_term_stamina, 1);
-  const health = ((shortSt + longSt) / 2) * 100;
-  const condition = num(focus.sharpness, 50);
-  const contractIndex = focus.salary > 0 ? (num(focus.ovr, 0) / (focus.salary / 1_000_000)) : 0;
-
-  if (els.quickFocusPlayer) els.quickFocusPlayer.textContent = `${focus.name || '-'} (${focus.pos || '-'})`;
-  if (els.quickFocusRole) els.quickFocusRole.textContent = `${roleLabelByScore(focus.ovr)} · OVR ${num(focus.ovr, 0).toFixed(1)}`;
-  if (els.quickFocusCondition) els.quickFocusCondition.textContent = `${Math.round(condition)}%`;
-  if (els.quickFocusHealth) els.quickFocusHealth.textContent = `${Math.round(health)}%`;
-  if (els.quickFocusContract) els.quickFocusContract.textContent = `${contractIndex.toFixed(2)} CEI`;
-
-  const strengths = [
-    `볼륨 점수 OVR ${num(focus.ovr, 0).toFixed(1)}`,
-    `컨디션 ${Math.round(condition)}%`,
-    `건강 지수 ${Math.round(health)}%`,
-  ];
-  const risks = [];
-  if (focus.age >= 34) risks.push(`고령 구간 ${focus.age}세`);
-  if (shortSt < 0.6 || longSt < 0.7) risks.push(`체력 관리 필요 (단기 ${Math.round(shortSt * 100)} / 장기 ${Math.round(longSt * 100)})`);
-  if (focus.salary >= 40_000_000) risks.push(`고연봉 자원 ${formatCompactMoney(focus.salary)}`);
-
-  renderQuickFocusList(els.quickFocusStrengths, strengths.slice(0, 3), '강점 데이터 없음');
-  renderQuickFocusList(els.quickFocusRisks, risks.slice(0, 2), '현재 리스크 낮음');
-}
-
 function resetNextGameCard() {
   els.teamAName.textContent = "Team A";
   els.teamBName.textContent = "Team B";
-  setLogoPlaceholder(els.teamALogo, "Team A");
-  setLogoPlaceholder(els.teamBLogo, "Team B");
-  if (els.nextGameArena) els.nextGameArena.textContent = "";
-  if (els.nextGameCountdown) els.nextGameCountdown.textContent = "TIP-OFF 예정";
-  if (els.nextGameSubline) els.nextGameSubline.textContent = "경기 준비 데이터를 분석 중입니다.";
   els.nextGameDatetime.textContent = "YYYY-MM-DD --:-- PM";
-  if (els.commandTeamSummary) els.commandTeamSummary.textContent = "팀 운영 데이터를 불러오는 중...";
-  if (els.commandSeasonStage) els.commandSeasonStage.textContent = "정규 시즌";
-  if (els.kpiRecord) els.kpiRecord.textContent = "--";
-  if (els.kpiWinRate) els.kpiWinRate.textContent = "--";
-  if (els.kpiLast10) els.kpiLast10.textContent = "--";
-  if (els.kpiStreak) els.kpiStreak.textContent = "--";
-  if (els.pulseRank) els.pulseRank.textContent = "--위";
-  if (els.pulseGb) els.pulseGb.textContent = "GB -";
-  if (els.pulseNet) els.pulseNet.textContent = "DIFF 0.0";
-  setPulseState(els.pulseForm, "NEUTRAL", "is-neutral");
-  setBadgeState(els.statusInjury, "부상 --명");
-  setBadgeState(els.statusFatigue, "피로 주의 --명");
-  setBadgeState(els.statusSchedule, "일정 강도 확인중");
-  if (els.homeKpiOvr) els.homeKpiOvr.textContent = "--";
-  if (els.homeKpiAge) els.homeKpiAge.textContent = "--";
-  if (els.homeKpiSalary) els.homeKpiSalary.textContent = "--";
-  if (els.homeKpiCap) els.homeKpiCap.textContent = "--";
-  if (els.homeKpiAlert) els.homeKpiAlert.textContent = "--";
-  if (els.quickFocusPlayer) els.quickFocusPlayer.textContent = "핵심 선수 분석 대기";
-  if (els.quickFocusRole) els.quickFocusRole.textContent = "로스터 로딩 중...";
-  if (els.quickFocusCondition) els.quickFocusCondition.textContent = "--";
-  if (els.quickFocusHealth) els.quickFocusHealth.textContent = "--";
-  if (els.quickFocusContract) els.quickFocusContract.textContent = "--";
-  renderQuickFocusList(els.quickFocusStrengths, [], "강점 데이터 없음");
-  renderQuickFocusList(els.quickFocusRisks, [], "리스크 데이터 없음");
-  updatePreviewCompare(null, null);
-  renderListItems(els.conditionList, ["컨디션 데이터를 불러오는 중입니다."], "컨디션 데이터가 없습니다.");
-  renderListItems(els.strategyList, ["전략 데이터를 준비 중입니다."], "전략 힌트가 없습니다.");
-  renderListItems(els.priorityList, ["우선 과제를 계산 중입니다."], "우선 과제가 없습니다.");
-  renderListItems(els.quickIntelList, ["핵심 체크 포인트를 준비 중입니다."], "표시할 정보가 없습니다.");
-  if (els.timelineList) els.timelineList.innerHTML = '<div class="timeline-item"><span class="tag">INFO</span><span>주간 일정 정보를 불러오는 중...</span><span>-</span></div>';
-  renderListItems(els.activityFeed, ["최근 활동 정보를 불러오는 중입니다."], "활동 데이터가 없습니다.");
 }
 
 function formatLeader(leader) {
@@ -949,179 +495,35 @@ async function showScheduleScreen() {
 async function refreshMainDashboard() {
   if (!state.selectedTeamId) return;
 
-  resetNextGameCard();
-
   try {
     const currentDate = await fetchInGameDate();
     state.currentDate = currentDate;
     els.mainCurrentDate.textContent = currentDate;
 
-    const [schedule, teamDetail, standingsPayload] = await Promise.all([
-      fetchJson(`/api/team-schedule/${encodeURIComponent(state.selectedTeamId)}`),
-      fetchJson(`/api/team-detail/${encodeURIComponent(state.selectedTeamId)}`).catch(() => ({})),
-      fetchJson("/api/standings/table").catch(() => null),
-    ]);
-
+    const schedule = await fetchJson(`/api/team-schedule/${encodeURIComponent(state.selectedTeamId)}`);
     const games = schedule?.games || [];
-    const completed = games.filter((g) => g?.is_completed);
-    const upcoming = games.filter((g) => !g?.is_completed);
-    const teamId = String(state.selectedTeamId || "").toUpperCase();
-
-    const recentResults = completed
-      .slice(-10)
-      .reverse()
-      .map((g) => {
-        const isHome = String(g?.home_team_id || "").toUpperCase() === teamId;
-        const myScore = Number(isHome ? g?.home_score : g?.away_score);
-        const oppScore = Number(isHome ? g?.away_score : g?.home_score);
-        if (!Number.isFinite(myScore) || !Number.isFinite(oppScore)) return "";
-        return myScore >= oppScore ? "W" : "L";
-      })
-      .filter(Boolean);
-
-    const wins = recentResults.filter((r) => r === "W").length;
-    const losses = recentResults.filter((r) => r === "L").length;
-
-    let standingsRow = null;
-    if (standingsPayload) {
-      const pool = [...(standingsPayload?.east || []), ...(standingsPayload?.west || [])];
-      standingsRow = pool.find((row) => String(row?.team_id || "").toUpperCase() === teamId) || null;
-    }
-
-    const baseRecord = normalizeRecord(standingsRow);
-    if (els.kpiRecord) els.kpiRecord.textContent = `${baseRecord.wins}-${baseRecord.losses}`;
-    if (els.kpiWinRate) els.kpiWinRate.textContent = `${(baseRecord.pct * 100).toFixed(1)}%`;
-    if (els.kpiLast10) els.kpiLast10.textContent = recentResults.length ? `${wins}-${losses}` : baseRecord.l10;
-    if (els.kpiStreak) els.kpiStreak.textContent = baseRecord.strk !== "-" ? baseRecord.strk : streakFromRecent(recentResults);
-
-    if (els.pulseRank) els.pulseRank.textContent = standingsRow?.rank ? `${standingsRow.rank}위` : "--위";
-    if (els.pulseGb) els.pulseGb.textContent = `GB ${standingsRow?.gb_display ?? "-"}`;
-    if (els.pulseNet) els.pulseNet.textContent = `DIFF ${formatSignedDiff(standingsRow?.diff)}`;
-    const form = computeFormIndex(standingsRow || { l10: baseRecord.l10, strk: baseRecord.strk, diff: 0 });
-    setPulseState(els.pulseForm, form.label, form.cls);
-
-    const seasonYear = Number(currentDate.slice(0, 4));
-    if (els.commandSeasonStage) {
-      els.commandSeasonStage.textContent = Number.isFinite(seasonYear) ? `${seasonYear}-${String((seasonYear + 1) % 100).padStart(2, "0")} 정규 시즌` : "정규 시즌";
-    }
-    if (els.commandTeamSummary) {
-      const summaryParts = [];
-      if (standingsRow?.rank) summaryParts.push(`${standingsRow.rank}위`);
-      if (standingsRow?.conf) summaryParts.push(`컨퍼런스 ${standingsRow.conf}`);
-      if (standingsRow?.gb_display) summaryParts.push(`GB ${standingsRow.gb_display}`);
-      els.commandTeamSummary.textContent = summaryParts.length ? summaryParts.join(" · ") : "순위 데이터 집계중";
-    }
-
-    const rosterRows = teamDetail?.roster || [];
-    const injuryCount = rosterRows.filter((p) => {
-      const status = String(p?.injury_status || p?.availability || "").toUpperCase();
-      return ["OUT", "QUESTIONABLE", "DOUBTFUL", "INJURED"].some((token) => status.includes(token));
-    }).length;
-    const fatigueCount = rosterRows.filter((p) => num(p?.short_term_stamina, 1) < 0.55 || num(p?.long_term_stamina, 1) < 0.65).length;
-    setBadgeState(els.statusInjury, `부상 ${injuryCount}명`, injuryCount >= 2 ? "danger" : injuryCount >= 1 ? "warn" : "");
-    setBadgeState(els.statusFatigue, `피로 주의 ${fatigueCount}명`, fatigueCount >= 4 ? "danger" : fatigueCount >= 2 ? "warn" : "");
-
-    const stress = classifyScheduleStress(upcoming);
-    setBadgeState(els.statusSchedule, stress.label, stress.cls);
-
-    renderHomeInsightBar(rosterRows, teamDetail?.summary || {}, injuryCount, fatigueCount, stress.label);
-
     const nextGame = games.find((g) => {
       const date = String(g?.date || "").slice(0, 10);
       return date >= currentDate && !isCompletedGame(g);
     });
 
     if (!nextGame) {
+      resetNextGameCard();
       els.nextGameDatetime.textContent = "예정된 다음 경기가 없습니다.";
-      if (els.nextGameSubline) els.nextGameSubline.textContent = "일정이 비어 있어 다음 매치업을 생성할 수 없습니다.";
       return;
     }
 
     const homeId = String(nextGame.home_team_id || "").toUpperCase();
     const awayId = String(nextGame.away_team_id || "").toUpperCase();
-    const homeName = TEAM_FULL_NAMES[homeId] || homeId || "Team A";
-    const awayName = TEAM_FULL_NAMES[awayId] || awayId || "Team B";
     const gameDate = formatIsoDate(nextGame.date);
-    const tipoffTime = nextGame.tipoff_time || "TBD";
-
-    els.teamAName.textContent = homeName;
-    els.teamBName.textContent = awayName;
-    setLogoPlaceholder(els.teamALogo, homeName);
-    setLogoPlaceholder(els.teamBLogo, awayName);
-    if (els.nextGameArena) els.nextGameArena.textContent = nextGame.arena_name || nextGame.location || "경기장 정보 미제공";
-    if (els.nextGameCountdown) els.nextGameCountdown.textContent = formatCountdownLabel(gameDate);
+    els.teamAName.textContent = TEAM_FULL_NAMES[homeId] || homeId || "Team A";
+    els.teamBName.textContent = TEAM_FULL_NAMES[awayId] || awayId || "Team B";
+    const tipoffTime = nextGame.tipoff_time || randomTipoffTime();
     els.nextGameDatetime.textContent = `${gameDate} ${tipoffTime}`;
-    if (els.nextGameSubline) {
-      const homeAway = homeId === teamId ? "홈" : "원정";
-      const statusLine = stress?.label ? ` · 일정 ${stress.label}` : "";
-      els.nextGameSubline.textContent = `${homeAway} 경기 준비 브리핑${statusLine}`;
-    }
-
-    const byTeam = {};
-    [...(standingsPayload?.east || []), ...(standingsPayload?.west || [])].forEach((row) => {
-      byTeam[String(row?.team_id || "").toUpperCase()] = normalizeRecord(row);
-    });
-    updatePreviewCompare(byTeam[homeId], byTeam[awayId]);
-
-    const conditionLines = [];
-    if (injuryCount > 0) conditionLines.push(`현재 출전 이슈 ${injuryCount}명 · 결장/주의 로테이션 확인 필요`);
-    else conditionLines.push("현재 결장 이슈 없음 · 로테이션 안정 상태");
-    conditionLines.push(`피로 주의 선수 ${fatigueCount}명 · 벤치 분배 조정 권장`);
-    conditionLines.push(`다음 경기 ${nextGame.home_team_id === teamId ? "홈" : "원정"} 일정`);
-    renderListItems(els.conditionList, conditionLines, "컨디션 데이터가 없습니다.");
-
-    const strategyLines = [];
-    const myRecord = byTeam[teamId] || baseRecord;
-    const oppId = homeId === teamId ? awayId : homeId;
-    const oppRecord = byTeam[oppId] || normalizeRecord(null);
-    if (num(myRecord.pct, 0.5) < num(oppRecord.pct, 0.5)) strategyLines.push("상대 승률 우세 · 경기 초반 템포를 낮춰 턴오버 관리에 집중하세요.");
-    else strategyLines.push("전력 우세 구간입니다 · 초반 주전 라인업으로 리드를 선점하세요.");
-    strategyLines.push(fatigueCount >= 3 ? "피로 누적 구간 · 2Q 중반부터 로테이션 폭을 넓히는 것이 안전합니다." : "컨디션 양호 · 클러치 전술 리허설을 유지하세요.");
-    strategyLines.push(stress.cls ? "일정 압박 구간 · 경기 후 회복 중심 훈련으로 전환 권장." : "일정 부담이 낮아 전술 디테일 훈련을 병행할 수 있습니다.");
-    renderListItems(els.strategyList, strategyLines, "전략 힌트가 없습니다.");
-
-    renderListItems(els.priorityList, [
-      `다음 경기 대비 핵심 과제: ${nextGame.home_team_id === teamId ? "홈 어드밴티지 활용" : "원정 초반 집중"}`,
-      `부상/피로 관리: ${injuryCount}명 / ${fatigueCount}명 모니터링`,
-      `최근 흐름: ${recentResults.length ? `${wins}-${losses}` : "데이터 부족"} · 스트릭 ${els.kpiStreak?.textContent || "-"}`,
-    ], "우선 과제가 없습니다.");
-
-    renderListItems(els.quickIntelList, [
-      `다음 4경기 ${Math.min(upcoming.length, 4)}경기 예정`,
-      `주간 핵심: ${stress.label}`,
-      `탭 이동 없이 홈에서 주요 리스크 점검 가능`,
-    ], "표시할 정보가 없습니다.");
-
-    if (els.timelineList) {
-      const timelineGames = upcoming.slice(0, 6);
-      els.timelineList.innerHTML = timelineGames.length
-        ? timelineGames.map((g, idx) => {
-          const tDate = formatIsoDate(g?.date);
-          const isHome = String(g?.home_team_id || "").toUpperCase() === teamId;
-          const opp = TEAM_FULL_NAMES[String(isHome ? g?.away_team_id : g?.home_team_id || "").toUpperCase()] || "상대 미정";
-          const locTag = isHome ? "HOME" : "AWAY";
-          const itemCls = `${idx === 0 ? "is-next " : ""}${isHome ? "is-home" : "is-away"}`.trim();
-          return `<div class="timeline-item ${itemCls}"><span>${tDate}</span><span>${isHome ? "vs" : "@"} ${opp}</span><span class="tag">${idx === 0 ? `NEXT · ${locTag}` : locTag}</span></div>`;
-        }).join("")
-        : '<div class="timeline-item"><span>-</span><span>예정 일정이 없습니다.</span><span class="tag">INFO</span></div>';
-    }
-
-    const feedItems = completed.slice(-3).reverse().map((g) => {
-      const isHome = String(g?.home_team_id || "").toUpperCase() === teamId;
-      const my = Number(isHome ? g?.home_score : g?.away_score);
-      const opp = Number(isHome ? g?.away_score : g?.home_score);
-      const wl = Number.isFinite(my) && Number.isFinite(opp) ? (my >= opp ? "승리" : "패배") : "결과 미정";
-      const oppName = TEAM_FULL_NAMES[String(isHome ? g?.away_team_id : g?.home_team_id || "").toUpperCase()] || "상대 미정";
-      return `${formatIsoDate(g?.date)} ${oppName}전 ${wl} (${Number.isFinite(my) ? my : "-"}-${Number.isFinite(opp) ? opp : "-"})`;
-    });
-    feedItems.push(`다음 경기 준비 상태: ${stress.label}`);
-    renderListItems(els.activityFeed, feedItems, "최근 활동이 없습니다.");
   } catch (e) {
     resetNextGameCard();
     els.mainCurrentDate.textContent = "YYYY-MM-DD";
     els.nextGameDatetime.textContent = `다음 경기 정보를 불러오지 못했습니다: ${e.message}`;
-    if (els.nextGameSubline) els.nextGameSubline.textContent = "네트워크 상태를 확인하고 다시 시도해주세요.";
-    renderListItems(els.activityFeed, [`대시보드 로딩 실패: ${e.message}`], "활동 데이터가 없습니다.");
   }
 }
 
@@ -1473,75 +875,6 @@ function trainingTypeLabel(t) {
   return m[String(t || "").toUpperCase()] || "-";
 }
 
-
-
-function setTrainingCardState(el, level) {
-  if (!el) return;
-  el.classList.remove("is-warn", "is-danger");
-  if (level === "danger") el.classList.add("is-danger");
-  else if (level === "warn") el.classList.add("is-warn");
-}
-
-function trainingRangeLabel(days) {
-  if (!days || !days.length) return "기간 정보 없음";
-  const first = parseIsoDate(days[0]);
-  const last = parseIsoDate(days[days.length - 1]);
-  if (!first || !last) return `${days[0]} ~ ${days[days.length - 1]}`;
-  return `REG SEASON · ${first.getMonth() + 1}/${first.getDate()} ~ ${last.getMonth() + 1}/${last.getDate()}`;
-}
-
-function getTrainingRiskInfo(iso) {
-  const row = state.trainingRiskCalendarByDate?.[iso] || {};
-  const riskPlayers = Number(row.high_risk_player_count || 0);
-  const outPlayers = Number(row.out_player_count || 0);
-  const score = Math.min(100, riskPlayers * 28 + outPlayers * 18 + (row.is_back_to_back ? 18 : 0) + (row.injury_event_count ? 12 : 0));
-  const cls = score >= 65 ? "risk-high" : score >= 35 ? "risk-mid" : "risk-low";
-  return { score, cls, row };
-}
-
-function updateTrainingSelectionSummary() {
-  if (!els.trainingSelectionSummary) return;
-  const selected = [...state.trainingSelectedDates].sort();
-  if (!selected.length) {
-    els.trainingSelectionSummary.textContent = "선택한 날짜가 없습니다. 캘린더에서 훈련 적용 날짜를 선택하세요.";
-    return;
-  }
-  const gameAdj = selected.filter((d) => {
-    const dt = parseIsoDate(d);
-    if (!dt) return false;
-    const prev = dateToIso(addDays(dt, -1));
-    const next = dateToIso(addDays(dt, 1));
-    return !!state.trainingGameByDate?.[prev] || !!state.trainingGameByDate?.[next];
-  }).length;
-  els.trainingSelectionSummary.textContent = `선택 ${selected.length}일 · 경기 인접일 ${gameAdj}일 · 기간 ${selected[0]} ~ ${selected[selected.length - 1]}`;
-}
-
-function renderTrainingKpiBar() {
-  const k = state.trainingKpi || {};
-  if (els.trainingContextRange) els.trainingContextRange.textContent = trainingRangeLabel(state.trainingCalendarDays);
-
-  const sharpAvg = Number(k.sharpnessAvg || 0);
-  const lowCount = Number(k.lowSharpCount || 0);
-  const games7d = Number(k.games7d || 0);
-  const b2b7d = Number(k.b2b7d || 0);
-  const highRisk = Number(k.highRisk || 0);
-  const out = Number(k.out || 0);
-  const ret = Number(k.returning || 0);
-
-  if (els.trainingKpiSharpness) els.trainingKpiSharpness.textContent = sharpAvg ? sharpAvg.toFixed(1) : "-";
-  if (els.trainingKpiSharpnessMeta) els.trainingKpiSharpnessMeta.textContent = `최저 ${Number(k.sharpnessMin || 0).toFixed(1)} · 최고 ${Number(k.sharpnessMax || 0).toFixed(1)}`;
-  if (els.trainingKpiLow) els.trainingKpiLow.textContent = `${lowCount}명`;
-  if (els.trainingKpiLowMeta) els.trainingKpiLowMeta.textContent = lowCount > 3 ? "경기력 저하 구간" : "관리 가능 범위";
-  if (els.trainingKpiLoad) els.trainingKpiLoad.textContent = `${games7d} / ${b2b7d}`;
-  if (els.trainingKpiLoadMeta) els.trainingKpiLoadMeta.textContent = "경기수 / 백투백";
-  if (els.trainingKpiRisk) els.trainingKpiRisk.textContent = `${highRisk}/${out}/${ret}`;
-  if (els.trainingKpiRiskMeta) els.trainingKpiRiskMeta.textContent = "HIGH / OUT / RETURN";
-
-  setTrainingCardState(els.trainingKpiSharpnessCard, sharpAvg < 53 ? "warn" : "normal");
-  setTrainingCardState(els.trainingKpiLowCard, lowCount >= 4 ? "danger" : lowCount >= 2 ? "warn" : "normal");
-  setTrainingCardState(els.trainingKpiLoadCard, games7d >= 4 || b2b7d >= 2 ? "warn" : "normal");
-  setTrainingCardState(els.trainingKpiRiskCard, out >= 2 || highRisk >= 4 ? "danger" : highRisk >= 2 ? "warn" : "normal");
-}
 function buildCalendar4Weeks(currentDateIso) {
   const today = parseIsoDate(currentDateIso) || new Date();
   const first = startOfWeek(today);
@@ -1588,42 +921,14 @@ async function loadTrainingData() {
   const teamDetail = await fetchJson(`/api/team-detail/${encodeURIComponent(state.selectedTeamId)}`);
   state.trainingRoster = teamDetail.roster || [];
 
-  const [offFam, defFam, sharpness, alerts, riskCalendar] = await Promise.all([
+  const [offFam, defFam] = await Promise.all([
     fetchJson(`/api/readiness/team/${encodeURIComponent(state.selectedTeamId)}/familiarity?scheme_type=offense`).catch(() => ({ items: [] })),
     fetchJson(`/api/readiness/team/${encodeURIComponent(state.selectedTeamId)}/familiarity?scheme_type=defense`).catch(() => ({ items: [] })),
-    fetchJson(`/api/readiness/team/${encodeURIComponent(state.selectedTeamId)}/sharpness`).catch(() => ({ distribution: {} })),
-    fetchJson(`/api/medical/team/${encodeURIComponent(state.selectedTeamId)}/alerts`).catch(() => ({ team_load_context: {}, primary_alert_player: null })),
-    fetchJson(`/api/medical/team/${encodeURIComponent(state.selectedTeamId)}/risk-calendar?date_from=${encodeURIComponent(from)}&days=28`).catch(() => ({ days: [] })),
   ]);
   state.trainingFamiliarity = { offense: offFam.items || [], defense: defFam.items || [] };
 
-  const riskByDate = {};
-  (riskCalendar.days || []).forEach((row) => {
-    if (!row?.date) return;
-    riskByDate[String(row.date).slice(0, 10)] = row;
-  });
-
-  const riskRows = Object.values(riskByDate);
-  const highRisk = riskRows.reduce((a, x) => a + Number(x.high_risk_player_count || 0), 0);
-  const out = riskRows.reduce((a, x) => a + Number(x.out_player_count || 0), 0);
-  const ret = riskRows.reduce((a, x) => a + Number(x.returning_player_count || 0), 0);
-
-  const dist = sharpness.distribution || {};
-  state.trainingKpi = {
-    sharpnessAvg: Number(dist.avg || 0),
-    sharpnessMin: Number(dist.min || 0),
-    sharpnessMax: Number(dist.max || 0),
-    lowSharpCount: Number(dist.low_sharp_count || 0),
-    games7d: Number(alerts.team_load_context?.next_7d_game_count || 0),
-    b2b7d: Number(alerts.team_load_context?.next_7d_back_to_back_count || 0),
-    highRisk,
-    out,
-    returning: ret,
-  };
-
   state.trainingSessionsByDate = sessions;
   state.trainingGameByDate = gameByDate;
-  state.trainingRiskCalendarByDate = riskByDate;
 }
 
 function renderTrainingCalendar() {
@@ -1646,30 +951,16 @@ function renderTrainingCalendar() {
     if (isGameDay) btn.classList.add("is-game");
     if (state.trainingSelectedDates.has(iso)) btn.classList.add("is-selected");
 
-    const risk = getTrainingRiskInfo(iso);
-    if (risk.cls) btn.classList.add(risk.cls);
-
     const sessInfo = state.trainingSessionsByDate?.[iso];
     const sessType = sessInfo?.session?.type;
-    const isUserSet = !!sessInfo?.is_user_set;
-    const tags = [];
-    if (isGameDay) tags.push('<span class="training-chip is-game">GAME</span>');
-    if (risk.row?.is_back_to_back) tags.push('<span class="training-chip is-b2b">B2B</span>');
-    if (!isGameDay && sessInfo) tags.push(`<span class="training-chip ${isUserSet ? "is-user" : "is-auto"}">${isUserSet ? "USER" : "AUTO"}</span>`);
-
-    const sessionLine = sessInfo ? `${trainingTypeLabel(sessType)}${risk.score >= 65 ? " · 리스크 높음" : ""}` : "";
-    const riskWidth = Math.max(4, Math.round(risk.score));
+    const sessionLine = sessInfo
+      ? (sessInfo.is_user_set ? `지정 · ${trainingTypeLabel(sessType)}` : `AUTO · ${trainingTypeLabel(sessType)}`)
+      : "";
 
     btn.innerHTML = `
-      <div class="training-day-top">
-        <div>
-          <div class="training-day-date">${label}</div>
-          <div class="training-day-note">${gameOpp ? `vs ${gameOpp}` : ""}</div>
-        </div>
-        <div class="training-day-tags">${tags.join("")}</div>
-      </div>
-      <div class="training-day-sub">${!gameOpp ? sessionLine : "경기일 · 훈련 비활성"}</div>
-      <div class="training-risk-track"><div class="training-risk-bar" style="width:${riskWidth}%;"></div></div>
+      <div class="training-day-date">${label}</div>
+      <div class="training-day-note">${gameOpp ? `vs ${gameOpp}` : ""}</div>
+      <div class="training-day-sub">${!gameOpp ? sessionLine : ""}</div>
     `;
 
     if (!selectable) {
@@ -1679,7 +970,6 @@ function renderTrainingCalendar() {
         if (state.trainingSelectedDates.has(iso)) state.trainingSelectedDates.delete(iso);
         else state.trainingSelectedDates.add(iso);
         renderTrainingCalendar();
-        updateTrainingSelectionSummary();
       });
     }
 
@@ -1763,22 +1053,10 @@ async function renderTrainingDetail(type) {
     ? `<ul class="kv-list"><li>공격 익숙도 gain: ${preview.preview?.familiarity_gain?.offense_gain ?? 0}</li><li>수비 익숙도 gain: ${preview.preview?.familiarity_gain?.defense_gain ?? 0}</li><li>평균 샤프니스 delta: ${Object.values(preview.preview?.intensity_mult_by_pid || {}).length ? (Object.values(preview.preview.intensity_mult_by_pid).reduce((a, x) => a + Number(x.sharpness_delta || 0), 0) / Object.values(preview.preview.intensity_mult_by_pid).length).toFixed(2) : "0.00"}</li></ul>`
     : '<p class="empty-copy">효과 프리뷰를 불러오지 못했습니다.</p>';
 
-  const selectedRiskStats = selected.reduce((acc, iso) => {
-    const r = state.trainingRiskCalendarByDate?.[iso] || {};
-    acc.highRisk += Number(r.high_risk_player_count || 0);
-    acc.out += Number(r.out_player_count || 0);
-    return acc;
-  }, { highRisk: 0, out: 0 });
-
-  const warningText = selectedRiskStats.highRisk > 0 || selectedRiskStats.out > 0
-    ? `<p class="training-detail-meta">주의: 선택 구간에 고위험 누적 ${selectedRiskStats.highRisk}명, 결장 누적 ${selectedRiskStats.out}명이 포함됩니다.</p>`
-    : '<p class="training-detail-meta">선택 구간은 상대적으로 안정적입니다.</p>';
-
   els.trainingDetailPanel.innerHTML = `
     <div class="training-detail-grid">
       <h3>${trainingTypeLabel(type)} 훈련 설정</h3>
-      <p class="training-detail-meta">선택 날짜: ${selected.join(", ")}</p>
-      ${warningText}
+      <p>선택 날짜: ${selected.join(", ")}</p>
       ${extra}
       <div><strong>연습 효과 프리뷰</strong>${prevText}</div>
       <div class="training-inline-row"><button id="training-apply-btn" class="btn btn-primary" type="button">선택 날짜에 적용</button></div>
@@ -1807,9 +1085,7 @@ async function renderTrainingDetail(type) {
       })
     })));
     await loadTrainingData();
-    renderTrainingKpiBar();
     renderTrainingCalendar();
-    updateTrainingSelectionSummary();
     alert(`${dates.length}일에 훈련을 적용했습니다.`);
   });
 }
@@ -1823,9 +1099,7 @@ async function showTrainingScreen() {
   try {
     state.trainingSelectedDates = new Set();
     await loadTrainingData();
-    renderTrainingKpiBar();
     renderTrainingCalendar();
-    updateTrainingSelectionSummary();
     els.trainingDetailPanel.innerHTML = '<p class="empty-copy">캘린더에서 날짜를 선택하고 훈련 버튼을 눌러 세부 설정을 확인하세요.</p>';
     activateScreen(els.trainingScreen);
   } finally {
@@ -2020,10 +1294,6 @@ function tacticsSchemeLabel(schemes, key) {
   return found ? found.label : key;
 }
 
-function deepClone(obj) {
-  return JSON.parse(JSON.stringify(obj));
-}
-
 function getDefenseRolesForScheme(key) {
   return TACTICS_DEFENSE_ROLE_BY_SCHEME[key] || TACTICS_DEFENSE_ROLE_BY_SCHEME.Drop;
 }
@@ -2058,7 +1328,7 @@ function renderSchemeOptions(kind) {
   const optionsEl = isOff ? els.tacticsOffenseOptions : els.tacticsDefenseOptions;
   const list = isOff ? TACTICS_OFFENSE_SCHEMES : TACTICS_DEFENSE_SCHEMES;
   const selected = isOff ? state.tacticsDraft.offenseScheme : state.tacticsDraft.defenseScheme;
-  optionsEl.innerHTML = list.map((s) => `<button type="button" data-key="${s.key}"><span>${s.label}</span>${s.key === selected ? '<strong>선택됨</strong>' : ''}</button>`).join("");
+  optionsEl.innerHTML = list.map((s) => `<button type="button" data-key="${s.key}">${s.label}${s.key === selected ? " ✓" : ""}</button>`).join("");
   optionsEl.querySelectorAll("button[data-key]").forEach((btn) => {
     btn.addEventListener("click", () => {
       if (isOff) state.tacticsDraft.offenseScheme = btn.dataset.key;
@@ -2080,44 +1350,6 @@ function rosterNameByPid(pid) {
   return row ? String(row.name || row.player_id) : "-";
 }
 
-function minutesNum(v) {
-  return Math.max(0, Math.min(48, Number(v || 0)));
-}
-
-function computeTacticsInsights() {
-  const starters = state.tacticsDraft?.starters || [];
-  const rotation = state.tacticsDraft?.rotation || [];
-  const allRows = [...starters, ...rotation];
-  const starterMinutes = starters.reduce((sum, row) => sum + minutesNum(row.minutes), 0);
-  const benchMinutes = rotation.reduce((sum, row) => sum + minutesNum(row.minutes), 0);
-  const totalMinutes = starterMinutes + benchMinutes;
-  const uniqueOffRoles = new Set(allRows.map((x) => x.offenseRole).filter(Boolean));
-  const roleDiversity = allRows.length ? (uniqueOffRoles.size / allRows.length) : 0;
-  const defenseRoles = allRows.map((x) => x.defenseRole).filter(Boolean);
-  const seen = new Set();
-  const dup = new Set();
-  defenseRoles.forEach((role) => {
-    if (seen.has(role)) dup.add(role);
-    seen.add(role);
-  });
-  const alerts = [];
-  const delta = 240 - totalMinutes;
-  if (delta !== 0) alerts.push({ level: 'warn', text: `총 출전시간이 ${delta > 0 ? `${delta}분 부족` : `${Math.abs(delta)}분 초과`} 상태입니다.` });
-  if (dup.size) alerts.push({ level: 'error', text: `수비 역할 중복 감지: ${[...dup].join(', ')}` });
-  if (starterMinutes < 145) alerts.push({ level: 'warn', text: '선발 출전시간 총합이 낮아 경기 초반 주도권이 약해질 수 있습니다.' });
-  if (roleDiversity < 0.5) alerts.push({ level: 'info', text: '공격 역할이 편중되어 있습니다. 역할 다양성을 높이면 대응력이 좋아집니다.' });
-  if (!alerts.length) alerts.push({ level: 'ok', text: '현재 전술은 밸런스가 안정적입니다. 세부 매치업 조정만 진행하세요.' });
-  return {
-    starterMinutes,
-    benchMinutes,
-    totalMinutes,
-    roleDiversity,
-    starterShare: totalMinutes ? (starterMinutes / totalMinutes) : 0,
-    benchShare: totalMinutes ? (benchMinutes / totalMinutes) : 0,
-    alerts,
-  };
-}
-
 function buildLineupRowHtml(group, idx, row, defenseRoles) {
   const players = state.rosterRows || [];
   const playerOptions = ['<option value="">- 선택 -</option>', ...players.map((r) => `<option value="${r.player_id}" ${String(r.player_id) === String(row.pid) ? "selected" : ""}>${r.name || r.player_id}</option>`)].join("");
@@ -2128,7 +1360,7 @@ function buildLineupRowHtml(group, idx, row, defenseRoles) {
       <select data-field="pid">${playerOptions}</select>
       <select data-field="offenseRole">${offOptions}</select>
       <select data-field="defenseRole">${defOptions}</select>
-      <input data-field="minutes" type="number" min="0" max="48" value="${minutesNum(row.minutes)}" />
+      <input data-field="minutes" type="number" min="0" max="48" value="${Number(row.minutes || 0)}" />
     </div>
   `;
 }
@@ -2137,12 +1369,6 @@ function validateDefenseRoleUnique(changedEl, nextValue) {
   const all = [...document.querySelectorAll('.tactics-lineup-row select[data-field="defenseRole"]')];
   const dup = all.find((el) => el !== changedEl && el.value === nextValue);
   return !dup;
-}
-
-function updateTacticsDirtyState() {
-  const dirty = JSON.stringify(state.tacticsDraft || {}) !== JSON.stringify(state.tacticsSnapshot || {});
-  els.tacticsDirtyBadge.textContent = dirty ? '변경됨' : '초기 상태';
-  els.tacticsDirtyBadge.classList.toggle('is-dirty', dirty);
 }
 
 function bindLineupEvents() {
@@ -2156,20 +1382,15 @@ function bindLineupEvents() {
         if (!target || !field) return;
         if (field === 'defenseRole') {
           if (!validateDefenseRoleUnique(control, control.value)) {
-            rowEl.classList.add('is-error');
-            setTimeout(() => rowEl.classList.remove('is-error'), 1000);
+            alert('수비 역할은 중복 선택할 수 없습니다.');
             renderTacticsScreen();
             return;
           }
           target.defenseRole = control.value;
-          renderTacticsScreen();
           return;
         }
-        if (field === 'minutes') target.minutes = minutesNum(control.value);
+        if (field === 'minutes') target.minutes = Math.max(0, Math.min(48, Number(control.value || 0)));
         else target[field] = control.value;
-        rowEl.classList.add('is-updated');
-        setTimeout(() => rowEl.classList.remove('is-updated'), 700);
-        renderTacticsScreen();
       });
     });
   });
@@ -2181,37 +1402,14 @@ function renderTacticsRosterList() {
     : '<p class="empty-copy">로스터 데이터가 없습니다.</p>';
 }
 
-function renderTacticsInsights() {
-  const insight = computeTacticsInsights();
-  els.tacticsKpiTotalMinutes.textContent = String(insight.totalMinutes);
-  els.tacticsKpiTotalCaption.textContent = insight.totalMinutes === 240 ? '목표 240분 달성' : `목표 대비 ${240 - insight.totalMinutes > 0 ? `${240 - insight.totalMinutes}분 부족` : `${Math.abs(240 - insight.totalMinutes)}분 초과`}`;
-  els.tacticsKpiTotalCaption.className = insight.totalMinutes === 240 ? 'tactics-kpi-ok' : 'tactics-kpi-warn';
-  els.tacticsKpiStarterMinutes.textContent = (insight.starterMinutes / 5).toFixed(1);
-  els.tacticsKpiBenchMinutes.textContent = (insight.benchMinutes / 5).toFixed(1);
-  els.tacticsKpiRoleDiversity.textContent = `${Math.round(insight.roleDiversity * 100)}%`;
-  const starterShare = Math.round(insight.starterShare * 100);
-  const benchShare = Math.round(insight.benchShare * 100);
-  els.tacticsStarterShare.textContent = `${starterShare}%`;
-  els.tacticsBenchShare.textContent = `${benchShare}%`;
-  els.tacticsStarterShareBar.style.width = `${starterShare}%`;
-  els.tacticsBenchShareBar.style.width = `${benchShare}%`;
-  els.tacticsAlertFeed.innerHTML = insight.alerts
-    .map((a) => `<li class="tactics-alert-item ${a.level}">${a.text}</li>`)
-    .join('');
-}
-
 function renderTacticsScreen() {
   if (!state.tacticsDraft) return;
   const defRoles = getDefenseRolesForScheme(state.tacticsDraft.defenseScheme);
-  const teamLabel = state.selectedTeamName || TEAM_FULL_NAMES[state.selectedTeamId] || '선택 팀';
-  els.tacticsTeamContext.textContent = `${teamLabel} 전술 디렉팅 보드`;
   els.tacticsOffenseCurrent.textContent = `현재: ${tacticsSchemeLabel(TACTICS_OFFENSE_SCHEMES, state.tacticsDraft.offenseScheme)}`;
   els.tacticsDefenseCurrent.textContent = `현재: ${tacticsSchemeLabel(TACTICS_DEFENSE_SCHEMES, state.tacticsDraft.defenseScheme)}`;
   els.tacticsStarters.innerHTML = state.tacticsDraft.starters.map((r, i) => buildLineupRowHtml('starters', i, r, defRoles)).join('');
   els.tacticsRotation.innerHTML = state.tacticsDraft.rotation.map((r, i) => buildLineupRowHtml('rotation', i, r, defRoles)).join('');
   renderTacticsRosterList();
-  renderTacticsInsights();
-  updateTacticsDirtyState();
   bindLineupEvents();
 }
 
@@ -2460,7 +1658,6 @@ async function showTacticsScreen() {
     const detail = await fetchJson(`/api/team-detail/${encodeURIComponent(state.selectedTeamId)}`);
     state.rosterRows = detail.roster || [];
     if (!state.tacticsDraft) state.tacticsDraft = buildTacticsDraft(state.rosterRows);
-    state.tacticsSnapshot = deepClone(state.tacticsDraft);
     renderSchemeOptions('offense');
     renderSchemeOptions('defense');
     renderTacticsScreen();
@@ -2486,14 +1683,6 @@ els.scheduleBtn.addEventListener("click", () => showScheduleScreen().catch((e) =
 els.scheduleBackBtn.addEventListener("click", () => showMainScreen());
 els.trainingMenuBtn.addEventListener("click", () => showTrainingScreen().catch((e) => alert(e.message)));
 els.tacticsBackBtn.addEventListener("click", () => showMainScreen());
-
-els.tacticsUndoBtn.addEventListener("click", () => {
-  if (!state.tacticsSnapshot) return;
-  state.tacticsDraft = deepClone(state.tacticsSnapshot);
-  renderSchemeOptions('offense');
-  renderSchemeOptions('defense');
-  renderTacticsScreen();
-});
 els.tacticsOffenseBtn.addEventListener("click", () => toggleTacticsOptions("offense"));
 els.tacticsDefenseBtn.addEventListener("click", () => toggleTacticsOptions("defense"));
 els.standingsMenuBtn.addEventListener("click", () => showStandingsScreen().catch((e) => alert(e.message)));
@@ -2514,12 +1703,6 @@ els.collegeLeaderSort.addEventListener("change", () => {
 els.collegeExpertSelect.addEventListener("change", () => {
   state.selectedCollegeExpertId = els.collegeExpertSelect.value || "";
   loadCollegeBigboard().catch((e) => alert(e.message));
-});
-els.collegeScoutSelect.addEventListener("change", () => {
-  const selectedScout = (state.scoutingScouts || []).find((x) => x.scout_id === els.collegeScoutSelect.value);
-  els.collegeScoutHint.textContent = selectedScout
-    ? `전문 분야: ${selectedScout.specialty_key || "-"} · 리포트 생성은 월말 진행 시 반영됩니다.`
-    : "스카우터를 선택하면 전문 분야를 확인할 수 있습니다.";
 });
 els.collegeAssignBtn.addEventListener("click", async () => {
   const scoutId = els.collegeScoutSelect.value;
