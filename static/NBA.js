@@ -86,6 +86,7 @@ const els = {
   teamBLogo: document.getElementById("team-b-logo"),
   nextGameArena: document.getElementById("next-game-arena"),
   nextGameCountdown: document.getElementById("next-game-countdown"),
+  nextGameSubline: document.getElementById("next-game-subline"),
   commandSeasonStage: document.getElementById("command-season-stage"),
   commandTeamSummary: document.getElementById("command-team-summary"),
   kpiRecord: document.getElementById("kpi-record"),
@@ -670,6 +671,7 @@ function resetNextGameCard() {
   setLogoPlaceholder(els.teamBLogo, "Team B");
   if (els.nextGameArena) els.nextGameArena.textContent = "";
   if (els.nextGameCountdown) els.nextGameCountdown.textContent = "TIP-OFF 예정";
+  if (els.nextGameSubline) els.nextGameSubline.textContent = "경기 준비 데이터를 분석 중입니다.";
   els.nextGameDatetime.textContent = "YYYY-MM-DD --:-- PM";
   if (els.commandTeamSummary) els.commandTeamSummary.textContent = "팀 운영 데이터를 불러오는 중...";
   if (els.commandSeasonStage) els.commandSeasonStage.textContent = "정규 시즌";
@@ -847,6 +849,7 @@ async function refreshMainDashboard() {
 
     if (!nextGame) {
       els.nextGameDatetime.textContent = "예정된 다음 경기가 없습니다.";
+      if (els.nextGameSubline) els.nextGameSubline.textContent = "일정이 비어 있어 다음 매치업을 생성할 수 없습니다.";
       return;
     }
 
@@ -855,7 +858,7 @@ async function refreshMainDashboard() {
     const homeName = TEAM_FULL_NAMES[homeId] || homeId || "Team A";
     const awayName = TEAM_FULL_NAMES[awayId] || awayId || "Team B";
     const gameDate = formatIsoDate(nextGame.date);
-    const tipoffTime = nextGame.tipoff_time || randomTipoffTime();
+    const tipoffTime = nextGame.tipoff_time || "TBD";
 
     els.teamAName.textContent = homeName;
     els.teamBName.textContent = awayName;
@@ -864,6 +867,11 @@ async function refreshMainDashboard() {
     if (els.nextGameArena) els.nextGameArena.textContent = nextGame.arena_name || nextGame.location || "경기장 정보 미제공";
     if (els.nextGameCountdown) els.nextGameCountdown.textContent = formatCountdownLabel(gameDate);
     els.nextGameDatetime.textContent = `${gameDate} ${tipoffTime}`;
+    if (els.nextGameSubline) {
+      const homeAway = homeId === teamId ? "홈" : "원정";
+      const statusLine = stress?.label ? ` · 일정 ${stress.label}` : "";
+      els.nextGameSubline.textContent = `${homeAway} 경기 준비 브리핑${statusLine}`;
+    }
 
     const byTeam = {};
     [...(standingsPayload?.east || []), ...(standingsPayload?.west || [])].forEach((row) => {
@@ -926,6 +934,7 @@ async function refreshMainDashboard() {
     resetNextGameCard();
     els.mainCurrentDate.textContent = "YYYY-MM-DD";
     els.nextGameDatetime.textContent = `다음 경기 정보를 불러오지 못했습니다: ${e.message}`;
+    if (els.nextGameSubline) els.nextGameSubline.textContent = "네트워크 상태를 확인하고 다시 시도해주세요.";
     renderListItems(els.activityFeed, [`대시보드 로딩 실패: ${e.message}`], "활동 데이터가 없습니다.");
   }
 }
