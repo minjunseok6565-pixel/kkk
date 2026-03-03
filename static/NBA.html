@@ -70,7 +70,7 @@
         </nav>
       </header>
 
-      <section class="main-overview">
+            <section class="main-overview">
         <div class="main-overview-header">
           <div>
             <p class="eyebrow">MY FRANCHISE</p>
@@ -83,8 +83,30 @@
           </div>
         </div>
 
+        <section class="franchise-command-bar" aria-label="프랜차이즈 지표">
+          <article class="command-team-meta">
+            <p class="command-label">FRANCHISE STATUS</p>
+            <p id="command-season-stage" class="command-value">정규 시즌</p>
+            <p id="command-team-summary" class="command-sub">팀 운영 데이터를 불러오는 중...</p>
+          </article>
+          <article class="command-kpi-grid" aria-label="핵심 지표">
+            <div class="kpi-item"><p>시즌 성적</p><strong id="kpi-record">--</strong></div>
+            <div class="kpi-item"><p>승률</p><strong id="kpi-win-rate">--</strong></div>
+            <div class="kpi-item"><p>최근 10경기</p><strong id="kpi-last10">--</strong></div>
+            <div class="kpi-item"><p>연속 흐름</p><strong id="kpi-streak">--</strong></div>
+          </article>
+          <article class="command-status" aria-label="위험 알림">
+            <span id="status-injury" class="status-badge">부상 --명</span>
+            <span id="status-fatigue" class="status-badge">피로 주의 --명</span>
+            <span id="status-schedule" class="status-badge">일정 강도 확인중</span>
+          </article>
+        </section>
+
         <section class="next-game-panel" aria-label="다음 경기">
-          <h3 class="next-game-title">다음 경기</h3>
+          <header class="next-game-header">
+            <p class="next-game-kicker">NEXT GAME PREVIEW</p>
+            <h3 class="next-game-title">다음 경기</h3>
+          </header>
 
           <div class="next-game-team-row">
             <div class="next-game-team-name" id="team-a-name">Team A</div>
@@ -94,22 +116,85 @@
 
           <div class="next-game-logo-row">
             <div id="team-a-logo" class="team-logo-placeholder" aria-label="Home 팀 로고"></div>
+            <div class="next-game-center-meta">
+              <span id="next-game-countdown" class="countdown-chip">TIP-OFF 예정</span>
+              <span id="next-game-arena" class="arena-name"></span>
+            </div>
             <div id="team-b-logo" class="team-logo-placeholder" aria-label="Away 팀 로고"></div>
           </div>
 
           <div class="next-game-meta-row">
-            <span class="home-away-label">Home</span>
-            <span id="next-game-arena" class="arena-name"></span>
-            <span class="home-away-label">Away</span>
+            <span class="home-away-label">HOME</span>
+            <p id="next-game-datetime" class="next-game-datetime">YYYY-MM-DD --:-- PM</p>
+            <span class="home-away-label">AWAY</span>
           </div>
 
-          <p id="next-game-datetime" class="next-game-datetime">YYYY-MM-DD --:-- PM</p>
+          <div class="preview-tabs" role="tablist" aria-label="경기 프리뷰 탭">
+            <button type="button" class="preview-tab is-active" data-preview-tab="matchup">매치업</button>
+            <button type="button" class="preview-tab" data-preview-tab="condition">컨디션</button>
+            <button type="button" class="preview-tab" data-preview-tab="strategy">전략 힌트</button>
+          </div>
+
+          <div class="preview-panels">
+            <section class="preview-panel is-active" data-preview-panel="matchup">
+              <div class="stat-compare">
+                <span>팀 승률</span>
+                <div class="compare-track"><span id="compare-winrate-bar" style="width:50%"></span></div>
+                <strong id="compare-winrate-text">50 : 50</strong>
+              </div>
+              <div class="stat-compare">
+                <span>최근 10경기</span>
+                <div class="compare-track"><span id="compare-last10-bar" style="width:50%"></span></div>
+                <strong id="compare-last10-text">5 : 5</strong>
+              </div>
+            </section>
+            <section class="preview-panel" data-preview-panel="condition">
+              <ul id="condition-list" class="insight-list"></ul>
+            </section>
+            <section class="preview-panel" data-preview-panel="strategy">
+              <ul id="strategy-list" class="insight-list"></ul>
+            </section>
+          </div>
 
           <div class="next-game-actions">
-            <button type="button" class="menu-card next-game-action-btn">경기 진행</button>
+            <button type="button" class="menu-card next-game-action-btn next-game-action-primary">경기 진행</button>
             <button type="button" id="next-game-tactics-btn" class="menu-card next-game-action-btn">전술</button>
             <button type="button" class="menu-card next-game-action-btn">빠른 진행</button>
           </div>
+        </section>
+
+        <section class="main-intel-grid" aria-label="운영 인텔리전스">
+          <article class="intel-card intel-priority">
+            <header>
+              <p class="command-label">TODAY'S PRIORITY</p>
+              <h4>오늘의 우선 과제</h4>
+            </header>
+            <ul id="priority-list" class="insight-list"></ul>
+          </article>
+          <article class="intel-card intel-stack">
+            <header>
+              <p class="command-label">QUICK INTEL</p>
+              <h4>핵심 체크 포인트</h4>
+            </header>
+            <ul id="quick-intel-list" class="intel-mini-list"></ul>
+          </article>
+        </section>
+
+        <section class="main-feed-grid" aria-label="일정 및 활동 피드">
+          <article class="intel-card">
+            <header>
+              <p class="command-label">WEEKLY TIMELINE</p>
+              <h4>주간 일정</h4>
+            </header>
+            <div id="timeline-list" class="timeline-list"></div>
+          </article>
+          <article class="intel-card">
+            <header>
+              <p class="command-label">FRANCHISE FEED</p>
+              <h4>최근 활동</h4>
+            </header>
+            <ul id="activity-feed" class="insight-list"></ul>
+          </article>
         </section>
       </section>
     </section>

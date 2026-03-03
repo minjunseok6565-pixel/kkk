@@ -81,6 +81,29 @@ const els = {
   teamAName: document.getElementById("team-a-name"),
   teamBName: document.getElementById("team-b-name"),
   nextGameDatetime: document.getElementById("next-game-datetime"),
+  teamALogo: document.getElementById("team-a-logo"),
+  teamBLogo: document.getElementById("team-b-logo"),
+  nextGameArena: document.getElementById("next-game-arena"),
+  nextGameCountdown: document.getElementById("next-game-countdown"),
+  commandSeasonStage: document.getElementById("command-season-stage"),
+  commandTeamSummary: document.getElementById("command-team-summary"),
+  kpiRecord: document.getElementById("kpi-record"),
+  kpiWinRate: document.getElementById("kpi-win-rate"),
+  kpiLast10: document.getElementById("kpi-last10"),
+  kpiStreak: document.getElementById("kpi-streak"),
+  statusInjury: document.getElementById("status-injury"),
+  statusFatigue: document.getElementById("status-fatigue"),
+  statusSchedule: document.getElementById("status-schedule"),
+  compareWinrateBar: document.getElementById("compare-winrate-bar"),
+  compareWinrateText: document.getElementById("compare-winrate-text"),
+  compareLast10Bar: document.getElementById("compare-last10-bar"),
+  compareLast10Text: document.getElementById("compare-last10-text"),
+  conditionList: document.getElementById("condition-list"),
+  strategyList: document.getElementById("strategy-list"),
+  priorityList: document.getElementById("priority-list"),
+  quickIntelList: document.getElementById("quick-intel-list"),
+  timelineList: document.getElementById("timeline-list"),
+  activityFeed: document.getElementById("activity-feed"),
   myTeamTitle: document.getElementById("my-team-title"),
   myTeamBtn: document.getElementById("my-team-btn"),
   tacticsMenuBtn: document.getElementById("tactics-menu-btn"),
@@ -396,12 +419,114 @@ function showMainScreen() {
   activateScreen(els.mainScreen);
   const teamName = state.selectedTeamName || state.selectedTeamId || "선택 팀";
   els.mainTeamTitle.textContent = teamName;
+  bindMainPreviewTabs();
   void refreshMainDashboard();
 }
 
 function formatIsoDate(dateString) {
   const raw = String(dateString || "").slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "YYYY-MM-DD";
+}
+
+function formatCountdownLabel(gameDate) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(gameDate || ""))) return "TIP-OFF 예정";
+  const today = new Date();
+  const target = new Date(`${gameDate}T00:00:00`);
+  const todayMidnight = new Date(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}T00:00:00`);
+  const days = Math.round((target - todayMidnight) / (1000 * 60 * 60 * 24));
+  if (days <= 0) return "TODAY · GAME DAY";
+  return `D-${days}`;
+}
+
+function teamInitial(teamName) {
+  const name = String(teamName || "").trim();
+  if (!name) return "NBA";
+  const parts = name.split(/\s+/).filter(Boolean);
+  const token = (parts[0]?.[0] || "") + (parts[1]?.[0] || "");
+  return token.toUpperCase() || name.slice(0, 2).toUpperCase();
+}
+
+function setLogoPlaceholder(el, teamName) {
+  if (!el) return;
+  el.textContent = teamInitial(teamName);
+}
+
+function classifyScheduleStress(upcomingGames) {
+  const cnt = (upcomingGames || []).slice(0, 4).length;
+  if (cnt >= 4) return { label: "일정 강도 높음", cls: "danger" };
+  if (cnt >= 3) return { label: "일정 강도 주의", cls: "warn" };
+  return { label: "일정 강도 안정", cls: "" };
+}
+
+function streakFromRecent(results) {
+  if (!results.length) return "-";
+  const first = results[0];
+  let n = 0;
+  for (const r of results) {
+    if (r === first) n += 1;
+    else break;
+  }
+  return `${first}${n}`;
+}
+
+function normalizeRecord(row) {
+  if (!row) return { wins: 0, losses: 0, pct: 0, l10: "0-0", strk: "-" };
+  return {
+    wins: Number(row?.wins || 0),
+    losses: Number(row?.losses || 0),
+    pct: Number(row?.pct || 0),
+    l10: row?.l10 || "0-0",
+    strk: row?.strk || "-",
+  };
+}
+
+function setBadgeState(el, text, cls = "") {
+  if (!el) return;
+  el.textContent = text;
+  el.classList.remove("warn", "danger");
+  if (cls) el.classList.add(cls);
+}
+
+function updatePreviewCompare(homeRecord, awayRecord) {
+  const homePct = clamp(num(homeRecord?.pct, 0.5), 0, 1);
+  const awayPct = clamp(num(awayRecord?.pct, 0.5), 0, 1);
+  const share = (homePct + awayPct) > 0 ? (homePct / (homePct + awayPct)) * 100 : 50;
+  if (els.compareWinrateBar) els.compareWinrateBar.style.width = `${share.toFixed(1)}%`;
+  if (els.compareWinrateText) {
+    els.compareWinrateText.textContent = `${Math.round(homePct * 100)} : ${Math.round(awayPct * 100)}`;
+  }
+
+  const [homeL10W, homeL10L] = String(homeRecord?.l10 || "0-0").split("-").map((v) => Number(v || 0));
+  const [awayL10W, awayL10L] = String(awayRecord?.l10 || "0-0").split("-").map((v) => Number(v || 0));
+  const homeL10Pct = (homeL10W + homeL10L) > 0 ? homeL10W / (homeL10W + homeL10L) : 0.5;
+  const awayL10Pct = (awayL10W + awayL10L) > 0 ? awayL10W / (awayL10W + awayL10L) : 0.5;
+  const l10Share = (homeL10Pct + awayL10Pct) > 0 ? (homeL10Pct / (homeL10Pct + awayL10Pct)) * 100 : 50;
+  if (els.compareLast10Bar) els.compareLast10Bar.style.width = `${l10Share.toFixed(1)}%`;
+  if (els.compareLast10Text) {
+    els.compareLast10Text.textContent = `${homeL10W} : ${awayL10W}`;
+  }
+}
+
+function renderListItems(el, items, emptyText) {
+  if (!el) return;
+  const rows = (items || []).filter(Boolean);
+  el.innerHTML = rows.length
+    ? rows.map((text) => `<li>${text}</li>`).join("")
+    : `<li>${emptyText}</li>`;
+}
+
+function bindMainPreviewTabs() {
+  const tabs = document.querySelectorAll('#main-screen [data-preview-tab]');
+  const panels = document.querySelectorAll('#main-screen [data-preview-panel]');
+  tabs.forEach((tab) => {
+    if (tab.dataset.bound === "true") return;
+    tab.dataset.bound = "true";
+    tab.addEventListener("click", () => {
+      const key = tab.dataset.previewTab;
+      tabs.forEach((btn) => btn.classList.toggle("is-active", btn === tab));
+      panels.forEach((panel) => panel.classList.toggle("is-active", panel.dataset.previewPanel === key));
+    });
+  });
 }
 
 function randomTipoffTime() {
@@ -424,7 +549,27 @@ async function fetchInGameDate() {
 function resetNextGameCard() {
   els.teamAName.textContent = "Team A";
   els.teamBName.textContent = "Team B";
+  setLogoPlaceholder(els.teamALogo, "Team A");
+  setLogoPlaceholder(els.teamBLogo, "Team B");
+  if (els.nextGameArena) els.nextGameArena.textContent = "";
+  if (els.nextGameCountdown) els.nextGameCountdown.textContent = "TIP-OFF 예정";
   els.nextGameDatetime.textContent = "YYYY-MM-DD --:-- PM";
+  if (els.commandTeamSummary) els.commandTeamSummary.textContent = "팀 운영 데이터를 불러오는 중...";
+  if (els.commandSeasonStage) els.commandSeasonStage.textContent = "정규 시즌";
+  if (els.kpiRecord) els.kpiRecord.textContent = "--";
+  if (els.kpiWinRate) els.kpiWinRate.textContent = "--";
+  if (els.kpiLast10) els.kpiLast10.textContent = "--";
+  if (els.kpiStreak) els.kpiStreak.textContent = "--";
+  setBadgeState(els.statusInjury, "부상 --명");
+  setBadgeState(els.statusFatigue, "피로 주의 --명");
+  setBadgeState(els.statusSchedule, "일정 강도 확인중");
+  updatePreviewCompare(null, null);
+  renderListItems(els.conditionList, ["컨디션 데이터를 불러오는 중입니다."], "컨디션 데이터가 없습니다.");
+  renderListItems(els.strategyList, ["전략 데이터를 준비 중입니다."], "전략 힌트가 없습니다.");
+  renderListItems(els.priorityList, ["우선 과제를 계산 중입니다."], "우선 과제가 없습니다.");
+  renderListItems(els.quickIntelList, ["핵심 체크 포인트를 준비 중입니다."], "표시할 정보가 없습니다.");
+  if (els.timelineList) els.timelineList.innerHTML = '<div class="timeline-item"><span class="tag">INFO</span><span>주간 일정 정보를 불러오는 중...</span><span>-</span></div>';
+  renderListItems(els.activityFeed, ["최근 활동 정보를 불러오는 중입니다."], "활동 데이터가 없습니다.");
 }
 
 function formatLeader(leader) {
@@ -495,35 +640,162 @@ async function showScheduleScreen() {
 async function refreshMainDashboard() {
   if (!state.selectedTeamId) return;
 
+  resetNextGameCard();
+
   try {
     const currentDate = await fetchInGameDate();
     state.currentDate = currentDate;
     els.mainCurrentDate.textContent = currentDate;
 
-    const schedule = await fetchJson(`/api/team-schedule/${encodeURIComponent(state.selectedTeamId)}`);
+    const [schedule, teamDetail, standingsPayload] = await Promise.all([
+      fetchJson(`/api/team-schedule/${encodeURIComponent(state.selectedTeamId)}`),
+      fetchJson(`/api/team-detail/${encodeURIComponent(state.selectedTeamId)}`).catch(() => ({})),
+      fetchJson("/api/standings/table").catch(() => null),
+    ]);
+
     const games = schedule?.games || [];
+    const completed = games.filter((g) => g?.is_completed);
+    const upcoming = games.filter((g) => !g?.is_completed);
+    const teamId = String(state.selectedTeamId || "").toUpperCase();
+
+    const recentResults = completed
+      .slice(-10)
+      .reverse()
+      .map((g) => {
+        const isHome = String(g?.home_team_id || "").toUpperCase() === teamId;
+        const myScore = Number(isHome ? g?.home_score : g?.away_score);
+        const oppScore = Number(isHome ? g?.away_score : g?.home_score);
+        if (!Number.isFinite(myScore) || !Number.isFinite(oppScore)) return "";
+        return myScore >= oppScore ? "W" : "L";
+      })
+      .filter(Boolean);
+
+    const wins = recentResults.filter((r) => r === "W").length;
+    const losses = recentResults.filter((r) => r === "L").length;
+
+    let standingsRow = null;
+    if (standingsPayload) {
+      const pool = [...(standingsPayload?.east || []), ...(standingsPayload?.west || [])];
+      standingsRow = pool.find((row) => String(row?.team_id || "").toUpperCase() === teamId) || null;
+    }
+
+    const baseRecord = normalizeRecord(standingsRow);
+    if (els.kpiRecord) els.kpiRecord.textContent = `${baseRecord.wins}-${baseRecord.losses}`;
+    if (els.kpiWinRate) els.kpiWinRate.textContent = `${(baseRecord.pct * 100).toFixed(1)}%`;
+    if (els.kpiLast10) els.kpiLast10.textContent = recentResults.length ? `${wins}-${losses}` : baseRecord.l10;
+    if (els.kpiStreak) els.kpiStreak.textContent = baseRecord.strk !== "-" ? baseRecord.strk : streakFromRecent(recentResults);
+
+    const seasonYear = Number(currentDate.slice(0, 4));
+    if (els.commandSeasonStage) {
+      els.commandSeasonStage.textContent = Number.isFinite(seasonYear) ? `${seasonYear}-${String((seasonYear + 1) % 100).padStart(2, "0")} 정규 시즌` : "정규 시즌";
+    }
+    if (els.commandTeamSummary) {
+      const summaryParts = [];
+      if (standingsRow?.rank) summaryParts.push(`${standingsRow.rank}위`);
+      if (standingsRow?.conf) summaryParts.push(`컨퍼런스 ${standingsRow.conf}`);
+      if (standingsRow?.gb_display) summaryParts.push(`GB ${standingsRow.gb_display}`);
+      els.commandTeamSummary.textContent = summaryParts.length ? summaryParts.join(" · ") : "순위 데이터 집계중";
+    }
+
+    const rosterRows = teamDetail?.roster || [];
+    const injuryCount = rosterRows.filter((p) => {
+      const status = String(p?.injury_status || p?.availability || "").toUpperCase();
+      return ["OUT", "QUESTIONABLE", "DOUBTFUL", "INJURED"].some((token) => status.includes(token));
+    }).length;
+    const fatigueCount = rosterRows.filter((p) => num(p?.short_term_stamina, 1) < 0.55 || num(p?.long_term_stamina, 1) < 0.65).length;
+    setBadgeState(els.statusInjury, `부상 ${injuryCount}명`, injuryCount >= 2 ? "danger" : injuryCount >= 1 ? "warn" : "");
+    setBadgeState(els.statusFatigue, `피로 주의 ${fatigueCount}명`, fatigueCount >= 4 ? "danger" : fatigueCount >= 2 ? "warn" : "");
+
+    const stress = classifyScheduleStress(upcoming);
+    setBadgeState(els.statusSchedule, stress.label, stress.cls);
+
     const nextGame = games.find((g) => {
       const date = String(g?.date || "").slice(0, 10);
       return date >= currentDate && !isCompletedGame(g);
     });
 
     if (!nextGame) {
-      resetNextGameCard();
       els.nextGameDatetime.textContent = "예정된 다음 경기가 없습니다.";
       return;
     }
 
     const homeId = String(nextGame.home_team_id || "").toUpperCase();
     const awayId = String(nextGame.away_team_id || "").toUpperCase();
+    const homeName = TEAM_FULL_NAMES[homeId] || homeId || "Team A";
+    const awayName = TEAM_FULL_NAMES[awayId] || awayId || "Team B";
     const gameDate = formatIsoDate(nextGame.date);
-    els.teamAName.textContent = TEAM_FULL_NAMES[homeId] || homeId || "Team A";
-    els.teamBName.textContent = TEAM_FULL_NAMES[awayId] || awayId || "Team B";
     const tipoffTime = nextGame.tipoff_time || randomTipoffTime();
+
+    els.teamAName.textContent = homeName;
+    els.teamBName.textContent = awayName;
+    setLogoPlaceholder(els.teamALogo, homeName);
+    setLogoPlaceholder(els.teamBLogo, awayName);
+    if (els.nextGameArena) els.nextGameArena.textContent = nextGame.arena_name || nextGame.location || "경기장 정보 미제공";
+    if (els.nextGameCountdown) els.nextGameCountdown.textContent = formatCountdownLabel(gameDate);
     els.nextGameDatetime.textContent = `${gameDate} ${tipoffTime}`;
+
+    const byTeam = {};
+    [...(standingsPayload?.east || []), ...(standingsPayload?.west || [])].forEach((row) => {
+      byTeam[String(row?.team_id || "").toUpperCase()] = normalizeRecord(row);
+    });
+    updatePreviewCompare(byTeam[homeId], byTeam[awayId]);
+
+    const conditionLines = [];
+    if (injuryCount > 0) conditionLines.push(`현재 출전 이슈 ${injuryCount}명 · 결장/주의 로테이션 확인 필요`);
+    else conditionLines.push("현재 결장 이슈 없음 · 로테이션 안정 상태");
+    conditionLines.push(`피로 주의 선수 ${fatigueCount}명 · 벤치 분배 조정 권장`);
+    conditionLines.push(`다음 경기 ${nextGame.home_team_id === teamId ? "홈" : "원정"} 일정`);
+    renderListItems(els.conditionList, conditionLines, "컨디션 데이터가 없습니다.");
+
+    const strategyLines = [];
+    const myRecord = byTeam[teamId] || baseRecord;
+    const oppId = homeId === teamId ? awayId : homeId;
+    const oppRecord = byTeam[oppId] || normalizeRecord(null);
+    if (num(myRecord.pct, 0.5) < num(oppRecord.pct, 0.5)) strategyLines.push("상대 승률 우세 · 경기 초반 템포를 낮춰 턴오버 관리에 집중하세요.");
+    else strategyLines.push("전력 우세 구간입니다 · 초반 주전 라인업으로 리드를 선점하세요.");
+    strategyLines.push(fatigueCount >= 3 ? "피로 누적 구간 · 2Q 중반부터 로테이션 폭을 넓히는 것이 안전합니다." : "컨디션 양호 · 클러치 전술 리허설을 유지하세요.");
+    strategyLines.push(stress.cls ? "일정 압박 구간 · 경기 후 회복 중심 훈련으로 전환 권장." : "일정 부담이 낮아 전술 디테일 훈련을 병행할 수 있습니다.");
+    renderListItems(els.strategyList, strategyLines, "전략 힌트가 없습니다.");
+
+    renderListItems(els.priorityList, [
+      `다음 경기 대비 핵심 과제: ${nextGame.home_team_id === teamId ? "홈 어드밴티지 활용" : "원정 초반 집중"}`,
+      `부상/피로 관리: ${injuryCount}명 / ${fatigueCount}명 모니터링`,
+      `최근 흐름: ${recentResults.length ? `${wins}-${losses}` : "데이터 부족"} · 스트릭 ${els.kpiStreak?.textContent || "-"}`,
+    ], "우선 과제가 없습니다.");
+
+    renderListItems(els.quickIntelList, [
+      `다음 4경기 ${Math.min(upcoming.length, 4)}경기 예정`,
+      `주간 핵심: ${stress.label}`,
+      `탭 이동 없이 홈에서 주요 리스크 점검 가능`,
+    ], "표시할 정보가 없습니다.");
+
+    if (els.timelineList) {
+      const timelineGames = upcoming.slice(0, 6);
+      els.timelineList.innerHTML = timelineGames.length
+        ? timelineGames.map((g, idx) => {
+          const tDate = formatIsoDate(g?.date);
+          const isHome = String(g?.home_team_id || "").toUpperCase() === teamId;
+          const opp = TEAM_FULL_NAMES[String(isHome ? g?.away_team_id : g?.home_team_id || "").toUpperCase()] || "상대 미정";
+          return `<div class="timeline-item ${idx === 0 ? "is-next" : ""}"><span>${tDate}</span><span>${isHome ? "vs" : "@"} ${opp}</span><span class="tag">${idx === 0 ? "NEXT" : "UPCOMING"}</span></div>`;
+        }).join("")
+        : '<div class="timeline-item"><span>-</span><span>예정 일정이 없습니다.</span><span class="tag">INFO</span></div>';
+    }
+
+    const feedItems = completed.slice(-3).reverse().map((g) => {
+      const isHome = String(g?.home_team_id || "").toUpperCase() === teamId;
+      const my = Number(isHome ? g?.home_score : g?.away_score);
+      const opp = Number(isHome ? g?.away_score : g?.home_score);
+      const wl = Number.isFinite(my) && Number.isFinite(opp) ? (my >= opp ? "승리" : "패배") : "결과 미정";
+      const oppName = TEAM_FULL_NAMES[String(isHome ? g?.away_team_id : g?.home_team_id || "").toUpperCase()] || "상대 미정";
+      return `${formatIsoDate(g?.date)} ${oppName}전 ${wl} (${Number.isFinite(my) ? my : "-"}-${Number.isFinite(opp) ? opp : "-"})`;
+    });
+    feedItems.push(`다음 경기 준비 상태: ${stress.label}`);
+    renderListItems(els.activityFeed, feedItems, "최근 활동이 없습니다.");
   } catch (e) {
     resetNextGameCard();
     els.mainCurrentDate.textContent = "YYYY-MM-DD";
     els.nextGameDatetime.textContent = `다음 경기 정보를 불러오지 못했습니다: ${e.message}`;
+    renderListItems(els.activityFeed, [`대시보드 로딩 실패: ${e.message}`], "활동 데이터가 없습니다.");
   }
 }
 
