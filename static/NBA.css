@@ -2516,7 +2516,7 @@ body:has(#player-detail-screen.active) .app-shell {
 }
 @media (min-width: 1201px) {
   #my-team-screen .myteam-overview {
-    transform: translateX(calc((100% + 12px) / 4));
+    transform: none;
   }
 }
 #my-team-screen .myteam-overview-block {
@@ -2599,6 +2599,129 @@ body:has(#player-detail-screen.active) .app-shell {
   color: #f8fafc;
   font-weight: 700;
 }
+#my-team-screen .roster-row.is-risk-row {
+  box-shadow: inset 2px 0 0 rgba(239, 68, 68, 0.95);
+}
+
+#my-team-screen .condition-cell {
+  min-width: 178px;
+}
+
+#my-team-screen .condition-cell-v2 {
+  display: grid;
+  gap: 6px;
+  min-width: 160px;
+}
+
+#my-team-screen .condition-micro-row {
+  display: grid;
+  grid-template-columns: 20px 1fr 34px;
+  align-items: center;
+  gap: 6px;
+}
+
+#my-team-screen .condition-micro-row span {
+  font-size: .66rem;
+  color: #64748b;
+  font-weight: 700;
+}
+
+#my-team-screen .condition-micro-row strong {
+  font-size: .68rem;
+  color: #0f172a;
+  text-align: right;
+}
+
+#my-team-screen .condition-micro-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.34);
+  overflow: hidden;
+}
+
+#my-team-screen .condition-micro-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #22c55e, #38bdf8);
+}
+
+#my-team-screen .condition-chip {
+  justify-self: start;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: .64rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  border: 1px solid transparent;
+}
+
+#my-team-screen .condition-chip.is-good {
+  color: #166534;
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+#my-team-screen .condition-chip.is-watch {
+  color: #92400e;
+  background: rgba(245, 158, 11, 0.22);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+#my-team-screen .condition-chip.is-risk {
+  color: #991b1b;
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.38);
+}
+
+#my-team-screen .sharpness-badge-v2,
+#player-detail-screen .sharpness-badge-v2 {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  grid-template-areas:
+    "value grade"
+    "label label";
+  align-items: center;
+  gap: 0 8px;
+  border-radius: 11px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: linear-gradient(180deg, #fff, #f8fafc);
+  color: #0f172a;
+  padding: 6px 10px;
+  min-width: 92px;
+}
+
+#my-team-screen .sharpness-badge-v2 strong,
+#player-detail-screen .sharpness-badge-v2 strong {
+  grid-area: value;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+#my-team-screen .sharpness-badge-v2 em,
+#player-detail-screen .sharpness-badge-v2 em {
+  grid-area: grade;
+  font-size: .86rem;
+  font-style: normal;
+  font-weight: 800;
+  border-radius: 999px;
+  padding: 2px 6px;
+  color: #fff;
+}
+
+#my-team-screen .sharpness-badge-v2 small,
+#player-detail-screen .sharpness-badge-v2 small {
+  grid-area: label;
+  font-size: .64rem;
+  color: #64748b;
+  letter-spacing: .03em;
+  font-weight: 700;
+}
+
+.sharpness-badge-v2.is-elite em { background: #6d28d9; }
+.sharpness-badge-v2.is-hot em { background: #16a34a; }
+.sharpness-badge-v2.is-stable em { background: #0284c7; }
+.sharpness-badge-v2.is-volatile em { background: #d97706; }
+.sharpness-badge-v2.is-cold em { background: #dc2626; }
 #my-team-screen .sharpness-badge.is-risk {
   box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.45);
 }
@@ -2612,9 +2735,9 @@ body:has(#player-detail-screen.active) .app-shell {
     "stats stats";
 }
 #player-detail-screen .detail-card-hero {
-  background: linear-gradient(120deg, rgba(15,23,42,0.9), rgba(30,41,59,0.86));
-  color: #e2e8f0;
-  border-color: rgba(255,255,255,0.14);
+  background: linear-gradient(120deg, rgba(15,23,42,0.95), rgba(30,41,59,0.92));
+  color: #f1f5f9;
+  border-color: rgba(255,255,255,0.2);
 }
 #player-detail-screen .detail-card-hero h3,
 #player-detail-screen .detail-card-hero .detail-subline,
@@ -2624,13 +2747,28 @@ body:has(#player-detail-screen.active) .app-shell {
   margin: 0 0 6px;
   font-size: .72rem;
   letter-spacing: .08em;
-  color: #64748b;
+  color: #94a3b8;
   font-weight: 700;
 }
 #player-detail-screen .hero-summary {
   margin: 10px 0 0;
   font-size: .86rem;
-  opacity: .9;
+  opacity: .98;
+}
+
+#player-detail-screen .detail-card {
+  background: linear-gradient(145deg, rgba(31, 41, 55, 0.92), rgba(15, 23, 42, 0.93));
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+#player-detail-screen .detail-card h4 {
+  color: #e2e8f0;
+}
+
+#player-detail-screen .section-copy,
+#player-detail-screen .compact-kv-list li,
+#player-detail-screen .kv-list {
+  color: #dbe6f7;
 }
 #player-detail-screen .hero-kpi-stack {
   display: grid;

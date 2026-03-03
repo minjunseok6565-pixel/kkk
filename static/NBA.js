@@ -778,6 +778,52 @@ function ratioToColor(ratio) {
   return `hsl(${hue} 80% 36%)`;
 }
 
+function getConditionState({ shortStamina, longStamina, sharpness }) {
+  const st = clamp(num(shortStamina, 0), 0, 1);
+  const lt = clamp(num(longStamina, 0), 0, 1);
+  const sharp = clamp(num(sharpness, 0), 0, 100);
+
+  if (sharp < 55 || st < 0.60 || lt < 0.65) return "risk";
+  if (sharp < 70 || st < 0.75 || lt < 0.80) return "watch";
+  return "good";
+}
+
+function sharpnessGrade(score) {
+  const v = clamp(num(score, 0), 0, 100);
+  if (v >= 95) return { grade: "S", tone: "elite", label: "Elite" };
+  if (v >= 85) return { grade: "A", tone: "hot", label: "Hot" };
+  if (v >= 70) return { grade: "B", tone: "stable", label: "Stable" };
+  if (v >= 55) return { grade: "C", tone: "volatile", label: "Volatile" };
+  return { grade: "D", tone: "cold", label: "Cold" };
+}
+
+function renderSharpnessBadgeV2(score, opts = {}) {
+  const value = Math.round(clamp(num(score, 0), 0, 100));
+  const tier = sharpnessGrade(value);
+  const prefix = opts.prefix || "";
+  return `
+    <span class="sharpness-badge-v2 is-${tier.tone}" title="${prefix}경기력 ${value}% · 등급 ${tier.grade} (${tier.label})">
+      <strong>${value}</strong>
+      <em>${tier.grade}</em>
+      <small>${tier.label}</small>
+    </span>
+  `;
+}
+
+function renderConditionCell(shortStamina, longStamina, sharpness) {
+  const st = clamp(num(shortStamina, 0), 0, 1);
+  const lt = clamp(num(longStamina, 0), 0, 1);
+  const state = getConditionState({ shortStamina: st, longStamina: lt, sharpness });
+  const label = state === "risk" ? "RISK" : state === "watch" ? "WATCH" : "GOOD";
+  return `
+    <div class="condition-cell-v2" title="ST ${Math.round(st * 100)}% · LT ${Math.round(lt * 100)}%">
+      <div class="condition-micro-row"><span>ST</span><div class="condition-micro-bar"><i style="width:${Math.round(st * 100)}%"></i></div><strong>${Math.round(st * 100)}%</strong></div>
+      <div class="condition-micro-row"><span>LT</span><div class="condition-micro-bar"><i style="width:${Math.round(lt * 100)}%"></i></div><strong>${Math.round(lt * 100)}%</strong></div>
+      <span class="condition-chip is-${state}">${label}</span>
+    </div>
+  `;
+}
+
 function renderConditionRing(longStamina, shortStamina) {
   const longPct = clamp(num(longStamina, 0), 0, 1) * 100;
   const shortPct = clamp(num(shortStamina, 0), 0, 1) * 100;
@@ -878,7 +924,9 @@ function renderRosterRows(rows) {
     const shortStamina = row.short_term_stamina ?? (1 - num(row.short_term_fatigue, 0));
     const longStamina = row.long_term_stamina ?? (1 - num(row.long_term_fatigue, 0));
     const sharpness = clamp(num(row.sharpness, 50), 0, 100);
-    const riskClass = sharpness < 60 || shortStamina < 0.6 || longStamina < 0.65 ? "is-risk" : "";
+    const conditionState = getConditionState({ shortStamina, longStamina, sharpness });
+    const riskClass = conditionState === "risk" ? "is-risk" : "";
+    if (conditionState === "risk") tr.classList.add("is-risk-row");
 
     tr.innerHTML = `
       <td>
@@ -897,8 +945,8 @@ function renderRosterRows(rows) {
       <td>${num(row.ast, 0).toFixed(1)}</td>
       <td>${num(row.reb, 0).toFixed(1)}</td>
       <td>${num(row.three_pm, 0).toFixed(1)}</td>
-      <td class="condition-cell">${renderConditionRing(longStamina, shortStamina)}</td>
-      <td><span class="sharpness-badge ${riskClass}" style="background:${ratioToColor(sharpness / 100)}">${Math.round(sharpness)}%</span></td>
+      <td class="condition-cell">${renderConditionCell(shortStamina, longStamina, sharpness)}</td>
+      <td>${renderSharpnessBadgeV2(sharpness, { prefix: "로스터 " })}</td>
     `;
 
     tr.addEventListener("click", () => {
@@ -1024,8 +1072,17 @@ function buildAttrIntelligence(attrs) {
     .join("");
 
   const sorted = [...entries].sort((a, b) => b.value - a.value);
+  const isHiddenNeedsAttentionKey = (key) => {
+    const k = String(key || "").trim();
+    const lower = k.toLowerCase();
+    return lower === "potential" || lower === "i_injuryfreq" || k.startsWith("M_");
+  };
+  const attentionPool = sorted.filter((item) => !isHiddenNeedsAttentionKey(item.key));
   const strengthsHtml = `<ul class="intel-list">${sorted.slice(0, 5).map((x) => `<li><span>${x.key}</span><strong>${Math.round(x.value)}</strong></li>`).join("")}</ul>`;
-  const weaknessesHtml = `<ul class="intel-list">${sorted.slice(-3).reverse().map((x) => `<li><span>${x.key}</span><strong>${Math.round(x.value)}</strong></li>`).join("")}</ul>`;
+  const weaknessItems = attentionPool.slice(-3).reverse();
+  const weaknessesHtml = weaknessItems.length
+    ? `<ul class="intel-list">${weaknessItems.map((x) => `<li><span>${x.key}</span><strong>${Math.round(x.value)}</strong></li>`).join("")}</ul>`
+    : '<p class="empty-copy">노출 가능한 약점 데이터가 없습니다.</p>';
 
   return { categoryHtml, strengthsHtml, weaknessesHtml };
 }
@@ -1090,7 +1147,7 @@ function renderPlayerDetail(detail) {
           </div>
           <div class="hero-kpi-stack">
             <span class="ovr-medal">OVR ${ovr}</span>
-            <span class="sharpness-badge" style="background:${ratioToColor(sharp / 100)}">경기력 ${Math.round(sharp)}%</span>
+            ${renderSharpnessBadgeV2(sharp)}
             <span class="status-line ${injury.is_injured ? "status-danger" : "status-ok"}">${injury.is_injured ? "Injured" : "Available"}</span>
           </div>
         </div>
