@@ -349,6 +349,7 @@
       </div>
 
       <section id="college-panel-teams" class="college-panel active" aria-hidden="false">
+        <div id="college-teams-kpi" class="college-kpi-grid" aria-label="리그 요약"></div>
         <div class="college-two-col">
           <article class="college-card">
             <h3>대학 팀 순위</h3>
@@ -365,6 +366,7 @@
           </article>
           <article class="college-card">
             <h3 id="college-roster-title">팀 로스터</h3>
+            <div id="college-roster-summary" class="college-inline-meta">팀을 선택하면 로스터 요약이 표시됩니다.</div>
             <div class="college-table-wrap">
               <table class="college-table">
                 <thead>
@@ -380,12 +382,21 @@
       </section>
 
       <section id="college-panel-leaders" class="college-panel" aria-hidden="true">
+        <div class="college-two-col college-two-col-7-5">
         <article class="college-card">
           <div class="college-card-head-inline">
             <h3>대학 리더보드</h3>
+            <div class="college-filter-row">
             <label>정렬
               <select id="college-leader-sort"></select>
             </label>
+            <label>포지션
+              <select id="college-leader-pos-filter"></select>
+            </label>
+            <label>팀
+              <select id="college-leader-team-filter"></select>
+            </label>
+            </div>
           </div>
           <div class="college-table-wrap">
             <table class="college-table">
@@ -398,15 +409,24 @@
             </table>
           </div>
         </article>
+        <article class="college-card college-insight-card">
+          <h3>선수 인사이트</h3>
+          <p id="college-leader-insight-empty" class="college-inline-meta">선수를 선택하면 인사이트가 표시됩니다.</p>
+          <div id="college-leader-insight" class="college-kv-stack"></div>
+        </article>
+        </div>
       </section>
 
       <section id="college-panel-bigboard" class="college-panel" aria-hidden="true">
         <article class="college-card">
           <div class="college-card-head-inline">
             <h3>전문가 빅보드</h3>
-            <label>전문가
-              <select id="college-expert-select"></select>
-            </label>
+            <div class="college-filter-row">
+              <label>전문가
+                <select id="college-expert-select"></select>
+              </label>
+              <div id="college-bigboard-summary" class="college-inline-meta"></div>
+            </div>
           </div>
           <div class="college-table-wrap">
             <table class="college-table">
@@ -432,6 +452,7 @@
                 <button id="college-assign-btn" type="button" class="btn btn-primary">배정</button>
                 <button id="college-unassign-btn" type="button" class="btn btn-secondary">해제</button>
               </div>
+              <p id="college-scouting-feedback" class="college-inline-meta">스카우터와 선수를 선택한 뒤 배정하세요.</p>
             </div>
           </article>
           <article class="college-card">
