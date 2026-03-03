@@ -2574,3 +2574,303 @@ body:has(#player-detail-screen.active) .app-shell {
     grid-template-columns: 1fr;
   }
 }
+
+/* ===== Tactics Screen Commercial Refresh (scoped) ===== */
+#tactics-screen {
+  --t-bg-0: #09101b;
+  --t-bg-1: #111b2d;
+  --t-bg-2: #15243a;
+  --t-line: rgba(148, 163, 184, 0.28);
+  --t-text: #eef4ff;
+  --t-sub: #9fb1cc;
+  --t-off: #ff7b4d;
+  --t-def: #53b0ff;
+  --t-ok: #3ecf8e;
+  --t-warn: #f4b740;
+  --t-err: #f05a5a;
+  background:
+    radial-gradient(circle at 12% -20%, rgba(83, 176, 255, 0.24), transparent 36%),
+    radial-gradient(circle at 92% -20%, rgba(240, 90, 90, 0.2), transparent 34%),
+    linear-gradient(180deg, var(--t-bg-0), #0d1626 44%, #0f1a2c);
+}
+
+#tactics-screen .subtitle,
+#tactics-screen .tactics-current-copy {
+  color: var(--t-sub);
+}
+
+#tactics-screen .screen-header-row {
+  padding: 4px 4px 0;
+}
+
+#tactics-screen .btn-secondary {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--t-text);
+  border-color: var(--t-line);
+}
+
+#tactics-screen .btn-secondary:hover {
+  border-color: rgba(191, 219, 254, 0.5);
+  background: rgba(83, 176, 255, 0.14);
+}
+
+#tactics-screen .tactics-shell {
+  background: linear-gradient(180deg, rgba(18, 30, 49, 0.92), rgba(14, 24, 40, 0.9));
+  border-color: rgba(148, 163, 184, 0.24);
+  border-radius: 18px;
+  padding: 20px;
+  box-shadow: 0 18px 32px rgba(2, 6, 23, 0.34);
+  gap: 16px;
+}
+
+#tactics-screen .tactics-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--t-line);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(83, 176, 255, 0.12), rgba(14, 24, 40, 0.88) 58%);
+}
+
+#tactics-screen .tactics-hero-main h3 {
+  margin: 2px 0 6px;
+  color: var(--t-text);
+}
+
+#tactics-screen .tactics-hero-sub {
+  margin: 0;
+  color: var(--t-sub);
+}
+
+#tactics-screen .tactics-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+#tactics-screen .tactics-dirty-badge {
+  border: 1px solid var(--t-line);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--t-sub);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+#tactics-screen .tactics-dirty-badge.is-dirty {
+  color: #1b1220;
+  background: var(--t-warn);
+  border-color: rgba(244, 183, 64, 0.65);
+}
+
+#tactics-screen .tactics-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+#tactics-screen .tactics-kpi-card {
+  border: 1px solid var(--t-line);
+  border-radius: 12px;
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(21, 36, 58, 0.96), rgba(17, 27, 45, 0.96));
+}
+
+#tactics-screen .tactics-kpi-card p,
+#tactics-screen .tactics-kpi-card small {
+  margin: 0;
+  color: var(--t-sub);
+  font-size: 12px;
+}
+
+#tactics-screen .tactics-kpi-card strong {
+  font-size: 28px;
+  line-height: 1.05;
+  color: var(--t-text);
+  font-variant-numeric: tabular-nums;
+}
+
+#tactics-screen .tactics-kpi-ok { color: var(--t-ok) !important; }
+#tactics-screen .tactics-kpi-warn { color: var(--t-warn) !important; }
+
+#tactics-screen .tactics-scheme-row {
+  margin-top: 2px;
+}
+
+#tactics-screen .tactics-scheme-btn {
+  min-width: 220px;
+}
+
+#tactics-screen .tactics-options {
+  min-width: 260px;
+  background: #0f1a2d;
+  border-color: rgba(191, 219, 254, 0.36);
+}
+
+#tactics-screen .tactics-options button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#tactics-screen .tactics-options button strong {
+  color: var(--t-ok);
+  font-size: 11px;
+}
+
+#tactics-screen .tactics-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 14px;
+  align-items: start;
+}
+
+#tactics-screen .tactics-lineup-grid {
+  gap: 12px;
+}
+
+#tactics-screen .tactics-lineup-panel {
+  border: 1px solid var(--t-line);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(11, 19, 32, 0.74);
+}
+
+#tactics-screen .tactics-lineup-head,
+#tactics-screen .tactics-lineup-row select,
+#tactics-screen .tactics-lineup-row input {
+  color: var(--t-sub);
+}
+
+#tactics-screen .tactics-lineup-row {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 10px;
+  padding: 6px;
+  transition: background 180ms ease, border-color 180ms ease;
+}
+
+#tactics-screen .tactics-lineup-row.is-updated {
+  border-color: rgba(83, 176, 255, 0.75);
+  background: rgba(83, 176, 255, 0.15);
+}
+
+#tactics-screen .tactics-lineup-row.is-error {
+  border-color: rgba(240, 90, 90, 0.86);
+  background: rgba(240, 90, 90, 0.14);
+}
+
+#tactics-screen .tactics-lineup-row select,
+#tactics-screen .tactics-lineup-row input {
+  background: rgba(15, 26, 45, 0.92);
+  border-color: rgba(148, 163, 184, 0.44);
+}
+
+#tactics-screen .tactics-lineup-row select:focus-visible,
+#tactics-screen .tactics-lineup-row input:focus-visible,
+#tactics-screen .btn:focus-visible {
+  outline: 2px solid rgba(83, 176, 255, 0.74);
+  outline-offset: 1px;
+}
+
+#tactics-screen .tactics-insight-panel {
+  border: 1px solid var(--t-line);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(11, 19, 32, 0.82);
+}
+
+#tactics-screen .tactics-insight-meters {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+#tactics-screen .tactics-insight-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--t-sub);
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+#tactics-screen .tactics-meter {
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(148, 163, 184, 0.24);
+}
+
+#tactics-screen .tactics-meter > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #8ed0ff, var(--t-def));
+}
+
+#tactics-screen .tactics-meter-bench > span {
+  background: linear-gradient(90deg, #ffc09f, var(--t-off));
+}
+
+#tactics-screen .tactics-alert-feed {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+#tactics-screen .tactics-alert-item {
+  border: 1px solid var(--t-line);
+  border-radius: 10px;
+  padding: 9px 10px;
+  color: var(--t-sub);
+  background: rgba(148, 163, 184, 0.1);
+  font-size: 13px;
+}
+
+#tactics-screen .tactics-alert-item.ok { border-color: rgba(62, 207, 142, 0.44); color: #baf3d8; }
+#tactics-screen .tactics-alert-item.info { border-color: rgba(83, 176, 255, 0.4); color: #c7e5ff; }
+#tactics-screen .tactics-alert-item.warn { border-color: rgba(244, 183, 64, 0.45); color: #ffe5a9; }
+#tactics-screen .tactics-alert-item.error { border-color: rgba(240, 90, 90, 0.5); color: #ffd0d0; }
+
+#tactics-screen .tactics-roster-box {
+  border: 1px solid var(--t-line);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(11, 19, 32, 0.6);
+}
+
+#tactics-screen .tactics-roster-list {
+  max-height: 220px;
+}
+
+#tactics-screen .tactics-roster-item {
+  color: var(--t-text);
+  background: rgba(83, 176, 255, 0.08);
+  border-color: rgba(83, 176, 255, 0.18);
+}
+
+@media (max-width: 1280px) {
+  #tactics-screen .tactics-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  #tactics-screen .tactics-kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  #tactics-screen .tactics-kpi-strip {
+    grid-template-columns: 1fr;
+  }
+
+  #tactics-screen .tactics-hero {
+    flex-direction: column;
+  }
+}
