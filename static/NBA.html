@@ -293,41 +293,94 @@
       <div class="screen-header-row">
         <div>
           <p class="eyebrow">TACTICS</p>
-          <h2>전술 설정</h2>
-          <p class="subtitle">공/수 스킴, 라인업, 역할, 출전 시간을 설정합니다.</p>
+          <h2>코칭 전술 콘솔</h2>
+          <p class="subtitle">공/수 스킴, 라인업, 역할, 출전 시간을 실시간 인사이트와 함께 조정합니다.</p>
         </div>
         <button id="tactics-back-btn" class="btn btn-secondary" type="button">메인으로</button>
       </div>
 
       <section class="tactics-shell">
+        <section class="tactics-hero" aria-label="전술 개요">
+          <article class="tactics-hero-main">
+            <p class="eyebrow">COACHING COMMAND</p>
+            <h3 id="tactics-team-context">팀 전술 개요</h3>
+            <p class="tactics-hero-sub">현재 스킴과 로테이션 밸런스를 점검하고 최적의 출전 시간 분배를 구성하세요.</p>
+          </article>
+          <div class="tactics-hero-actions">
+            <span id="tactics-dirty-badge" class="tactics-dirty-badge">초기 상태</span>
+            <button type="button" id="tactics-save-btn" class="btn btn-secondary" disabled aria-disabled="true" title="저장 API 연동 전까지 임시 비활성화">저장 예정</button>
+            <button type="button" id="tactics-undo-btn" class="btn btn-secondary">되돌리기</button>
+          </div>
+        </section>
+
+        <section class="tactics-kpi-strip" aria-label="전술 핵심 지표">
+          <article class="tactics-kpi-card">
+            <p>총 출전시간</p>
+            <strong id="tactics-kpi-total-minutes">0</strong>
+            <small id="tactics-kpi-total-caption">목표 240분</small>
+          </article>
+          <article class="tactics-kpi-card">
+            <p>스타터 평균 MIN</p>
+            <strong id="tactics-kpi-starter-minutes">0.0</strong>
+            <small>선발 5인 평균</small>
+          </article>
+          <article class="tactics-kpi-card">
+            <p>벤치 평균 MIN</p>
+            <strong id="tactics-kpi-bench-minutes">0.0</strong>
+            <small>로테이션 5인 평균</small>
+          </article>
+          <article class="tactics-kpi-card">
+            <p>공격 역할 다양성</p>
+            <strong id="tactics-kpi-role-diversity">0%</strong>
+            <small>고유 역할 분산</small>
+          </article>
+        </section>
+
         <div class="tactics-scheme-row">
           <div class="tactics-scheme-picker">
-            <button type="button" id="tactics-offense-btn" class="btn btn-secondary">공격 스킴</button>
+            <button type="button" id="tactics-offense-btn" class="btn btn-secondary tactics-scheme-btn">팀 공격 아이덴티티</button>
             <div id="tactics-offense-options" class="tactics-options hidden"></div>
             <p id="tactics-offense-current" class="tactics-current-copy"></p>
           </div>
           <div class="tactics-scheme-picker">
-            <button type="button" id="tactics-defense-btn" class="btn btn-secondary">수비 스킴</button>
+            <button type="button" id="tactics-defense-btn" class="btn btn-secondary tactics-scheme-btn">기본 수비 커버리지</button>
             <div id="tactics-defense-options" class="tactics-options hidden"></div>
             <p id="tactics-defense-current" class="tactics-current-copy"></p>
           </div>
         </div>
 
-        <div class="tactics-lineup-grid">
-          <article>
+        <div class="tactics-workbench">
+          <div class="tactics-lineup-grid">
+          <article class="tactics-lineup-panel">
             <h3>선발</h3>
             <div class="tactics-lineup-head"><span>선수</span><span>공격 역할</span><span>수비 역할</span><span>출전 시간</span></div>
             <div id="tactics-starters" class="tactics-lineup-body"></div>
           </article>
-          <article>
+          <article class="tactics-lineup-panel">
             <h3>로테이션</h3>
             <div class="tactics-lineup-head"><span>선수</span><span>공격 역할</span><span>수비 역할</span><span>출전 시간</span></div>
             <div id="tactics-rotation" class="tactics-lineup-body"></div>
           </article>
+          </div>
+
+          <aside class="tactics-insight-panel" aria-label="실시간 인사이트">
+            <h3>실시간 인사이트</h3>
+            <div class="tactics-insight-meters">
+              <div>
+                <div class="tactics-insight-label"><span>선발 출전 비중</span><strong id="tactics-starter-share">0%</strong></div>
+                <div class="tactics-meter"><span id="tactics-starter-share-bar" style="width:0%"></span></div>
+              </div>
+              <div>
+                <div class="tactics-insight-label"><span>벤치 출전 비중</span><strong id="tactics-bench-share">0%</strong></div>
+                <div class="tactics-meter tactics-meter-bench"><span id="tactics-bench-share-bar" style="width:0%"></span></div>
+              </div>
+            </div>
+            <ul id="tactics-alert-feed" class="tactics-alert-feed"></ul>
+          </aside>
         </div>
 
         <section class="tactics-roster-box">
-          <h3>로스터 선수</h3>
+          <h3>로스터 선수 풀</h3>
           <div id="tactics-roster-list" class="tactics-roster-list"></div>
         </section>
       </section>

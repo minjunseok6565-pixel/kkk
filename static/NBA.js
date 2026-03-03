@@ -61,6 +61,7 @@ const state = {
   trainingDraftSession: null,
   standingsData: null,
   tacticsDraft: null,
+  tacticsSnapshot: null,
   medicalOverview: null,
   medicalSelectedPlayerId: null,
 };
@@ -125,6 +126,19 @@ const els = {
   tacticsStarters: document.getElementById("tactics-starters"),
   tacticsRotation: document.getElementById("tactics-rotation"),
   tacticsRosterList: document.getElementById("tactics-roster-list"),
+  tacticsTeamContext: document.getElementById("tactics-team-context"),
+  tacticsDirtyBadge: document.getElementById("tactics-dirty-badge"),
+  tacticsUndoBtn: document.getElementById("tactics-undo-btn"),
+  tacticsKpiTotalMinutes: document.getElementById("tactics-kpi-total-minutes"),
+  tacticsKpiTotalCaption: document.getElementById("tactics-kpi-total-caption"),
+  tacticsKpiStarterMinutes: document.getElementById("tactics-kpi-starter-minutes"),
+  tacticsKpiBenchMinutes: document.getElementById("tactics-kpi-bench-minutes"),
+  tacticsKpiRoleDiversity: document.getElementById("tactics-kpi-role-diversity"),
+  tacticsStarterShare: document.getElementById("tactics-starter-share"),
+  tacticsBenchShare: document.getElementById("tactics-bench-share"),
+  tacticsStarterShareBar: document.getElementById("tactics-starter-share-bar"),
+  tacticsBenchShareBar: document.getElementById("tactics-bench-share-bar"),
+  tacticsAlertFeed: document.getElementById("tactics-alert-feed"),
   standingsMenuBtn: document.getElementById("standings-menu-btn"),
   trainingScreen: document.getElementById("training-screen"),
   standingsScreen: document.getElementById("standings-screen"),
@@ -1566,6 +1580,10 @@ function tacticsSchemeLabel(schemes, key) {
   return found ? found.label : key;
 }
 
+function deepClone(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
 function getDefenseRolesForScheme(key) {
   return TACTICS_DEFENSE_ROLE_BY_SCHEME[key] || TACTICS_DEFENSE_ROLE_BY_SCHEME.Drop;
 }
@@ -1600,7 +1618,7 @@ function renderSchemeOptions(kind) {
   const optionsEl = isOff ? els.tacticsOffenseOptions : els.tacticsDefenseOptions;
   const list = isOff ? TACTICS_OFFENSE_SCHEMES : TACTICS_DEFENSE_SCHEMES;
   const selected = isOff ? state.tacticsDraft.offenseScheme : state.tacticsDraft.defenseScheme;
-  optionsEl.innerHTML = list.map((s) => `<button type="button" data-key="${s.key}">${s.label}${s.key === selected ? " ✓" : ""}</button>`).join("");
+  optionsEl.innerHTML = list.map((s) => `<button type="button" data-key="${s.key}"><span>${s.label}</span>${s.key === selected ? '<strong>선택됨</strong>' : ''}</button>`).join("");
   optionsEl.querySelectorAll("button[data-key]").forEach((btn) => {
     btn.addEventListener("click", () => {
       if (isOff) state.tacticsDraft.offenseScheme = btn.dataset.key;
@@ -1622,6 +1640,44 @@ function rosterNameByPid(pid) {
   return row ? String(row.name || row.player_id) : "-";
 }
 
+function minutesNum(v) {
+  return Math.max(0, Math.min(48, Number(v || 0)));
+}
+
+function computeTacticsInsights() {
+  const starters = state.tacticsDraft?.starters || [];
+  const rotation = state.tacticsDraft?.rotation || [];
+  const allRows = [...starters, ...rotation];
+  const starterMinutes = starters.reduce((sum, row) => sum + minutesNum(row.minutes), 0);
+  const benchMinutes = rotation.reduce((sum, row) => sum + minutesNum(row.minutes), 0);
+  const totalMinutes = starterMinutes + benchMinutes;
+  const uniqueOffRoles = new Set(allRows.map((x) => x.offenseRole).filter(Boolean));
+  const roleDiversity = allRows.length ? (uniqueOffRoles.size / allRows.length) : 0;
+  const defenseRoles = allRows.map((x) => x.defenseRole).filter(Boolean);
+  const seen = new Set();
+  const dup = new Set();
+  defenseRoles.forEach((role) => {
+    if (seen.has(role)) dup.add(role);
+    seen.add(role);
+  });
+  const alerts = [];
+  const delta = 240 - totalMinutes;
+  if (delta !== 0) alerts.push({ level: 'warn', text: `총 출전시간이 ${delta > 0 ? `${delta}분 부족` : `${Math.abs(delta)}분 초과`} 상태입니다.` });
+  if (dup.size) alerts.push({ level: 'error', text: `수비 역할 중복 감지: ${[...dup].join(', ')}` });
+  if (starterMinutes < 145) alerts.push({ level: 'warn', text: '선발 출전시간 총합이 낮아 경기 초반 주도권이 약해질 수 있습니다.' });
+  if (roleDiversity < 0.5) alerts.push({ level: 'info', text: '공격 역할이 편중되어 있습니다. 역할 다양성을 높이면 대응력이 좋아집니다.' });
+  if (!alerts.length) alerts.push({ level: 'ok', text: '현재 전술은 밸런스가 안정적입니다. 세부 매치업 조정만 진행하세요.' });
+  return {
+    starterMinutes,
+    benchMinutes,
+    totalMinutes,
+    roleDiversity,
+    starterShare: totalMinutes ? (starterMinutes / totalMinutes) : 0,
+    benchShare: totalMinutes ? (benchMinutes / totalMinutes) : 0,
+    alerts,
+  };
+}
+
 function buildLineupRowHtml(group, idx, row, defenseRoles) {
   const players = state.rosterRows || [];
   const playerOptions = ['<option value="">- 선택 -</option>', ...players.map((r) => `<option value="${r.player_id}" ${String(r.player_id) === String(row.pid) ? "selected" : ""}>${r.name || r.player_id}</option>`)].join("");
@@ -1632,7 +1688,7 @@ function buildLineupRowHtml(group, idx, row, defenseRoles) {
       <select data-field="pid">${playerOptions}</select>
       <select data-field="offenseRole">${offOptions}</select>
       <select data-field="defenseRole">${defOptions}</select>
-      <input data-field="minutes" type="number" min="0" max="48" value="${Number(row.minutes || 0)}" />
+      <input data-field="minutes" type="number" min="0" max="48" value="${minutesNum(row.minutes)}" />
     </div>
   `;
 }
@@ -1641,6 +1697,12 @@ function validateDefenseRoleUnique(changedEl, nextValue) {
   const all = [...document.querySelectorAll('.tactics-lineup-row select[data-field="defenseRole"]')];
   const dup = all.find((el) => el !== changedEl && el.value === nextValue);
   return !dup;
+}
+
+function updateTacticsDirtyState() {
+  const dirty = JSON.stringify(state.tacticsDraft || {}) !== JSON.stringify(state.tacticsSnapshot || {});
+  els.tacticsDirtyBadge.textContent = dirty ? '변경됨' : '초기 상태';
+  els.tacticsDirtyBadge.classList.toggle('is-dirty', dirty);
 }
 
 function bindLineupEvents() {
@@ -1654,15 +1716,20 @@ function bindLineupEvents() {
         if (!target || !field) return;
         if (field === 'defenseRole') {
           if (!validateDefenseRoleUnique(control, control.value)) {
-            alert('수비 역할은 중복 선택할 수 없습니다.');
+            rowEl.classList.add('is-error');
+            setTimeout(() => rowEl.classList.remove('is-error'), 1000);
             renderTacticsScreen();
             return;
           }
           target.defenseRole = control.value;
+          renderTacticsScreen();
           return;
         }
-        if (field === 'minutes') target.minutes = Math.max(0, Math.min(48, Number(control.value || 0)));
+        if (field === 'minutes') target.minutes = minutesNum(control.value);
         else target[field] = control.value;
+        rowEl.classList.add('is-updated');
+        setTimeout(() => rowEl.classList.remove('is-updated'), 700);
+        renderTacticsScreen();
       });
     });
   });
@@ -1674,14 +1741,37 @@ function renderTacticsRosterList() {
     : '<p class="empty-copy">로스터 데이터가 없습니다.</p>';
 }
 
+function renderTacticsInsights() {
+  const insight = computeTacticsInsights();
+  els.tacticsKpiTotalMinutes.textContent = String(insight.totalMinutes);
+  els.tacticsKpiTotalCaption.textContent = insight.totalMinutes === 240 ? '목표 240분 달성' : `목표 대비 ${240 - insight.totalMinutes > 0 ? `${240 - insight.totalMinutes}분 부족` : `${Math.abs(240 - insight.totalMinutes)}분 초과`}`;
+  els.tacticsKpiTotalCaption.className = insight.totalMinutes === 240 ? 'tactics-kpi-ok' : 'tactics-kpi-warn';
+  els.tacticsKpiStarterMinutes.textContent = (insight.starterMinutes / 5).toFixed(1);
+  els.tacticsKpiBenchMinutes.textContent = (insight.benchMinutes / 5).toFixed(1);
+  els.tacticsKpiRoleDiversity.textContent = `${Math.round(insight.roleDiversity * 100)}%`;
+  const starterShare = Math.round(insight.starterShare * 100);
+  const benchShare = Math.round(insight.benchShare * 100);
+  els.tacticsStarterShare.textContent = `${starterShare}%`;
+  els.tacticsBenchShare.textContent = `${benchShare}%`;
+  els.tacticsStarterShareBar.style.width = `${starterShare}%`;
+  els.tacticsBenchShareBar.style.width = `${benchShare}%`;
+  els.tacticsAlertFeed.innerHTML = insight.alerts
+    .map((a) => `<li class="tactics-alert-item ${a.level}">${a.text}</li>`)
+    .join('');
+}
+
 function renderTacticsScreen() {
   if (!state.tacticsDraft) return;
   const defRoles = getDefenseRolesForScheme(state.tacticsDraft.defenseScheme);
+  const teamLabel = state.selectedTeamName || TEAM_FULL_NAMES[state.selectedTeamId] || '선택 팀';
+  els.tacticsTeamContext.textContent = `${teamLabel} 전술 디렉팅 보드`;
   els.tacticsOffenseCurrent.textContent = `현재: ${tacticsSchemeLabel(TACTICS_OFFENSE_SCHEMES, state.tacticsDraft.offenseScheme)}`;
   els.tacticsDefenseCurrent.textContent = `현재: ${tacticsSchemeLabel(TACTICS_DEFENSE_SCHEMES, state.tacticsDraft.defenseScheme)}`;
   els.tacticsStarters.innerHTML = state.tacticsDraft.starters.map((r, i) => buildLineupRowHtml('starters', i, r, defRoles)).join('');
   els.tacticsRotation.innerHTML = state.tacticsDraft.rotation.map((r, i) => buildLineupRowHtml('rotation', i, r, defRoles)).join('');
   renderTacticsRosterList();
+  renderTacticsInsights();
+  updateTacticsDirtyState();
   bindLineupEvents();
 }
 
@@ -1930,6 +2020,7 @@ async function showTacticsScreen() {
     const detail = await fetchJson(`/api/team-detail/${encodeURIComponent(state.selectedTeamId)}`);
     state.rosterRows = detail.roster || [];
     if (!state.tacticsDraft) state.tacticsDraft = buildTacticsDraft(state.rosterRows);
+    state.tacticsSnapshot = deepClone(state.tacticsDraft);
     renderSchemeOptions('offense');
     renderSchemeOptions('defense');
     renderTacticsScreen();
@@ -1955,6 +2046,14 @@ els.scheduleBtn.addEventListener("click", () => showScheduleScreen().catch((e) =
 els.scheduleBackBtn.addEventListener("click", () => showMainScreen());
 els.trainingMenuBtn.addEventListener("click", () => showTrainingScreen().catch((e) => alert(e.message)));
 els.tacticsBackBtn.addEventListener("click", () => showMainScreen());
+
+els.tacticsUndoBtn.addEventListener("click", () => {
+  if (!state.tacticsSnapshot) return;
+  state.tacticsDraft = deepClone(state.tacticsSnapshot);
+  renderSchemeOptions('offense');
+  renderSchemeOptions('defense');
+  renderTacticsScreen();
+});
 els.tacticsOffenseBtn.addEventListener("click", () => toggleTacticsOptions("offense"));
 els.tacticsDefenseBtn.addEventListener("click", () => toggleTacticsOptions("defense"));
 els.standingsMenuBtn.addEventListener("click", () => showStandingsScreen().catch((e) => alert(e.message)));
