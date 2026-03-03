@@ -2366,6 +2366,208 @@ body:has(#player-detail-screen.active) .app-shell {
   color: #0f172a;
 }
 
+/* ===== My Team / Player Detail Premium UI (scoped) ===== */
+#my-team-screen .myteam-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0 14px;
+}
+#my-team-screen .myteam-overview-block {
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: linear-gradient(145deg, #f8fafc, #eef2f7);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+#my-team-screen .myteam-overview-label {
+  margin: 0 0 8px;
+  font-size: .72rem;
+  letter-spacing: .08em;
+  color: #64748b;
+  font-weight: 700;
+}
+#my-team-screen .myteam-overview-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+#my-team-screen .myteam-overview-row strong {
+  font-size: 1.08rem;
+  color: #0f172a;
+}
+#my-team-screen .myteam-overview-row span {
+  color: #475569;
+  font-size: .86rem;
+}
+#my-team-screen .myteam-command {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+#my-team-screen .myteam-command-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+#my-team-screen .myteam-chip {
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  background: #fff;
+  color: #1e293b;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: .76rem;
+  font-weight: 700;
+  letter-spacing: .03em;
+  cursor: pointer;
+  transition: all .16s ease;
+}
+#my-team-screen .myteam-chip:hover {
+  border-color: rgba(15, 23, 42, 0.34);
+  transform: translateY(-1px);
+}
+#my-team-screen .myteam-chip.is-active {
+  background: linear-gradient(180deg, #1e293b, #0f172a);
+  color: #f8fafc;
+  border-color: #0f172a;
+}
+#my-team-screen .myteam-name-cell {
+  display: grid;
+  gap: 2px;
+}
+#my-team-screen .myteam-name-cell strong { font-size: .95rem; }
+#my-team-screen .myteam-name-cell span {
+  color: #64748b;
+  font-size: .72rem;
+}
+#my-team-screen .myteam-ovr-pill {
+  display: inline-block;
+  min-width: 42px;
+  text-align: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #111827, #020617);
+  color: #f8fafc;
+  font-weight: 700;
+}
+#my-team-screen .sharpness-badge.is-risk {
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.45);
+}
+
+#player-detail-screen .player-layout-v2 {
+  grid-template-columns: minmax(0, 2.15fr) minmax(280px, 0.85fr);
+  grid-template-areas:
+    "header contract"
+    "attr dissatisfaction"
+    "attr health"
+    "stats stats";
+}
+#player-detail-screen .detail-card-hero {
+  background: linear-gradient(120deg, rgba(15,23,42,0.9), rgba(30,41,59,0.86));
+  color: #e2e8f0;
+  border-color: rgba(255,255,255,0.14);
+}
+#player-detail-screen .detail-card-hero h3,
+#player-detail-screen .detail-card-hero .detail-subline,
+#player-detail-screen .detail-card-hero .detail-eyebrow,
+#player-detail-screen .detail-card-hero .hero-summary { color: #e2e8f0; }
+#player-detail-screen .detail-eyebrow {
+  margin: 0 0 6px;
+  font-size: .72rem;
+  letter-spacing: .08em;
+  color: #64748b;
+  font-weight: 700;
+}
+#player-detail-screen .hero-summary {
+  margin: 10px 0 0;
+  font-size: .86rem;
+  opacity: .9;
+}
+#player-detail-screen .hero-kpi-stack {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+#player-detail-screen .ovr-medal {
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  background: linear-gradient(180deg, #f59e0b, #b45309);
+  color: #fff;
+}
+#player-detail-screen .hero-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 4px 0 10px;
+}
+#player-detail-screen .hero-stat {
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(15, 23, 42, 0.26);
+}
+#player-detail-screen .hero-stat p {
+  margin: 0;
+  font-size: .74rem;
+  color: #94a3b8;
+}
+#player-detail-screen .hero-stat strong {
+  font-size: 1.08rem;
+}
+#player-detail-screen .attr-intel-grid {
+  display: grid;
+  gap: 8px;
+}
+#player-detail-screen .attr-intel-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 40px;
+  align-items: center;
+  gap: 10px;
+}
+#player-detail-screen .attr-meter {
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(148, 163, 184, 0.28);
+}
+#player-detail-screen .attr-meter i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #60a5fa, #38bdf8);
+}
+#player-detail-screen .attr-intel-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 14px;
+}
+#player-detail-screen .intel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+#player-detail-screen .intel-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: rgba(15,23,42,0.22);
+}
+
+@media (max-width: 1200px) {
+  #my-team-screen .myteam-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #player-detail-screen .hero-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  #my-team-screen .myteam-overview { grid-template-columns: 1fr; }
+  #player-detail-screen .attr-intel-columns { grid-template-columns: 1fr; }
 /* ===== Tactics Command Center (scoped) ===== */
 #tactics-screen .tactics-shell {
   background: linear-gradient(160deg, #ffffff 0%, #f8fbff 55%, #f3f7ff 100%);
