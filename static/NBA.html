@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NBA 시뮬레이션 게임</title>
+  <link rel="stylesheet" href="/static/NBA.css" />
+</head>
+<body>
+  <div class="bg-overlay"></div>
+  <main class="app-shell">
+    <section id="start-screen" class="panel active">
+      <div class="start-hero-shell">
+        <div class="start-hero-main">
+          <p class="eyebrow">NBA SIMULATION GM</p>
+          <h1>NBA 시뮬레이션 게임</h1>
+          <p class="subtitle">30개 팀 중 하나를 선택하고, 트레이드·전술·훈련으로 왕조를 만들어보세요.</p>
+
+          <div class="start-badges" aria-label="게임 핵심 포인트">
+            <span>82경기 시즌 운영</span>
+            <span>전술/라인업 커스터마이즈</span>
+            <span>프랜차이즈 장기 운영</span>
+          </div>
+
+          <div class="button-group">
+            <button id="new-game-btn" class="btn btn-primary">새 게임</button>
+            <button id="continue-btn" class="btn btn-secondary" disabled aria-disabled="true">이어하기</button>
+          </div>
+
+          <p id="continue-hint" class="hint">저장된 게임을 확인하는 중...</p>
+        </div>
+
+        <aside class="start-hero-side" aria-label="게임 안내 카드">
+          <article class="start-info-card">
+            <h3>GM 체크리스트</h3>
+            <ul>
+              <li>팀 선택 후 로스터 상태 확인</li>
+              <li>전술 탭에서 공/수 스킴 설정</li>
+              <li>스케쥴 기반으로 훈련 강도 조절</li>
+            </ul>
+          </article>
+          <article class="start-info-card">
+            <h3>오늘의 목표</h3>
+            <p>팀 케미스트리와 수비 안정성을 먼저 잡으면 시즌 초반 승률이 크게 개선됩니다.</p>
+          </article>
+        </aside>
+      </div>
+    </section>
+
+    <section id="team-screen" class="panel" aria-hidden="true">
+      <p class="eyebrow">FRANCHISE SELECT</p>
+      <h2>운영할 팀을 선택하세요</h2>
+      <p class="subtitle">동부/서부 컨퍼런스와 디비전 구조를 기준으로 팀을 확인하고 GM 커리어를 시작하세요.</p>
+      <div id="team-grid" class="team-grid"></div>
+    </section>
+
+    <section id="main-screen" class="panel" aria-hidden="true">
+      <header class="top-league-nav" aria-label="메인 메뉴 탭">
+        <div class="top-league-brand">NBA</div>
+        <nav class="top-league-tabs">
+          <button type="button" class="top-league-tab is-active">Home</button>
+          <button type="button" id="my-team-btn" class="top-league-tab">내 팀</button>
+          <button type="button" id="tactics-menu-btn" class="top-league-tab">전술</button>
+          <button type="button" id="schedule-btn" class="top-league-tab">스케쥴</button>
+          <button type="button" id="training-menu-btn" class="top-league-tab">훈련</button>
+          <button type="button" id="standings-menu-btn" class="top-league-tab">순위</button>
+          <button type="button" id="college-menu-btn" class="top-league-tab">대학</button>
+          <button type="button" class="top-league-tab">시장</button>
+          <button type="button" id="medical-menu-btn" class="top-league-tab">메디컬 센터</button>
+        </nav>
+      </header>
+
+      <section class="main-overview">
+        <div class="main-overview-header">
+          <div>
+            <p class="eyebrow">MY FRANCHISE</p>
+            <h2 id="main-team-title">팀 이름</h2>
+          </div>
+          <div class="franchise-header-actions">
+            <span id="main-current-date" class="franchise-date">YYYY-MM-DD</span>
+            <button type="button" id="quick-save-btn" class="btn btn-secondary">빠른 저장</button>
+            <button type="button" id="settings-btn" class="btn btn-secondary">설정</button>
+          </div>
+        </div>
+
+        <section class="next-game-panel" aria-label="다음 경기">
+          <h3 class="next-game-title">다음 경기</h3>
+
+          <div class="next-game-team-row">
+            <div class="next-game-team-name" id="team-a-name">Team A</div>
+            <div class="next-game-vs">VS</div>
+            <div class="next-game-team-name" id="team-b-name">Team B</div>
+          </div>
+
+          <div class="next-game-logo-row">
+            <div id="team-a-logo" class="team-logo-placeholder" aria-label="Home 팀 로고"></div>
+            <div id="team-b-logo" class="team-logo-placeholder" aria-label="Away 팀 로고"></div>
+          </div>
+
+          <div class="next-game-meta-row">
+            <span class="home-away-label">Home</span>
+            <span id="next-game-arena" class="arena-name"></span>
+            <span class="home-away-label">Away</span>
+          </div>
+
+          <p id="next-game-datetime" class="next-game-datetime">YYYY-MM-DD --:-- PM</p>
+
+          <div class="next-game-actions">
+            <button type="button" class="menu-card next-game-action-btn">경기 진행</button>
+            <button type="button" id="next-game-tactics-btn" class="menu-card next-game-action-btn">전술</button>
+            <button type="button" class="menu-card next-game-action-btn">빠른 진행</button>
+          </div>
+        </section>
+      </section>
+    </section>
+
+    <section id="schedule-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row">
+        <div>
+          <p class="eyebrow">SCHEDULE</p>
+          <h2 id="schedule-title">정규 시즌 일정</h2>
+          <p class="subtitle">완료 경기 결과와 예정 경기를 한눈에 확인합니다.</p>
+        </div>
+        <button id="schedule-back-btn" class="btn btn-secondary" type="button">메인으로</button>
+      </div>
+
+      <div class="schedule-shell">
+        <article class="schedule-card">
+          <div class="schedule-card-head">
+            <h3>완료 경기</h3>
+            <p class="schedule-meta">DATE · OPPONENT · RESULT · W-L · HI PTS/REB/AST</p>
+          </div>
+          <div class="schedule-table-wrap">
+            <table class="schedule-table schedule-table-completed">
+              <thead>
+                <tr>
+                  <th>DATE</th>
+                  <th>OPPONENT</th>
+                  <th>RESULT</th>
+                  <th>W-L</th>
+                  <th>Hi Points</th>
+                  <th>Hi Rebounds</th>
+                  <th>Hi Assists</th>
+                </tr>
+              </thead>
+              <tbody id="schedule-completed-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="schedule-card">
+          <div class="schedule-card-head">
+            <h3>예정 경기</h3>
+            <p class="schedule-meta">DATE · OPPONENT · TIME</p>
+          </div>
+          <div class="schedule-table-wrap">
+            <table class="schedule-table schedule-table-upcoming">
+              <thead>
+                <tr>
+                  <th>DATE</th>
+                  <th>OPPONENT</th>
+                  <th>TIME</th>
+                </tr>
+              </thead>
+              <tbody id="schedule-upcoming-body"></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="my-team-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row">
+        <div>
+          <p class="eyebrow">MY TEAM</p>
+          <h2 id="my-team-title">내 팀 선수단</h2>
+          <p class="subtitle">선수를 클릭하면 상세 정보를 확인할 수 있습니다.</p>
+        </div>
+        <button id="back-to-main-btn" class="btn btn-secondary" type="button">메인으로</button>
+      </div>
+
+      <div class="roster-shell">
+        <div class="roster-table-wrap">
+          <table class="roster-table">
+            <thead>
+              <tr>
+                <th>선수명</th>
+                <th>포지션</th>
+                <th>나이</th>
+                <th>키</th>
+                <th>몸무게</th>
+                <th>샐러리</th>
+                <th class="condition-col">컨디션</th>
+                <th>경기력</th>
+              </tr>
+            </thead>
+            <tbody id="my-team-roster-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+
+
+
+
+    <section id="tactics-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row">
+        <div>
+          <p class="eyebrow">TACTICS</p>
+          <h2>전술 설정</h2>
+          <p class="subtitle">공/수 스킴, 라인업, 역할, 출전 시간을 설정합니다.</p>
+        </div>
+        <button id="tactics-back-btn" class="btn btn-secondary" type="button">메인으로</button>
+      </div>
+
+      <section class="tactics-shell">
+        <div class="tactics-scheme-row">
+          <div class="tactics-scheme-picker">
+            <button type="button" id="tactics-offense-btn" class="btn btn-secondary">공격 스킴</button>
+            <div id="tactics-offense-options" class="tactics-options hidden"></div>
+            <p id="tactics-offense-current" class="tactics-current-copy"></p>
+          </div>
+          <div class="tactics-scheme-picker">
+            <button type="button" id="tactics-defense-btn" class="btn btn-secondary">수비 스킴</button>
+            <div id="tactics-defense-options" class="tactics-options hidden"></div>
+            <p id="tactics-defense-current" class="tactics-current-copy"></p>
+          </div>
+        </div>
+
+        <div class="tactics-lineup-grid">
+          <article>
+            <h3>선발</h3>
+            <div class="tactics-lineup-head"><span>선수</span><span>공격 역할</span><span>수비 역할</span><span>출전 시간</span></div>
+            <div id="tactics-starters" class="tactics-lineup-body"></div>
+          </article>
+          <article>
+            <h3>로테이션</h3>
+            <div class="tactics-lineup-head"><span>선수</span><span>공격 역할</span><span>수비 역할</span><span>출전 시간</span></div>
+            <div id="tactics-rotation" class="tactics-lineup-body"></div>
+          </article>
+        </div>
+
+        <section class="tactics-roster-box">
+          <h3>로스터 선수</h3>
+          <div id="tactics-roster-list" class="tactics-roster-list"></div>
+        </section>
+      </section>
+    </section>
+
+
+    <section id="training-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row">
+        <div>
+          <p class="eyebrow">TRAINING</p>
+          <h2>훈련 설정</h2>
+          <p class="subtitle">팀 훈련 캘린더와 세션을 설정합니다.</p>
+        </div>
+        <button id="training-back-btn" class="btn btn-secondary" type="button">메인으로</button>
+      </div>
+
+      <div class="training-top-tabs">
+        <button id="team-training-tab-btn" type="button" class="btn btn-secondary is-active">팀 훈련</button>
+        <button id="player-training-tab-btn" type="button" class="btn btn-secondary" disabled aria-disabled="true">개인 훈련 (준비중)</button>
+      </div>
+
+      <section class="training-calendar-panel">
+        <div id="training-calendar-grid" class="training-calendar-grid"></div>
+      </section>
+
+      <div class="training-type-buttons" id="training-type-buttons">
+        <button type="button" data-training-type="OFF_TACTICS" class="btn btn-secondary">공격 전술 훈련</button>
+        <button type="button" data-training-type="DEF_TACTICS" class="btn btn-secondary">수비 전술 훈련</button>
+        <button type="button" data-training-type="FILM" class="btn btn-secondary">필름/영상 훈련</button>
+        <button type="button" data-training-type="SCRIMMAGE" class="btn btn-secondary">청백전</button>
+        <button type="button" data-training-type="RECOVERY" class="btn btn-secondary">휴식 훈련</button>
+        <button type="button" data-training-type="REST" class="btn btn-secondary">훈련 없음</button>
+      </div>
+
+      <section id="training-detail-panel" class="training-detail-panel">
+        <p class="empty-copy">캘린더에서 날짜를 선택하고 훈련 버튼을 눌러 세부 설정을 확인하세요.</p>
+      </section>
+    </section>
+
+    <section id="standings-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row">
+        <div>
+          <p class="eyebrow">STANDINGS</p>
+          <h2>컨퍼런스 순위표</h2>
+          <p class="subtitle">정규시즌 확정 경기 기준 팀 순위를 확인합니다.</p>
+        </div>
+        <button id="standings-back-btn" class="btn btn-secondary" type="button">메인으로</button>
+      </div>
+
+      <div class="standings-grid">
+        <section class="standings-card">
+          <div class="standings-card-header">
+            <h3>Eastern Conference</h3>
+          </div>
+          <div class="standings-table-wrap">
+            <table class="standings-table">
+              <thead>
+                <tr>
+                  <th>RK</th><th>TEAM</th><th>W</th><th>L</th><th>PCT</th><th>GB</th>
+                  <th>HOME</th><th>AWAY</th><th>DIV</th><th>CONF</th>
+                  <th>PPG</th><th>OPP PPG</th><th>DIFF</th><th>STRK</th><th>L10</th>
+                </tr>
+              </thead>
+              <tbody id="standings-east-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="standings-card">
+          <div class="standings-card-header">
+            <h3>Western Conference</h3>
+          </div>
+          <div class="standings-table-wrap">
+            <table class="standings-table">
+              <thead>
+                <tr>
+                  <th>RK</th><th>TEAM</th><th>W</th><th>L</th><th>PCT</th><th>GB</th>
+                  <th>HOME</th><th>AWAY</th><th>DIV</th><th>CONF</th>
+                  <th>PPG</th><th>OPP PPG</th><th>DIFF</th><th>STRK</th><th>L10</th>
+                </tr>
+              </thead>
+              <tbody id="standings-west-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="college-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row">
+        <div>
+          <p class="eyebrow">COLLEGE LEAGUE</p>
+          <h2>대학 리그</h2>
+          <p class="subtitle" id="college-meta-line">대학 팀 순위, 리더보드, 빅보드, 스카우팅을 관리합니다.</p>
+        </div>
+        <button id="college-back-btn" class="btn btn-secondary" type="button">메인으로</button>
+      </div>
+
+      <div class="college-tab-row">
+        <button id="college-tab-teams" type="button" class="btn btn-secondary is-active">팀 순위</button>
+        <button id="college-tab-leaders" type="button" class="btn btn-secondary">리더보드</button>
+        <button id="college-tab-bigboard" type="button" class="btn btn-secondary">빅보드</button>
+        <button id="college-tab-scouting" type="button" class="btn btn-secondary">스카우팅</button>
+      </div>
+
+      <section id="college-panel-teams" class="college-panel active" aria-hidden="false">
+        <div class="college-two-col">
+          <article class="college-card">
+            <h3>대학 팀 순위</h3>
+            <div class="college-table-wrap">
+              <table class="college-table">
+                <thead>
+                  <tr>
+                    <th>RK</th><th>팀</th><th>컨퍼런스</th><th>W</th><th>L</th><th>SRS</th>
+                  </tr>
+                </thead>
+                <tbody id="college-teams-body"></tbody>
+              </table>
+            </div>
+          </article>
+          <article class="college-card">
+            <h3 id="college-roster-title">팀 로스터</h3>
+            <div class="college-table-wrap">
+              <table class="college-table">
+                <thead>
+                  <tr>
+                    <th>선수</th><th>포지션</th><th>학년</th><th>PTS</th><th>REB</th><th>AST</th>
+                  </tr>
+                </thead>
+                <tbody id="college-roster-body"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="college-panel-leaders" class="college-panel" aria-hidden="true">
+        <article class="college-card">
+          <div class="college-card-head-inline">
+            <h3>대학 리더보드</h3>
+            <label>정렬
+              <select id="college-leader-sort"></select>
+            </label>
+          </div>
+          <div class="college-table-wrap">
+            <table class="college-table">
+              <thead>
+                <tr>
+                  <th>RK</th><th>선수</th><th>팀</th><th>POS</th><th>PTS</th><th>REB</th><th>AST</th><th>STL</th><th>BLK</th>
+                </tr>
+              </thead>
+              <tbody id="college-leaders-body"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section id="college-panel-bigboard" class="college-panel" aria-hidden="true">
+        <article class="college-card">
+          <div class="college-card-head-inline">
+            <h3>전문가 빅보드</h3>
+            <label>전문가
+              <select id="college-expert-select"></select>
+            </label>
+          </div>
+          <div class="college-table-wrap">
+            <table class="college-table">
+              <thead>
+                <tr>
+                  <th>RANK</th><th>선수</th><th>POS</th><th>TIER</th><th>요약</th>
+                </tr>
+              </thead>
+              <tbody id="college-bigboard-body"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section id="college-panel-scouting" class="college-panel" aria-hidden="true">
+        <div class="college-two-col">
+          <article class="college-card">
+            <h3>스카우터 배정</h3>
+            <div class="college-form-grid">
+              <label>스카우터<select id="college-scout-select"></select></label>
+              <label>대상 선수<select id="college-scout-player-select"></select></label>
+              <div class="college-actions-row">
+                <button id="college-assign-btn" type="button" class="btn btn-primary">배정</button>
+                <button id="college-unassign-btn" type="button" class="btn btn-secondary">해제</button>
+              </div>
+            </div>
+          </article>
+          <article class="college-card">
+            <h3>스카우팅 리포트</h3>
+            <div class="college-table-wrap">
+              <table class="college-table">
+                <thead>
+                  <tr>
+                    <th>날짜</th><th>스카우터</th><th>선수</th><th>상태</th><th>요약</th>
+                  </tr>
+                </thead>
+                <tbody id="college-reports-body"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+    </section>
+
+
+    <section id="medical-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row">
+        <div>
+          <p class="eyebrow">MEDICAL CENTER</p>
+          <h2 id="medical-title">메디컬 센터</h2>
+          <p class="subtitle">부상 위험, 결장/복귀 현황, 건강 불만 신호를 통합적으로 관리합니다.</p>
+        </div>
+        <button id="medical-back-btn" class="btn btn-secondary" type="button">메인으로</button>
+      </div>
+
+      <section id="medical-alert-bar" class="medical-alert-bar">
+        <div class="medical-alert-main">
+          <p class="medical-alert-label">PRIMARY ALERT</p>
+          <h3 id="medical-alert-text">현재 주요 경고가 없습니다.</h3>
+          <p id="medical-alert-meta" class="medical-sub">리스크 변동이 감지되면 여기에 표시됩니다.</p>
+        </div>
+        <div class="medical-alert-actions">
+          <span id="medical-alert-level" class="medical-alert-badge">INFO</span>
+          <button id="medical-alert-open-player" class="btn btn-secondary" type="button">선수 상세</button>
+          <button id="medical-alert-open-action" class="btn btn-secondary" type="button">권고안 보기</button>
+        </div>
+      </section>
+
+      <section class="medical-summary-grid" id="medical-summary-grid">
+        <article class="medical-card medical-kpi-card"><h3>로스터 인원</h3><p id="medical-roster-count" class="medical-big">-</p><p id="medical-roster-delta" class="medical-delta">-</p></article>
+        <article class="medical-card medical-kpi-card"><h3>현재 결장</h3><p id="medical-out-count" class="medical-big">-</p><p id="medical-returning-count" class="medical-sub">복귀 관리: -</p><p id="medical-out-delta" class="medical-delta">-</p></article>
+        <article class="medical-card medical-kpi-card"><h3>고위험 선수</h3><p id="medical-high-risk-count" class="medical-big">-</p><p class="medical-sub">HIGH tier</p><p id="medical-high-risk-delta" class="medical-delta">-</p></article>
+        <article class="medical-card medical-kpi-card"><h3>건강 불만</h3><p id="medical-health-frustration-count" class="medical-big">-</p><p class="medical-sub">health_frustration ≥ 0.5</p><p id="medical-health-delta" class="medical-delta">-</p></article>
+      </section>
+
+      <section class="medical-layout medical-layout-primary">
+        <article class="medical-card">
+          <div class="medical-head-row"><h3>리스크 워치리스트</h3><span id="medical-as-of" class="medical-chip">-</span></div>
+          <div class="medical-table-wrap">
+            <table class="medical-table">
+              <thead><tr><th>선수</th><th>상태</th><th>위험</th><th>컨디션</th><th>Sharp</th><th>재부상</th></tr></thead>
+              <tbody id="medical-risk-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="medical-card medical-context-panel">
+          <h3>선수 컨텍스트</h3>
+          <p id="medical-timeline-title" class="medical-sub">워치리스트에서 선수를 선택하세요.</p>
+          <div id="medical-timeline-list" class="medical-timeline-list"></div>
+          <div class="medical-action-block">
+            <h4>권고 액션</h4>
+            <div id="medical-action-list" class="medical-action-list"><p class="empty-copy">권고안이 없습니다.</p></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="medical-layout">
+        <article class="medical-card">
+          <h3>결장/복귀 현황</h3>
+          <div class="medical-table-wrap">
+            <table class="medical-table">
+              <thead><tr><th>선수</th><th>상태</th><th>부위</th><th>복귀 일정</th></tr></thead>
+              <tbody id="medical-injured-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="medical-card">
+          <h3>건강 불만 Top</h3>
+          <div class="medical-table-wrap">
+            <table class="medical-table">
+              <thead><tr><th>선수</th><th>불만도</th><th>요청 단계</th><th>에스컬레이션</th></tr></thead>
+              <tbody id="medical-health-body"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="medical-card medical-calendar-panel">
+        <div class="medical-head-row">
+          <h3>Risk Calendar (14일)</h3>
+          <span class="medical-chip">경기/훈련/리스크 통합</span>
+        </div>
+        <div id="medical-risk-calendar-list" class="medical-risk-calendar-list"></div>
+      </section>
+    </section>
+
+
+    <section id="player-detail-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row">
+        <div>
+          <p class="eyebrow">PLAYER PROFILE</p>
+          <h2 id="player-detail-title">선수 상세 정보</h2>
+          <p class="subtitle">선수의 컨디션, 계약, 불만 및 시즌 스탯을 한 화면에서 확인할 수 있습니다.</p>
+        </div>
+        <button id="back-to-roster-btn" class="btn btn-secondary" type="button">선수단으로</button>
+      </div>
+
+      <article id="player-detail-panel" class="player-detail-panel">
+        <div id="player-detail-content"></div>
+      </article>
+    </section>
+  </main>
+
+  <div id="loading-overlay" class="loading-overlay hidden" role="status" aria-live="polite">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <p id="loading-text">새 게임을 준비하는 중입니다...</p>
+    </div>
+  </div>
+
+  <script src="/static/NBA.js" defer></script>
+</body>
+</html>
