@@ -1533,18 +1533,100 @@ function buildSchemeRows(schemeType) {
   }));
 }
 
+function trainingImpactLevelLabel(score) {
+  if (score >= 2.5) return "매우 높음";
+  if (score >= 1.2) return "높음";
+  if (score > 0.1) return "보통";
+  if (score >= -0.4) return "낮음";
+  return "매우 낮음";
+}
+
+function trainingRhythmLabel(avgSharpnessDelta) {
+  if (avgSharpnessDelta >= 1.2) return "실전 감각이 크게 올라갑니다.";
+  if (avgSharpnessDelta >= 0.4) return "실전 감각 유지에 도움이 됩니다.";
+  if (avgSharpnessDelta > -0.2) return "실전 감각 변화는 제한적입니다.";
+  return "실전 감각이 떨어질 수 있어 경기 투입 전 점검이 필요합니다.";
+}
+
+function trainingLoadLabel(avgIntensity) {
+  if (avgIntensity >= 1.12) return { label: "높음", tone: "is-caution" };
+  if (avgIntensity >= 0.95) return { label: "보통", tone: "is-neutral" };
+  return { label: "낮음", tone: "is-positive" };
+}
+
+function trainingImpactTone(levelLabel) {
+  if (["매우 높음", "높음"].includes(levelLabel)) return "is-positive";
+  if (levelLabel === "보통") return "is-neutral";
+  return "is-caution";
+}
+
 function renderPreviewText(preview) {
   if (!preview) return '<p class="empty-copy">효과 프리뷰를 불러오지 못했습니다.</p>';
-  const multByPid = Object.values(preview.preview?.intensity_mult_by_pid || {});
-  const avgSharpness = multByPid.length
-    ? (multByPid.reduce((a, x) => a + Number(x.sharpness_delta || 0), 0) / multByPid.length).toFixed(2)
-    : "0.00";
+  const byPidRows = Object.values(preview.preview?.intensity_mult_by_pid || {});
+  const avgSharpnessDelta = byPidRows.length
+    ? (byPidRows.reduce((a, x) => a + Number(x.sharpness_delta || 0), 0) / byPidRows.length)
+    : 0;
+  const avgIntensity = byPidRows.length
+    ? (byPidRows.reduce((a, x) => a + Number(x.intensity_mult || 1), 0) / byPidRows.length)
+    : 1;
+
+  const offenseGain = Number(preview.preview?.familiarity_gain?.offense_gain || 0);
+  const defenseGain = Number(preview.preview?.familiarity_gain?.defense_gain || 0);
+  const offenseLevel = trainingImpactLevelLabel(offenseGain);
+  const defenseLevel = trainingImpactLevelLabel(defenseGain);
+  const rhythmCopy = trainingRhythmLabel(avgSharpnessDelta);
+  const load = trainingLoadLabel(avgIntensity);
+
+  const dateIso = String(preview.date_iso || "").slice(0, 10);
+  const risk = dateIso ? buildTrainingRiskFlags(dateIso) : { level: "low", reason: "일반 일정" };
+  const riskKorean = risk.level === "high" ? "높음" : (risk.level === "medium" ? "주의" : "안정");
+
+  const sessionType = String(preview.session?.type || "").toUpperCase();
+  const participantCount = Array.isArray(preview.session?.participant_pids) ? preview.session.participant_pids.length : 0;
+  const scopeCopy = sessionType === "SCRIMMAGE"
+    ? `청백전 참여 선수 중심으로 강도가 높고, 비참여 선수는 ${trainingTypeLabel(preview.session?.non_participant_type)} 루틴을 따릅니다.`
+    : "해당 날짜 로스터 전체에 동일한 훈련 컨셉이 적용됩니다.";
+
+  const coachLine = (() => {
+    if (risk.level === "high" && ["OFF_TACTICS", "DEF_TACTICS", "SCRIMMAGE"].includes(sessionType)) {
+      return "경기 인접 일정입니다. 고강도 세션보다 필름/회복 중심 구성이 더 안전합니다.";
+    }
+    if (load.label === "높음") {
+      return "훈련 완성도는 좋지만 누적 부담이 큽니다. 다음 일정에 회복 세션을 고려하세요.";
+    }
+    if (sessionType === "FILM") {
+      return "전술 이해도와 경기 집중력을 안정적으로 끌어올리는 선택입니다.";
+    }
+    return "현재 일정에서는 균형 잡힌 선택입니다.";
+  })();
+
   return `
-    <ul class="kv-list training-preview-list">
-      <li>공격 익숙도 gain: <strong>${preview.preview?.familiarity_gain?.offense_gain ?? 0}</strong></li>
-      <li>수비 익숙도 gain: <strong>${preview.preview?.familiarity_gain?.defense_gain ?? 0}</strong></li>
-      <li>평균 샤프니스 delta: <strong>${avgSharpness}</strong></li>
-    </ul>
+    <div class="training-preview-report">
+      <div class="training-preview-row">
+        <p class="training-preview-head">기대 효과</p>
+        <ul class="kv-list training-preview-list">
+          <li><span>공격 조직력</span><strong class="${trainingImpactTone(offenseLevel)}">${offenseLevel}</strong></li>
+          <li><span>수비 조직력</span><strong class="${trainingImpactTone(defenseLevel)}">${defenseLevel}</strong></li>
+          <li><span>실전 감각</span><strong class="is-neutral">${rhythmCopy}</strong></li>
+        </ul>
+      </div>
+      <div class="training-preview-row">
+        <p class="training-preview-head">부담도</p>
+        <ul class="kv-list training-preview-list">
+          <li><span>훈련 강도 부담</span><strong class="${load.tone}">${load.label}</strong></li>
+          <li><span>일정 리스크</span><strong class="${risk.level === "high" ? "is-caution" : "is-neutral"}">${riskKorean} · ${risk.reason}</strong></li>
+        </ul>
+      </div>
+      <div class="training-preview-row">
+        <p class="training-preview-head">적용 범위</p>
+        <p class="training-preview-copy">${scopeCopy}</p>
+        ${sessionType === "SCRIMMAGE" ? `<p class="training-preview-subcopy">청백전 참여 인원: ${participantCount}명</p>` : ""}
+      </div>
+      <div class="training-preview-row training-preview-coach">
+        <p class="training-preview-head">코치 코멘트</p>
+        <p class="training-preview-copy">${coachLine}</p>
+      </div>
+    </div>
   `;
 }
 
