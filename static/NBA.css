@@ -1975,3 +1975,483 @@ body:has(#player-detail-screen.active) .app-shell {
   background: rgba(255, 255, 255, 0.94);
   color: #0f172a;
 }
+
+/* ===== Main Home Premium Refresh (scoped to #main-screen) ===== */
+#main-screen {
+  --home-bg: #090d16;
+  --home-surface: #111827;
+  --home-surface-2: #151f30;
+  --home-line: rgba(148, 163, 184, 0.28);
+  --home-text: #f8fafc;
+  --home-muted: #94a3b8;
+  --home-accent: #5b8cff;
+  --home-accent-2: #ef4f93;
+  background:
+    radial-gradient(circle at 14% -12%, rgba(91, 140, 255, 0.22), transparent 38%),
+    radial-gradient(circle at 88% -10%, rgba(239, 79, 147, 0.22), transparent 32%),
+    linear-gradient(180deg, #090d16, #0a101c 40%, #0d1422);
+  color: var(--home-text);
+}
+
+#main-screen .top-league-nav {
+  margin-top: 12px;
+  padding: 0 18px;
+  border: 1px solid var(--home-line);
+  border-radius: 16px;
+  background: rgba(11, 19, 32, 0.86);
+  box-shadow: 0 14px 28px rgba(2, 6, 23, 0.32);
+}
+
+#main-screen .top-league-brand {
+  color: #f8fafc;
+  border-right-color: rgba(148, 163, 184, 0.28);
+}
+
+#main-screen .top-league-tab {
+  color: #9fb0c9;
+  border-radius: 10px;
+  border-bottom: none;
+  padding: 11px 14px;
+  margin: 8px 0;
+}
+
+#main-screen .top-league-tab:hover {
+  color: #f8fafc;
+  background: rgba(91, 140, 255, 0.16);
+}
+
+#main-screen .top-league-tab.is-active {
+  background: rgba(91, 140, 255, 0.28);
+  color: #f8fafc;
+  box-shadow: inset 0 0 0 1px rgba(151, 182, 255, 0.42);
+}
+
+#main-screen .main-overview {
+  margin-top: 26px;
+  display: grid;
+  gap: 18px;
+}
+
+#main-screen .main-overview h2 {
+  color: #f8fafc;
+}
+
+#main-screen .main-overview .eyebrow {
+  color: #8da2c0;
+}
+
+#main-screen .franchise-date {
+  color: #e4ecff;
+  background: rgba(16, 24, 38, 0.9);
+  border: 1px solid var(--home-line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+#main-screen .btn-secondary {
+  background: linear-gradient(180deg, #1e293b, #172233);
+  border-color: rgba(148, 163, 184, 0.44);
+  color: #dbeafe;
+}
+
+#main-screen .btn-secondary:hover {
+  border-color: rgba(191, 219, 254, 0.85);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.45);
+}
+
+#main-screen .franchise-command-bar,
+#main-screen .next-game-panel,
+#main-screen .intel-card {
+  border: 1px solid var(--home-line);
+  border-radius: 16px;
+  background: linear-gradient(170deg, rgba(17, 24, 39, 0.92), rgba(13, 21, 35, 0.92));
+  box-shadow: 0 16px 28px rgba(2, 6, 23, 0.28);
+}
+
+#main-screen .franchise-command-bar {
+  display: grid;
+  grid-template-columns: 1.3fr 2fr 1.3fr;
+  gap: 16px;
+  padding: 18px;
+}
+
+#main-screen .command-label {
+  margin: 0;
+  color: var(--home-muted);
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .14em;
+}
+
+#main-screen .command-value {
+  margin: 8px 0 4px;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+#main-screen .command-sub {
+  margin: 0;
+  color: #bed0ea;
+  font-size: .9rem;
+}
+
+#main-screen .command-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+#main-screen .kpi-item {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.56);
+}
+
+#main-screen .kpi-item p {
+  margin: 0 0 6px;
+  color: var(--home-muted);
+  font-size: .8rem;
+}
+
+#main-screen .kpi-item strong {
+  font-size: 1.15rem;
+  color: #f8fafc;
+}
+
+#main-screen .command-status {
+  display: grid;
+  gap: 8px;
+  align-content: center;
+}
+
+#main-screen .status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  background: rgba(15, 23, 42, 0.5);
+  color: #dbeafe;
+  font-weight: 600;
+  font-size: .84rem;
+  padding: 0 12px;
+}
+
+#main-screen .status-badge.warn {
+  border-color: rgba(245, 158, 11, 0.55);
+  color: #fde68a;
+}
+
+#main-screen .status-badge.danger {
+  border-color: rgba(248, 113, 113, 0.6);
+  color: #fecaca;
+}
+
+#main-screen .next-game-panel {
+  padding: 24px;
+  display: grid;
+  gap: 16px;
+}
+
+#main-screen .next-game-panel::before {
+  display: none;
+}
+
+#main-screen .next-game-header {
+  display: grid;
+  gap: 2px;
+  text-align: center;
+}
+
+#main-screen .next-game-kicker {
+  margin: 0;
+  letter-spacing: .14em;
+  color: #95a9c5;
+  font-size: .72rem;
+}
+
+#main-screen .next-game-title {
+  margin: 0;
+  color: #f8fafc;
+  font-size: clamp(1.8rem, 2.7vw, 2.45rem);
+}
+
+#main-screen .next-game-team-row,
+#main-screen .next-game-logo-row,
+#main-screen .next-game-meta-row {
+  grid-template-columns: 1fr 190px 1fr;
+}
+
+#main-screen .next-game-team-name {
+  color: #eef2ff;
+  font-size: clamp(1.45rem, 2.6vw, 2.3rem);
+}
+
+#main-screen .next-game-vs {
+  color: #90a4c2;
+}
+
+#main-screen .next-game-center-meta {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+
+#main-screen .team-logo-placeholder {
+  width: 126px;
+  height: 126px;
+  display: grid;
+  place-items: center;
+  font-size: 1.25rem;
+  font-weight: 900;
+  letter-spacing: .04em;
+  color: #e2e8f0;
+  border-color: rgba(148, 163, 184, 0.45);
+  background:
+    radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0) 48%),
+    linear-gradient(155deg, rgba(91, 140, 255, 0.28), rgba(239, 79, 147, 0.24));
+  box-shadow: inset 0 0 0 1px rgba(203, 213, 225, 0.2), 0 10px 20px rgba(2, 6, 23, 0.35);
+}
+
+#main-screen .countdown-chip {
+  border-radius: 999px;
+  border: 1px solid rgba(110, 231, 183, 0.5);
+  color: #bbf7d0;
+  font-size: .75rem;
+  padding: 6px 12px;
+  background: rgba(20, 83, 45, 0.3);
+}
+
+#main-screen .arena-name {
+  color: #c9d7ed;
+}
+
+#main-screen .next-game-meta-row {
+  border-top-color: rgba(148, 163, 184, 0.24);
+  border-bottom-color: rgba(148, 163, 184, 0.24);
+}
+
+#main-screen .next-game-datetime {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 1.02rem;
+}
+
+#main-screen .home-away-label {
+  color: #8ea2c0;
+  font-size: .82rem;
+}
+
+#main-screen .preview-tabs {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+#main-screen .preview-tab {
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.64);
+  color: #aac1df;
+  min-height: 36px;
+  padding: 0 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#main-screen .preview-tab.is-active {
+  background: linear-gradient(135deg, rgba(91, 140, 255, 0.38), rgba(54, 88, 165, 0.42));
+  color: #eff6ff;
+  border-color: rgba(147, 197, 253, 0.64);
+}
+
+#main-screen .preview-panels {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(8, 13, 25, 0.72);
+}
+
+#main-screen .preview-panel {
+  display: none;
+}
+
+#main-screen .preview-panel.is-active {
+  display: grid;
+  gap: 10px;
+}
+
+#main-screen .stat-compare {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+#main-screen .stat-compare span {
+  color: #9eb2ce;
+  font-size: .82rem;
+}
+
+#main-screen .compare-track {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(30, 41, 59, 0.92);
+  overflow: hidden;
+}
+
+#main-screen .compare-track > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #5b8cff, #ef4f93);
+}
+
+#main-screen .stat-compare strong {
+  color: #e2e8f0;
+  min-width: 48px;
+  text-align: right;
+}
+
+#main-screen .insight-list,
+#main-screen .intel-mini-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+#main-screen .insight-list li,
+#main-screen .intel-mini-list li {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.56);
+  color: #dbeafe;
+  padding: 10px 12px;
+  font-size: .92rem;
+}
+
+#main-screen .next-game-actions {
+  gap: 12px;
+}
+
+#main-screen .next-game-action-btn {
+  min-height: 52px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: #dbeafe;
+  background: rgba(15, 23, 42, 0.82);
+}
+
+#main-screen .next-game-action-btn:hover {
+  border-color: rgba(191, 219, 254, 0.92);
+  background: rgba(30, 58, 138, 0.46);
+  color: #eff6ff;
+}
+
+#main-screen .next-game-action-primary {
+  border-color: rgba(191, 219, 254, 0.84);
+  background: linear-gradient(160deg, rgba(59, 130, 246, 0.5), rgba(37, 99, 235, 0.4));
+}
+
+#main-screen .main-intel-grid,
+#main-screen .main-feed-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1.5fr 1fr;
+}
+
+#main-screen .main-feed-grid {
+  grid-template-columns: 1fr 1fr;
+}
+
+#main-screen .intel-card {
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+#main-screen .intel-card h4 {
+  margin: 2px 0 0;
+  color: #f8fafc;
+  font-size: 1.1rem;
+}
+
+#main-screen .timeline-list {
+  display: grid;
+  gap: 8px;
+}
+
+#main-screen .timeline-item {
+  display: grid;
+  grid-template-columns: 84px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.56);
+}
+
+#main-screen .timeline-item .tag {
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  color: #cbd5e1;
+  padding: 4px 10px;
+  font-size: .74rem;
+  text-align: center;
+}
+
+#main-screen .timeline-item.is-next {
+  border-color: rgba(147, 197, 253, 0.72);
+}
+
+@media (max-width: 1200px) {
+  #main-screen .franchise-command-bar,
+  #main-screen .main-intel-grid,
+  #main-screen .main-feed-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #main-screen .command-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #main-screen .next-game-team-row,
+  #main-screen .next-game-logo-row,
+  #main-screen .next-game-meta-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  #main-screen .next-game-vs {
+    order: 3;
+  }
+}
+
+@media (max-width: 768px) {
+  #main-screen .top-league-nav {
+    border-radius: 12px;
+  }
+
+  #main-screen .main-overview-header {
+    flex-direction: column;
+  }
+
+  #main-screen .franchise-header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  #main-screen .franchise-date,
+  #main-screen .franchise-header-actions .btn {
+    width: 100%;
+  }
+
+  #main-screen .next-game-actions {
+    grid-template-columns: 1fr;
+  }
+}
