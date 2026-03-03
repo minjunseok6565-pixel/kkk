@@ -598,6 +598,144 @@ h1, h2, h3 { margin: 0 0 12px; }
   background: linear-gradient(180deg, #eff6ff, #dbeafe);
 }
 
+.home-kpi-strip {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.home-kpi-card {
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  padding: 14px 16px;
+}
+
+.home-kpi-card p {
+  margin: 0 0 4px;
+  color: #64748b;
+  font-size: .75rem;
+  letter-spacing: .08em;
+}
+
+.home-kpi-card strong {
+  display: block;
+  font-size: 1.1rem;
+  color: #0f172a;
+}
+
+.home-kpi-card span {
+  color: #334155;
+  font-size: .9rem;
+}
+
+.home-intel-grid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.home-panel {
+  margin-top: 12px;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  padding: 14px 16px;
+}
+
+.home-panel-head h3 {
+  margin: 0 0 10px;
+  color: #0f172a;
+}
+
+.home-priority-list,
+.home-activity-feed {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.home-priority-item,
+.home-activity-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  padding: 8px 10px;
+}
+
+.home-priority-item p,
+.home-activity-item p {
+  margin: 0;
+  color: #1f2937;
+}
+
+.home-inline-cta {
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  background: #eff6ff;
+  color: #1e3a8a;
+  padding: 4px 8px;
+}
+
+.home-badge {
+  font-size: .75rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.home-badge-critical { background: #fee2e2; color: #991b1b; }
+.home-badge-warn { background: #fef3c7; color: #92400e; }
+.home-badge-info { background: #dbeafe; color: #1e3a8a; }
+
+.home-activity-date {
+  font-weight: 700;
+  color: #334155;
+  min-width: 42px;
+}
+
+.home-risk-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(80px, 1fr));
+  gap: 8px;
+}
+
+.home-day-chip {
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  background: #fff;
+  padding: 8px;
+  display: grid;
+  gap: 2px;
+}
+
+.home-day-chip p {
+  margin: 0 0 4px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.home-day-chip span {
+  font-size: .8rem;
+  color: #334155;
+}
+
+.home-day-chip.is-game {
+  border-color: rgba(37, 99, 235, 0.5);
+}
+
+.home-day-chip.is-b2b {
+  background: #fff7ed;
+  border-color: rgba(234, 88, 12, 0.5);
+}
+
+.home-empty {
+  color: #64748b;
+  font-size: .92rem;
+}
+
 .team-card,
 .menu-card {
   background: linear-gradient(145deg, rgba(36, 41, 55, 0.85), rgba(20, 24, 33, 0.92));

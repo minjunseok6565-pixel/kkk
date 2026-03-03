@@ -86,6 +86,8 @@ const els = {
   teamAName: document.getElementById("team-a-name"),
   teamBName: document.getElementById("team-b-name"),
   nextGameDatetime: document.getElementById("next-game-datetime"),
+  nextGamePlayBtn: document.getElementById("next-game-play-btn"),
+  nextGameQuickBtn: document.getElementById("next-game-quick-btn"),
   myTeamTitle: document.getElementById("my-team-title"),
   myTeamBtn: document.getElementById("my-team-btn"),
   tacticsMenuBtn: document.getElementById("tactics-menu-btn"),
@@ -206,6 +208,17 @@ const els = {
   medicalHealthDelta: document.getElementById("medical-health-delta"),
   medicalRiskCalendarList: document.getElementById("medical-risk-calendar-list"),
   medicalActionList: document.getElementById("medical-action-list"),
+  homeKpiRecord: document.getElementById("home-kpi-record"),
+  homeKpiWinpct: document.getElementById("home-kpi-winpct"),
+  homeKpiRank: document.getElementById("home-kpi-rank"),
+  homeKpiGb: document.getElementById("home-kpi-gb"),
+  homeKpiL10: document.getElementById("home-kpi-l10"),
+  homeKpiStreak: document.getElementById("home-kpi-streak"),
+  homeKpiOut: document.getElementById("home-kpi-out"),
+  homeKpiRisk: document.getElementById("home-kpi-risk"),
+  homePriorityList: document.getElementById("home-priority-list"),
+  homeActivityFeed: document.getElementById("home-activity-feed"),
+  homeRiskCalendar: document.getElementById("home-risk-calendar"),
   loadingOverlay: document.getElementById("loading-overlay"),
   loadingText: document.getElementById("loading-text")
 };
@@ -632,6 +645,66 @@ function resetNextGameCard() {
   els.nextGameDatetime.textContent = "YYYY-MM-DD --:-- PM";
 }
 
+function renderHomePriorities(items) {
+  if (!els.homePriorityList) return;
+  const rows = Array.isArray(items) ? items : [];
+  if (!rows.length) {
+    els.homePriorityList.innerHTML = '<li class="home-empty">우선 확인할 알림이 없습니다.</li>';
+    return;
+  }
+  els.homePriorityList.innerHTML = rows.map((p) => {
+    const severity = String(p?.severity || "info").toLowerCase();
+    return `
+      <li class="home-priority-item">
+        <span class="home-badge home-badge-${severity}">${severity.toUpperCase()}</span>
+        <p>${escapeHtml(p?.text || "-")}</p>
+        <button type="button" class="home-inline-cta">${escapeHtml(p?.cta || "확인")}</button>
+      </li>
+    `;
+  }).join("");
+}
+
+function renderHomeActivityFeed(items) {
+  if (!els.homeActivityFeed) return;
+  const rows = Array.isArray(items) ? items : [];
+  if (!rows.length) {
+    els.homeActivityFeed.innerHTML = '<li class="home-empty">최근 활동 데이터가 없습니다.</li>';
+    return;
+  }
+  els.homeActivityFeed.innerHTML = rows.map((r) => `
+    <li class="home-activity-item">
+      <span class="home-activity-date">${escapeHtml(String(r?.date || "").slice(5, 10) || "--/--")}</span>
+      <div>
+        <strong>${escapeHtml(r?.type || "EVENT")}</strong>
+        <p>${escapeHtml(r?.title || "-")}</p>
+      </div>
+    </li>
+  `).join("");
+}
+
+function renderHomeRiskCalendar(days) {
+  if (!els.homeRiskCalendar) return;
+  const rows = Array.isArray(days) ? days : [];
+  if (!rows.length) {
+    els.homeRiskCalendar.innerHTML = '<p class="home-empty">캘린더 데이터가 없습니다.</p>';
+    return;
+  }
+  els.homeRiskCalendar.innerHTML = rows.map((d) => {
+    const ds = String(d?.date || "").slice(5, 10) || "--/--";
+    const isGame = !!d?.is_game_day;
+    const b2b = !!d?.is_back_to_back;
+    const out = num(d?.out_player_count, 0);
+    const high = num(d?.high_risk_player_count, 0);
+    return `
+      <article class="home-day-chip ${isGame ? "is-game" : ""} ${b2b ? "is-b2b" : ""}">
+        <p>${ds}</p>
+        <span>OUT ${out}</span>
+        <span>HIGH ${high}</span>
+      </article>
+    `;
+  }).join("");
+}
+
 function formatLeader(leader) {
   if (!leader || !leader.name) return "-";
   return `${leader.name} ${num(leader.value, 0)}`;
@@ -701,20 +774,19 @@ async function refreshMainDashboard() {
   if (!state.selectedTeamId) return;
 
   try {
-    const currentDate = await fetchInGameDate();
+    const dashboard = await fetchJson(`/api/home/dashboard/${encodeURIComponent(state.selectedTeamId)}`);
+    const currentDate = formatIsoDate(dashboard?.current_date);
     state.currentDate = currentDate;
     els.mainCurrentDate.textContent = currentDate;
 
-    const schedule = await fetchJson(`/api/team-schedule/${encodeURIComponent(state.selectedTeamId)}`);
-    const games = schedule?.games || [];
-    const nextGame = games.find((g) => {
-      const date = String(g?.date || "").slice(0, 10);
-      return date >= currentDate && !isCompletedGame(g);
-    });
+    const nextGame = dashboard?.next_game?.game;
 
     if (!nextGame) {
       resetNextGameCard();
       els.nextGameDatetime.textContent = "예정된 다음 경기가 없습니다.";
+      renderHomePriorities(dashboard?.priorities || []);
+      renderHomeActivityFeed(dashboard?.activity_feed || []);
+      renderHomeRiskCalendar(dashboard?.risk_calendar || []);
       return;
     }
 
@@ -725,6 +797,23 @@ async function refreshMainDashboard() {
     els.teamBName.textContent = TEAM_FULL_NAMES[awayId] || awayId || "Team B";
     const tipoffTime = nextGame.tipoff_time || randomTipoffTime();
     els.nextGameDatetime.textContent = `${gameDate} ${tipoffTime}`;
+
+    const snapshot = dashboard?.snapshot || {};
+    const rec = snapshot?.record || {};
+    const standing = snapshot?.standing || {};
+    const health = snapshot?.health || {};
+    if (els.homeKpiRecord) els.homeKpiRecord.textContent = `${num(rec?.wins, 0)}-${num(rec?.losses, 0)}`;
+    if (els.homeKpiWinpct) els.homeKpiWinpct.textContent = formatWinPct(rec?.win_pct);
+    if (els.homeKpiRank) els.homeKpiRank.textContent = standing?.rank != null ? `#${num(standing.rank, 0)}` : "#-";
+    if (els.homeKpiGb) els.homeKpiGb.textContent = `GB ${standing?.gb_display || "-"}`;
+    if (els.homeKpiL10) els.homeKpiL10.textContent = `L10 ${standing?.l10 || "0-0"}`;
+    if (els.homeKpiStreak) els.homeKpiStreak.textContent = standing?.streak || "-";
+    if (els.homeKpiOut) els.homeKpiOut.textContent = `OUT ${num(health?.out_count, 0)}`;
+    if (els.homeKpiRisk) els.homeKpiRisk.textContent = `HIGH ${num(health?.high_risk_count, 0)}`;
+
+    renderHomePriorities(dashboard?.priorities || []);
+    renderHomeActivityFeed(dashboard?.activity_feed || []);
+    renderHomeRiskCalendar(dashboard?.risk_calendar || []);
   } catch (e) {
     resetNextGameCard();
     els.mainCurrentDate.textContent = "YYYY-MM-DD";
