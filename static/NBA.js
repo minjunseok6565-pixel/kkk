@@ -56,9 +56,11 @@ const state = {
   trainingSelectedDates: new Set(),
   trainingCalendarDays: [],
   trainingSessionsByDate: {},
+  trainingGameByDate: {},
   trainingRoster: [],
   trainingFamiliarity: { offense: [], defense: [] },
   trainingDraftSession: null,
+  trainingActiveType: null,
   standingsData: null,
   tacticsDraft: null,
   medicalOverview: null,
@@ -147,6 +149,8 @@ const els = {
   playerTrainingTabBtn: document.getElementById("player-training-tab-btn"),
   trainingCalendarGrid: document.getElementById("training-calendar-grid"),
   trainingTypeButtons: document.getElementById("training-type-buttons"),
+  trainingSummaryStrip: document.getElementById("training-summary-strip"),
+  trainingContextPanel: document.getElementById("training-context-panel"),
   trainingDetailPanel: document.getElementById("training-detail-panel"),
   standingsEastBody: document.getElementById("standings-east-body"),
   standingsWestBody: document.getElementById("standings-west-body"),
@@ -1054,6 +1058,179 @@ function trainingTypeLabel(t) {
   return m[String(t || "").toUpperCase()] || "-";
 }
 
+function trainingTypeIcon(t, isGameDay) {
+  if (isGameDay) return "🏟";
+  const m = {
+    OFF_TACTICS: "⚔",
+    DEF_TACTICS: "🛡",
+    FILM: "🎬",
+    SCRIMMAGE: "🏀",
+    RECOVERY: "🧊",
+    REST: "⏸"
+  };
+  return m[String(t || "").toUpperCase()] || "•";
+}
+
+function buildTrainingDerivedMetrics() {
+  const today = state.currentDate;
+  const next7 = state.trainingCalendarDays.filter((d) => d >= today).slice(0, 7);
+  const sessions = next7.map((d) => state.trainingSessionsByDate?.[d]?.session?.type).filter(Boolean);
+  const gameCount = next7.filter((d) => !!state.trainingGameByDate?.[d]).length;
+  const restCount = sessions.filter((t) => ["RECOVERY", "REST"].includes(String(t || "").toUpperCase())).length;
+  const trainCount = sessions.length - restCount;
+  const nextGame = next7.find((d) => !!state.trainingGameByDate?.[d]);
+  const dDay = nextGame ? Math.max(0, Math.round((parseIsoDate(nextGame) - parseIsoDate(today)) / (1000 * 60 * 60 * 24))) : null;
+  const offenseCount = sessions.filter((t) => String(t || "").toUpperCase() === "OFF_TACTICS").length;
+  const offenseRatio = sessions.length ? offenseCount / sessions.length : 0;
+  const hasBackToBack = next7.some((d) => state.trainingGameByDate?.[d] && state.trainingGameByDate?.[dateToIso(addDays(parseIsoDate(d), 1))]);
+  return {
+    rangeStart: state.trainingCalendarDays[0],
+    rangeEnd: state.trainingCalendarDays[state.trainingCalendarDays.length - 1],
+    trainCount,
+    gameCount,
+    restCount,
+    nextGame,
+    dDay,
+    offenseRatio,
+    hasBackToBack,
+  };
+}
+
+function buildTrainingRiskFlags(iso) {
+  const cur = parseIsoDate(iso);
+  if (!cur) return { level: "low", reason: "" };
+  const prevIso = dateToIso(addDays(cur, -1));
+  const nextIso = dateToIso(addDays(cur, 1));
+  const prevGame = !!state.trainingGameByDate?.[prevIso];
+  const nextGame = !!state.trainingGameByDate?.[nextIso];
+  if (prevGame && nextGame) return { level: "high", reason: "연전 사이 일정" };
+  if (prevGame || nextGame) return { level: "medium", reason: "경기 인접 일정" };
+  return { level: "low", reason: "일반 일정" };
+}
+
+function buildTrainingRecommendation(selectedDates, type = null) {
+  if (!selectedDates.length) {
+    return {
+      title: "선택 대기",
+      body: "날짜를 선택하면 일정 기반 추천 훈련이 표시됩니다.",
+    };
+  }
+
+  const sorted = [...selectedDates].sort();
+  const hasPreGame = sorted.some((iso) => !!state.trainingGameByDate?.[dateToIso(addDays(parseIsoDate(iso), 1))]);
+  const hasPostGame = sorted.some((iso) => !!state.trainingGameByDate?.[dateToIso(addDays(parseIsoDate(iso), -1))]);
+  const selectedType = String(type || "").toUpperCase();
+  const metrics = buildTrainingDerivedMetrics();
+  if (hasPreGame && ["OFF_TACTICS", "DEF_TACTICS", "SCRIMMAGE"].includes(selectedType)) {
+    return {
+      title: "경기 전날 고강도 경고",
+      body: "내일 경기 일정이 있어 필름/회복 훈련이 더 안정적입니다.",
+    };
+  }
+  if (metrics.gameCount >= 3 && metrics.restCount <= 1) {
+    return {
+      title: "회복 세션 보강 권장",
+      body: "7일 내 경기 밀도가 높아 최소 1회 회복 세션을 확보하는 것이 좋습니다.",
+    };
+  }
+  if (metrics.offenseRatio >= 0.6) {
+    return {
+      title: "훈련 편중 경고",
+      body: "공격 전술 비중이 높습니다. 수비/필름 훈련으로 균형을 맞추세요.",
+    };
+  }
+  if (hasPostGame) {
+    return {
+      title: "경기 다음날 회복 추천",
+      body: "경기 다음날은 RECOVERY 배치 시 피로 누적 관리에 유리합니다.",
+    };
+  }
+  return {
+    title: "균형 상태 양호",
+    body: "현재 일정 밀도 기준으로 선택한 훈련 구성이 무난합니다.",
+  };
+}
+
+function renderTrainingSummaryStrip() {
+  if (!els.trainingSummaryStrip) return;
+  const m = buildTrainingDerivedMetrics();
+  const range = m.rangeStart && m.rangeEnd
+    ? `${String(m.rangeStart).slice(5)} ~ ${String(m.rangeEnd).slice(5)}`
+    : "-";
+  const nextOpp = m.nextGame ? state.trainingGameByDate?.[m.nextGame] : null;
+  const dDay = m.dDay == null ? "-" : `D-${m.dDay}`;
+  const risk = [];
+  if (m.hasBackToBack) risk.push("연전 구간");
+  if (m.restCount <= 1) risk.push("휴식 부족");
+  if (m.offenseRatio >= 0.6) risk.push("공격 편중");
+  const riskLabel = risk.length ? risk.join(" · ") : "안정";
+
+  els.trainingSummaryStrip.innerHTML = `
+    <article class="training-kpi-card">
+      <p class="training-kpi-title">캘린더 범위</p>
+      <p class="training-kpi-value">${range}</p>
+      <p class="training-kpi-sub">4주 훈련 계획 구간</p>
+    </article>
+    <article class="training-kpi-card">
+      <p class="training-kpi-title">이번 7일 요약</p>
+      <p class="training-kpi-value">훈련 ${m.trainCount} · 경기 ${m.gameCount}</p>
+      <p class="training-kpi-sub">휴식 ${m.restCount}일</p>
+    </article>
+    <article class="training-kpi-card">
+      <p class="training-kpi-title">다음 경기</p>
+      <p class="training-kpi-value">${nextOpp ? `vs ${nextOpp}` : "일정 없음"}</p>
+      <p class="training-kpi-sub">${m.nextGame || "-"} · ${dDay}</p>
+    </article>
+    <article class="training-kpi-card">
+      <p class="training-kpi-title">리스크 상태</p>
+      <p class="training-kpi-value">${riskLabel}</p>
+      <p class="training-kpi-sub">일정/편중도 기반</p>
+    </article>
+  `;
+}
+
+function renderTrainingContextPanel(type = null) {
+  if (!els.trainingContextPanel) return;
+  const selected = [...state.trainingSelectedDates].sort();
+  const rec = buildTrainingRecommendation(selected, type || state.trainingActiveType);
+  if (!selected.length) {
+    els.trainingContextPanel.innerHTML = '<p class="empty-copy">캘린더에서 날짜를 선택하면 일정 맥락과 추천 훈련이 표시됩니다.</p>';
+    return;
+  }
+  const first = selected[0];
+  const last = selected[selected.length - 1];
+  const firstRisk = buildTrainingRiskFlags(first);
+  const prevIso = dateToIso(addDays(parseIsoDate(first), -1));
+  const nextIso = dateToIso(addDays(parseIsoDate(last), 1));
+  const prevGame = state.trainingGameByDate?.[prevIso];
+  const nextGame = state.trainingGameByDate?.[nextIso];
+
+  els.trainingContextPanel.innerHTML = `
+    <h3 class="training-context-title">선택 일정 컨텍스트</h3>
+    <ul class="training-context-kv">
+      <li><span>선택 날짜</span><strong>${selected.length}일</strong></li>
+      <li><span>구간</span><strong>${first} ~ ${last}</strong></li>
+      <li><span>전날 경기</span><strong>${prevGame ? `vs ${prevGame}` : "없음"}</strong></li>
+      <li><span>다음날 경기</span><strong>${nextGame ? `vs ${nextGame}` : "없음"}</strong></li>
+      <li><span>대표 위험도</span><strong>${firstRisk.level.toUpperCase()} · ${firstRisk.reason}</strong></li>
+    </ul>
+    <div class="training-recommend">
+      <strong>${rec.title}</strong>
+      <p>${rec.body}</p>
+    </div>
+  `;
+}
+
+function refreshTrainingTypeButtonsState() {
+  if (!els.trainingTypeButtons) return;
+  const hasSelection = state.trainingSelectedDates.size > 0;
+  els.trainingTypeButtons.querySelectorAll("button[data-training-type]").forEach((btn) => {
+    btn.disabled = !hasSelection;
+    btn.setAttribute("aria-disabled", hasSelection ? "false" : "true");
+    btn.title = hasSelection ? "" : "날짜를 먼저 선택하세요.";
+  });
+}
+
 function buildCalendar4Weeks(currentDateIso) {
   const today = parseIsoDate(currentDateIso) || new Date();
   const first = startOfWeek(today);
@@ -1132,14 +1309,19 @@ function renderTrainingCalendar() {
 
     const sessInfo = state.trainingSessionsByDate?.[iso];
     const sessType = sessInfo?.session?.type;
-    const sessionLine = sessInfo
-      ? (sessInfo.is_user_set ? `지정 · ${trainingTypeLabel(sessType)}` : `AUTO · ${trainingTypeLabel(sessType)}`)
-      : "";
+    const sessionLine = sessInfo ? trainingTypeLabel(sessType) : "";
+    const risk = buildTrainingRiskFlags(iso);
+    const badgeClass = sessInfo?.is_user_set ? "is-user" : "is-auto";
+    const badgeLabel = sessInfo ? (sessInfo.is_user_set ? "수동" : "AUTO") : "";
+    const riskCls = risk.level === "high" ? "is-high" : (risk.level === "medium" ? "is-medium" : "");
+    const icon = trainingTypeIcon(sessType, isGameDay);
 
     btn.innerHTML = `
-      <div class="training-day-date">${label}</div>
+      <div class="training-day-head"><div class="training-day-date">${label}</div><span class="training-day-icon">${icon}</span></div>
       <div class="training-day-note">${gameOpp ? `vs ${gameOpp}` : ""}</div>
-      <div class="training-day-sub">${!gameOpp ? sessionLine : ""}</div>
+      <div class="training-day-sub">${!gameOpp ? sessionLine : "경기일"}</div>
+      ${!gameOpp && sessInfo ? `<span class="training-session-badge ${badgeClass}">${badgeLabel}</span>` : ""}
+      ${!isGameDay && !isPast ? `<span class="training-risk-dot ${riskCls}" title="${risk.reason}"></span>` : ""}
     `;
 
     if (!selectable) {
@@ -1149,6 +1331,8 @@ function renderTrainingCalendar() {
         if (state.trainingSelectedDates.has(iso)) state.trainingSelectedDates.delete(iso);
         else state.trainingSelectedDates.add(iso);
         renderTrainingCalendar();
+        refreshTrainingTypeButtonsState();
+        renderTrainingContextPanel();
       });
     }
 
@@ -1162,9 +1346,11 @@ function optionsHtml(list, fallback = []) {
 }
 
 async function renderTrainingDetail(type) {
+  state.trainingActiveType = type;
   const selected = [...state.trainingSelectedDates].sort();
   if (!selected.length) {
     els.trainingDetailPanel.innerHTML = '<p class="empty-copy">적용할 날짜를 먼저 선택하세요.</p>';
+    renderTrainingContextPanel(type);
     return;
   }
 
@@ -1241,6 +1427,7 @@ async function renderTrainingDetail(type) {
       <div class="training-inline-row"><button id="training-apply-btn" class="btn btn-primary" type="button">선택 날짜에 적용</button></div>
     </div>
   `;
+  renderTrainingContextPanel(type);
 
   const offSel = document.getElementById("training-off-scheme");
   const defSel = document.getElementById("training-def-scheme");
@@ -1277,8 +1464,12 @@ async function showTrainingScreen() {
   setLoading(true, "훈련 화면 데이터를 불러오는 중...");
   try {
     state.trainingSelectedDates = new Set();
+    state.trainingActiveType = null;
     await loadTrainingData();
+    renderTrainingSummaryStrip();
     renderTrainingCalendar();
+    refreshTrainingTypeButtonsState();
+    renderTrainingContextPanel();
     els.trainingDetailPanel.innerHTML = '<p class="empty-copy">캘린더에서 날짜를 선택하고 훈련 버튼을 눌러 세부 설정을 확인하세요.</p>';
     activateScreen(els.trainingScreen);
   } finally {
