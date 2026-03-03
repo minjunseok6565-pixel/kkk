@@ -339,31 +339,75 @@
         <div>
           <p class="eyebrow">TRAINING</p>
           <h2>훈련 설정</h2>
-          <p class="subtitle">팀 훈련 캘린더와 세션을 설정합니다.</p>
+          <p class="subtitle">일정·컨디션·리스크를 함께 고려해 팀 훈련을 운영하세요.</p>
         </div>
         <button id="training-back-btn" class="btn btn-secondary" type="button">메인으로</button>
       </div>
+
+      <section class="training-command-bar" aria-label="훈련 운영 지표">
+        <div class="training-command-context">
+          <p class="training-context-label">Training War Room</p>
+          <p id="training-context-range" class="training-context-range">-</p>
+        </div>
+        <div class="training-kpi-grid">
+          <article class="training-kpi-card" id="training-kpi-sharpness-card">
+            <p class="training-kpi-label">Team Sharpness Avg</p>
+            <p id="training-kpi-sharpness" class="training-kpi-value">-</p>
+            <p id="training-kpi-sharpness-meta" class="training-kpi-meta">팀 평균 경기력 컨디션</p>
+          </article>
+          <article class="training-kpi-card" id="training-kpi-low-card">
+            <p class="training-kpi-label">Low Sharpness</p>
+            <p id="training-kpi-low" class="training-kpi-value">-</p>
+            <p id="training-kpi-low-meta" class="training-kpi-meta">45 미만 선수 수</p>
+          </article>
+          <article class="training-kpi-card" id="training-kpi-load-card">
+            <p class="training-kpi-label">Next 7D Load</p>
+            <p id="training-kpi-load" class="training-kpi-value">-</p>
+            <p id="training-kpi-load-meta" class="training-kpi-meta">다음 7일 경기수 / B2B</p>
+          </article>
+          <article class="training-kpi-card" id="training-kpi-risk-card">
+            <p class="training-kpi-label">Risk Overview</p>
+            <p id="training-kpi-risk" class="training-kpi-value">-</p>
+            <p id="training-kpi-risk-meta" class="training-kpi-meta">HIGH / OUT / RETURNING</p>
+          </article>
+        </div>
+      </section>
 
       <div class="training-top-tabs">
         <button id="team-training-tab-btn" type="button" class="btn btn-secondary is-active">팀 훈련</button>
         <button id="player-training-tab-btn" type="button" class="btn btn-secondary" disabled aria-disabled="true">개인 훈련 (준비중)</button>
       </div>
 
-      <section class="training-calendar-panel">
-        <div id="training-calendar-grid" class="training-calendar-grid"></div>
-      </section>
+      <div id="training-selection-summary" class="training-selection-summary">선택한 날짜가 없습니다.</div>
 
-      <div class="training-type-buttons" id="training-type-buttons">
-        <button type="button" data-training-type="OFF_TACTICS" class="btn btn-secondary">공격 전술 훈련</button>
-        <button type="button" data-training-type="DEF_TACTICS" class="btn btn-secondary">수비 전술 훈련</button>
-        <button type="button" data-training-type="FILM" class="btn btn-secondary">필름/영상 훈련</button>
-        <button type="button" data-training-type="SCRIMMAGE" class="btn btn-secondary">청백전</button>
-        <button type="button" data-training-type="RECOVERY" class="btn btn-secondary">휴식 훈련</button>
-        <button type="button" data-training-type="REST" class="btn btn-secondary">훈련 없음</button>
-      </div>
+      <section class="training-layout">
+        <div>
+          <section class="training-calendar-panel">
+            <div class="training-calendar-header">
+              <h3>4주 훈련 캘린더</h3>
+              <div class="training-legend" aria-label="상태 범례">
+                <span class="training-chip is-game">GAME</span>
+                <span class="training-chip is-auto">AUTO</span>
+                <span class="training-chip is-user">USER</span>
+                <span class="training-chip is-b2b">B2B</span>
+              </div>
+            </div>
+            <div id="training-calendar-grid" class="training-calendar-grid"></div>
+          </section>
 
-      <section id="training-detail-panel" class="training-detail-panel">
-        <p class="empty-copy">캘린더에서 날짜를 선택하고 훈련 버튼을 눌러 세부 설정을 확인하세요.</p>
+          <div class="training-type-buttons" id="training-type-buttons">
+            <button type="button" data-training-type="OFF_TACTICS" class="btn btn-secondary">공격 전술 훈련 <span>익숙도↑</span></button>
+            <button type="button" data-training-type="DEF_TACTICS" class="btn btn-secondary">수비 전술 훈련 <span>조직력↑</span></button>
+            <button type="button" data-training-type="FILM" class="btn btn-secondary">필름/영상 훈련 <span>균형</span></button>
+            <button type="button" data-training-type="SCRIMMAGE" class="btn btn-secondary">청백전 <span>실전 강도</span></button>
+            <button type="button" data-training-type="RECOVERY" class="btn btn-secondary">휴식 훈련 <span>회복</span></button>
+            <button type="button" data-training-type="REST" class="btn btn-secondary">훈련 없음 <span>보존</span></button>
+          </div>
+        </div>
+
+        <section id="training-detail-panel" class="training-detail-panel">
+          <p class="empty-copy">캘린더에서 날짜를 선택하고 훈련 버튼을 눌러 세부 설정을 확인하세요.</p>
+        </section>
       </section>
     </section>
 
