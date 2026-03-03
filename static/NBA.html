@@ -83,6 +83,34 @@
           </div>
         </div>
 
+        <section class="executive-insight-bar" aria-label="팀 요약 인사이트">
+          <article class="insight-kpi-card">
+            <p class="insight-kpi-label">평균 OVR</p>
+            <strong id="home-kpi-ovr" class="insight-kpi-value">--</strong>
+            <span class="insight-kpi-meta">로스터 경쟁력</span>
+          </article>
+          <article class="insight-kpi-card">
+            <p class="insight-kpi-label">평균 나이</p>
+            <strong id="home-kpi-age" class="insight-kpi-value">--</strong>
+            <span class="insight-kpi-meta">세대 밸런스</span>
+          </article>
+          <article class="insight-kpi-card">
+            <p class="insight-kpi-label">총 연봉</p>
+            <strong id="home-kpi-salary" class="insight-kpi-value">--</strong>
+            <span class="insight-kpi-meta">캡 관리 포지션</span>
+          </article>
+          <article class="insight-kpi-card">
+            <p class="insight-kpi-label">캡 여유</p>
+            <strong id="home-kpi-cap" class="insight-kpi-value">--</strong>
+            <span class="insight-kpi-meta">유연성 지표</span>
+          </article>
+          <article class="insight-kpi-card">
+            <p class="insight-kpi-label">핵심 경보</p>
+            <strong id="home-kpi-alert" class="insight-kpi-value">--</strong>
+            <span class="insight-kpi-meta">부상/피로/일정</span>
+          </article>
+        </section>
+
         <section class="franchise-command-bar" aria-label="프랜차이즈 지표">
           <article class="command-team-meta">
             <p class="command-label">FRANCHISE STATUS</p>
@@ -102,8 +130,9 @@
           </article>
         </section>
 
-        <section class="next-game-panel" aria-label="다음 경기">
-          <header class="next-game-header">
+        <section class="home-primary-grid" aria-label="핵심 브리핑">
+          <section class="next-game-panel" aria-label="다음 경기">
+            <header class="next-game-header">
             <p class="next-game-kicker">NEXT GAME PREVIEW</p>
             <h3 class="next-game-title">다음 경기</h3>
           </header>
@@ -154,13 +183,35 @@
             <section class="preview-panel" data-preview-panel="strategy">
               <ul id="strategy-list" class="insight-list"></ul>
             </section>
-          </div>
+            </div>
 
-          <div class="next-game-actions">
-            <button type="button" class="menu-card next-game-action-btn next-game-action-primary">경기 진행</button>
-            <button type="button" id="next-game-tactics-btn" class="menu-card next-game-action-btn">전술</button>
-            <button type="button" class="menu-card next-game-action-btn">빠른 진행</button>
-          </div>
+            <div class="next-game-actions">
+              <button type="button" class="menu-card next-game-action-btn next-game-action-primary">경기 진행</button>
+              <button type="button" id="next-game-tactics-btn" class="menu-card next-game-action-btn">전술</button>
+              <button type="button" class="menu-card next-game-action-btn">빠른 진행</button>
+            </div>
+          </section>
+
+          <aside class="franchise-focus-panel" aria-label="핵심 선수 브리핑">
+            <header class="focus-header">
+              <p class="command-label">PLAYER BRIEFING</p>
+              <h4 id="quick-focus-player">핵심 선수 분석 대기</h4>
+              <p id="quick-focus-role" class="focus-role">로스터 로딩 중...</p>
+            </header>
+            <div class="focus-kpi-grid">
+              <article class="focus-kpi"><span>컨디션</span><strong id="quick-focus-condition">--</strong></article>
+              <article class="focus-kpi"><span>건강 지수</span><strong id="quick-focus-health">--</strong></article>
+              <article class="focus-kpi"><span>계약 가치</span><strong id="quick-focus-contract">--</strong></article>
+            </div>
+            <div class="focus-list-wrap">
+              <h5>강점 TOP3</h5>
+              <ul id="quick-focus-strengths" class="intel-mini-list"></ul>
+            </div>
+            <div class="focus-list-wrap">
+              <h5>리스크 TOP2</h5>
+              <ul id="quick-focus-risks" class="intel-mini-list"></ul>
+            </div>
+          </aside>
         </section>
 
         <section class="main-intel-grid" aria-label="운영 인텔리전스">

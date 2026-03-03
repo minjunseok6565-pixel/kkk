@@ -94,6 +94,18 @@ const els = {
   statusInjury: document.getElementById("status-injury"),
   statusFatigue: document.getElementById("status-fatigue"),
   statusSchedule: document.getElementById("status-schedule"),
+  homeKpiOvr: document.getElementById("home-kpi-ovr"),
+  homeKpiAge: document.getElementById("home-kpi-age"),
+  homeKpiSalary: document.getElementById("home-kpi-salary"),
+  homeKpiCap: document.getElementById("home-kpi-cap"),
+  homeKpiAlert: document.getElementById("home-kpi-alert"),
+  quickFocusPlayer: document.getElementById("quick-focus-player"),
+  quickFocusRole: document.getElementById("quick-focus-role"),
+  quickFocusCondition: document.getElementById("quick-focus-condition"),
+  quickFocusHealth: document.getElementById("quick-focus-health"),
+  quickFocusContract: document.getElementById("quick-focus-contract"),
+  quickFocusStrengths: document.getElementById("quick-focus-strengths"),
+  quickFocusRisks: document.getElementById("quick-focus-risks"),
   compareWinrateBar: document.getElementById("compare-winrate-bar"),
   compareWinrateText: document.getElementById("compare-winrate-text"),
   compareLast10Bar: document.getElementById("compare-last10-bar"),
@@ -546,6 +558,97 @@ async function fetchInGameDate() {
   return formatIsoDate(currentDate);
 }
 
+function formatCompactMoney(value) {
+  const n = num(value, 0);
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${Math.round(n)}`;
+}
+
+function formatSignedCompactMoney(value) {
+  const n = num(value, 0);
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${formatCompactMoney(n)}`;
+}
+
+function average(arr, key) {
+  if (!arr.length) return 0;
+  const total = arr.reduce((sum, row) => sum + num(row?.[key], 0), 0);
+  return total / arr.length;
+}
+
+function topRosterFocus(rosterRows) {
+  if (!rosterRows.length) return null;
+  const sorted = [...rosterRows].sort((a, b) => num(b.ovr, 0) - num(a.ovr, 0));
+  return sorted[0] || null;
+}
+
+function roleLabelByScore(ovr) {
+  const score = num(ovr, 0);
+  if (score >= 86) return 'Franchise Core';
+  if (score >= 79) return 'Primary Rotation';
+  if (score >= 73) return 'Core Bench';
+  return 'Development Unit';
+}
+
+function renderQuickFocusList(el, items, empty) {
+  if (!el) return;
+  const rows = (items || []).filter(Boolean);
+  el.innerHTML = rows.length ? rows.map((item) => `<li>${item}</li>`).join('') : `<li>${empty}</li>`;
+}
+
+function renderHomeInsightBar(rosterRows, teamSummary, injuryCount, fatigueCount, stressLabel) {
+  const avgOvr = average(rosterRows, 'ovr');
+  const avgAge = average(rosterRows, 'age');
+  const totalSalary = rosterRows.reduce((sum, row) => sum + num(row?.salary, 0), 0);
+  const capSpace = num(teamSummary?.cap_space, 0);
+
+  if (els.homeKpiOvr) els.homeKpiOvr.textContent = rosterRows.length ? avgOvr.toFixed(1) : '--';
+  if (els.homeKpiAge) els.homeKpiAge.textContent = rosterRows.length ? `${avgAge.toFixed(1)}세` : '--';
+  if (els.homeKpiSalary) els.homeKpiSalary.textContent = formatCompactMoney(totalSalary);
+  if (els.homeKpiCap) els.homeKpiCap.textContent = formatSignedCompactMoney(capSpace);
+  if (els.homeKpiAlert) els.homeKpiAlert.textContent = `부상 ${injuryCount} · 피로 ${fatigueCount}`;
+
+  const focus = topRosterFocus(rosterRows);
+  if (!focus) {
+    if (els.quickFocusPlayer) els.quickFocusPlayer.textContent = '핵심 선수 분석 대기';
+    if (els.quickFocusRole) els.quickFocusRole.textContent = stressLabel || '로스터 로딩 중...';
+    if (els.quickFocusCondition) els.quickFocusCondition.textContent = '--';
+    if (els.quickFocusHealth) els.quickFocusHealth.textContent = '--';
+    if (els.quickFocusContract) els.quickFocusContract.textContent = '--';
+    renderQuickFocusList(els.quickFocusStrengths, [], '강점 데이터 없음');
+    renderQuickFocusList(els.quickFocusRisks, [], '리스크 데이터 없음');
+    return;
+  }
+
+  const shortSt = num(focus.short_term_stamina, 1);
+  const longSt = num(focus.long_term_stamina, 1);
+  const health = ((shortSt + longSt) / 2) * 100;
+  const condition = num(focus.sharpness, 50);
+  const contractIndex = focus.salary > 0 ? (num(focus.ovr, 0) / (focus.salary / 1_000_000)) : 0;
+
+  if (els.quickFocusPlayer) els.quickFocusPlayer.textContent = `${focus.name || '-'} (${focus.pos || '-'})`;
+  if (els.quickFocusRole) els.quickFocusRole.textContent = `${roleLabelByScore(focus.ovr)} · OVR ${num(focus.ovr, 0).toFixed(1)}`;
+  if (els.quickFocusCondition) els.quickFocusCondition.textContent = `${Math.round(condition)}%`;
+  if (els.quickFocusHealth) els.quickFocusHealth.textContent = `${Math.round(health)}%`;
+  if (els.quickFocusContract) els.quickFocusContract.textContent = `${contractIndex.toFixed(2)} CEI`;
+
+  const strengths = [
+    `볼륨 점수 OVR ${num(focus.ovr, 0).toFixed(1)}`,
+    `컨디션 ${Math.round(condition)}%`,
+    `건강 지수 ${Math.round(health)}%`,
+  ];
+  const risks = [];
+  if (focus.age >= 34) risks.push(`고령 구간 ${focus.age}세`);
+  if (shortSt < 0.6 || longSt < 0.7) risks.push(`체력 관리 필요 (단기 ${Math.round(shortSt * 100)} / 장기 ${Math.round(longSt * 100)})`);
+  if (focus.salary >= 40_000_000) risks.push(`고연봉 자원 ${formatCompactMoney(focus.salary)}`);
+
+  renderQuickFocusList(els.quickFocusStrengths, strengths.slice(0, 3), '강점 데이터 없음');
+  renderQuickFocusList(els.quickFocusRisks, risks.slice(0, 2), '현재 리스크 낮음');
+}
+
 function resetNextGameCard() {
   els.teamAName.textContent = "Team A";
   els.teamBName.textContent = "Team B";
@@ -563,6 +666,18 @@ function resetNextGameCard() {
   setBadgeState(els.statusInjury, "부상 --명");
   setBadgeState(els.statusFatigue, "피로 주의 --명");
   setBadgeState(els.statusSchedule, "일정 강도 확인중");
+  if (els.homeKpiOvr) els.homeKpiOvr.textContent = "--";
+  if (els.homeKpiAge) els.homeKpiAge.textContent = "--";
+  if (els.homeKpiSalary) els.homeKpiSalary.textContent = "--";
+  if (els.homeKpiCap) els.homeKpiCap.textContent = "--";
+  if (els.homeKpiAlert) els.homeKpiAlert.textContent = "--";
+  if (els.quickFocusPlayer) els.quickFocusPlayer.textContent = "핵심 선수 분석 대기";
+  if (els.quickFocusRole) els.quickFocusRole.textContent = "로스터 로딩 중...";
+  if (els.quickFocusCondition) els.quickFocusCondition.textContent = "--";
+  if (els.quickFocusHealth) els.quickFocusHealth.textContent = "--";
+  if (els.quickFocusContract) els.quickFocusContract.textContent = "--";
+  renderQuickFocusList(els.quickFocusStrengths, [], "강점 데이터 없음");
+  renderQuickFocusList(els.quickFocusRisks, [], "리스크 데이터 없음");
   updatePreviewCompare(null, null);
   renderListItems(els.conditionList, ["컨디션 데이터를 불러오는 중입니다."], "컨디션 데이터가 없습니다.");
   renderListItems(els.strategyList, ["전략 데이터를 준비 중입니다."], "전략 힌트가 없습니다.");
@@ -708,6 +823,8 @@ async function refreshMainDashboard() {
 
     const stress = classifyScheduleStress(upcoming);
     setBadgeState(els.statusSchedule, stress.label, stress.cls);
+
+    renderHomeInsightBar(rosterRows, teamDetail?.summary || {}, injuryCount, fatigueCount, stress.label);
 
     const nextGame = games.find((g) => {
       const date = String(g?.date || "").slice(0, 10);
