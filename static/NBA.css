@@ -2084,10 +2084,6 @@ h1, h2, h3 { margin: 0 0 12px; }
 @media (max-width: 760px) {
   .medical-risk-calendar-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@media (max-width: 1100px) {
-  .medical-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .medical-layout { grid-template-columns: 1fr; }
-}
 
 
 /* Unified light mood for main-tab destination screens */
@@ -2568,6 +2564,7 @@ body:has(#player-detail-screen.active) .app-shell {
 @media (max-width: 760px) {
   #my-team-screen .myteam-overview { grid-template-columns: 1fr; }
   #player-detail-screen .attr-intel-columns { grid-template-columns: 1fr; }
+}
 /* ===== Tactics Command Center (scoped) ===== */
 #tactics-screen .tactics-shell {
   background: linear-gradient(160deg, #ffffff 0%, #f8fbff 55%, #f3f7ff 100%);
