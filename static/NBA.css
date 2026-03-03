@@ -2365,3 +2365,242 @@ body:has(#player-detail-screen.active) .app-shell {
   background: rgba(255, 255, 255, 0.94);
   color: #0f172a;
 }
+
+/* ===== Tactics Command Center (scoped) ===== */
+#tactics-screen .tactics-shell {
+  background: linear-gradient(160deg, #ffffff 0%, #f8fbff 55%, #f3f7ff 100%);
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 18px;
+  padding: 20px;
+  display: grid;
+  gap: 16px;
+}
+
+#tactics-screen .tactics-hero {
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 14px;
+  padding: 16px;
+  background: linear-gradient(130deg, rgba(15, 23, 42, 0.95), rgba(30, 64, 175, 0.86));
+  color: #eaf1ff;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+}
+
+#tactics-screen .tactics-hero-title { margin: 0 0 4px; font-size: 1.05rem; font-weight: 800; letter-spacing: 0.03em; }
+#tactics-screen .tactics-hero-sub { margin: 0; font-size: 0.88rem; color: rgba(226, 236, 255, 0.9); }
+#tactics-screen .tactics-kpi-row { display: grid; grid-template-columns: repeat(4, minmax(108px, 1fr)); gap: 10px; }
+#tactics-screen .tactics-kpi-chip {
+  border: 1px solid rgba(148, 190, 255, 0.35);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(10, 17, 32, 0.35);
+}
+#tactics-screen .tactics-kpi-label { margin: 0 0 4px; font-size: 0.72rem; color: #bdd3ff; letter-spacing: 0.06em; }
+#tactics-screen .tactics-kpi-value { margin: 0; font-size: 1.02rem; font-weight: 800; color: #f8fbff; font-variant-numeric: tabular-nums; }
+#tactics-screen .kpi-warn .tactics-kpi-value { color: #ffd48d; }
+
+#tactics-screen .tactics-scheme-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+#tactics-screen .tactics-scheme-picker { position: relative; }
+#tactics-screen .tactics-scheme-card {
+  width: 100%;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.97), rgba(244, 249, 255, 0.96));
+  padding: 12px 14px;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease;
+}
+#tactics-screen .tactics-scheme-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.12);
+}
+#tactics-screen .tactics-scheme-card:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+#tactics-screen .tactics-scheme-type { font-size: 0.72rem; font-weight: 700; color: #64748b; letter-spacing: .08em; }
+#tactics-screen .tactics-scheme-current { font-size: 1rem; color: #0f172a; }
+#tactics-screen .tactics-scheme-desc { font-size: 0.78rem; color: #64748b; }
+
+#tactics-screen .tactics-options {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 8;
+  min-width: 280px;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+  padding: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+#tactics-screen .tactics-options button {
+  width: 100%;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #0f172a;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 0.86rem;
+}
+#tactics-screen .tactics-options button:hover { background: #eff6ff; border-color: rgba(59,130,246,.4); }
+
+#tactics-screen .tactics-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.7fr);
+  gap: 14px;
+}
+#tactics-screen .tactics-lineup-grid { display: grid; gap: 12px; grid-template-columns: 1fr; }
+#tactics-screen .tactics-lineup-card,
+#tactics-screen .tactics-insight-card,
+#tactics-screen .tactics-roster-box {
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 12px;
+}
+
+#tactics-screen .tactics-block-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+#tactics-screen .tactics-block-meta { font-size: .76rem; color: #64748b; font-weight: 600; }
+#tactics-screen .tactics-lineup-head,
+#tactics-screen .tactics-lineup-row {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 1fr 0.62fr 0.42fr;
+  gap: 8px;
+  align-items: center;
+}
+#tactics-screen .tactics-lineup-head {
+  color: #64748b;
+  font-size: 0.78rem;
+  margin-bottom: 6px;
+  padding: 0 4px;
+}
+#tactics-screen .tactics-lineup-body { display: grid; gap: 8px; }
+#tactics-screen .tactics-lineup-row {
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 10px;
+  padding: 8px;
+  background: #ffffff;
+}
+#tactics-screen .tactics-lineup-row.is-edited {
+  border-color: rgba(59,130,246,.56);
+  box-shadow: 0 0 0 2px rgba(59,130,246,.16);
+}
+#tactics-screen .tactics-lineup-row select,
+#tactics-screen .tactics-lineup-row input {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.68);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 7px 8px;
+  font-size: .85rem;
+}
+#tactics-screen .tactics-lineup-row input[type="number"] { text-align: center; font-variant-numeric: tabular-nums; }
+#tactics-screen .tactics-role-badge {
+  display: inline-flex;
+  justify-content: center;
+  width: 100%;
+  padding: 6px 0;
+  border-radius: 999px;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .03em;
+  border: 1px solid;
+}
+#tactics-screen .tactics-role-badge.ok { color: #166534; background: #dcfce7; border-color: #86efac; }
+#tactics-screen .tactics-role-badge.warn { color: #92400e; background: #fef3c7; border-color: #fcd34d; }
+#tactics-screen .tactics-role-badge.err { color: #b91c1c; background: #fee2e2; border-color: #fca5a5; }
+
+#tactics-screen .tactics-insight { display: grid; gap: 10px; align-content: start; }
+#tactics-screen .tactics-insight-card h3 { margin: 0 0 10px; }
+#tactics-screen .tactics-progress-row { display: flex; justify-content: space-between; font-size: .86rem; color: #334155; margin-bottom: 7px; }
+#tactics-screen .tactics-progress-track {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+  overflow: hidden;
+}
+#tactics-screen .tactics-progress-track > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #2563eb, #38bdf8);
+}
+#tactics-screen .tactics-progress-track > span.warn {
+  background: linear-gradient(90deg, #f59e0b, #f97316);
+}
+#tactics-screen .tactics-insight-copy {
+  margin: 8px 0 0;
+  font-size: .83rem;
+  color: #64748b;
+}
+#tactics-screen .tactics-coverage-list,
+#tactics-screen .tactics-warning-list {
+  display: grid;
+  gap: 7px;
+}
+#tactics-screen .tactics-pill,
+#tactics-screen .tactics-warning-item {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: #f8fafc;
+  font-size: .8rem;
+  color: #334155;
+}
+#tactics-screen .tactics-warning-item.warn {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: #fffbeb;
+  color: #92400e;
+}
+#tactics-screen .tactics-warning-item.err {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: #fef2f2;
+  color: #991b1b;
+}
+#tactics-screen .tactics-roster-list {
+  max-height: 210px;
+  overflow: auto;
+  display: grid;
+  gap: 7px;
+}
+#tactics-screen .tactics-roster-item {
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+#tactics-screen .tactics-roster-meta { color: #64748b; font-size: 0.78rem; }
+
+@media (max-width: 1180px) {
+  #tactics-screen .tactics-hero { grid-template-columns: 1fr; }
+  #tactics-screen .tactics-workbench { grid-template-columns: 1fr; }
+}
+@media (max-width: 780px) {
+  #tactics-screen .tactics-kpi-row,
+  #tactics-screen .tactics-scheme-strip { grid-template-columns: 1fr; }
+  #tactics-screen .tactics-lineup-head,
+  #tactics-screen .tactics-lineup-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  #tactics-screen .tactics-lineup-head span:nth-child(n+3) { display: none; }
+  #tactics-screen .tactics-lineup-row > :nth-child(n+3) { grid-column: span 2; }
+}
