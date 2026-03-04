@@ -583,12 +583,43 @@
       <section id="college-panel-scouting" class="college-panel" aria-hidden="true">
         <article class="college-card scouting-overview-card">
           <div class="college-card-head-inline">
-            <h3>스카우팅 오퍼레이션</h3>
+            <div>
+              <p class="college-section-eyebrow">FRONT OFFICE WAR ROOM</p>
+              <h3>스카우팅 오퍼레이션</h3>
+            </div>
             <p id="college-scouting-summary" class="college-inline-meta">스카우터 카드를 불러오는 중입니다...</p>
           </div>
+          <div id="college-scouting-kpi-row" class="college-scouting-kpi-row" aria-live="polite"></div>
           <p id="college-scouting-feedback" class="college-inline-meta">스카우터 카드를 통해 선수 배정과 리포트 확인을 진행하세요.</p>
         </article>
-        <div id="college-scout-cards" class="college-scout-grid" role="list"></div>
+
+        <div class="college-scout-warroom-layout">
+          <article class="college-card college-scout-roster-card">
+            <div class="college-card-head-inline">
+              <h4>스카우터 로스터</h4>
+              <span class="college-inline-meta">전문 분야별 배정 현황</span>
+            </div>
+            <div id="college-scout-cards" class="college-scout-grid" role="list"></div>
+          </article>
+
+          <div class="college-scout-side-column">
+            <article class="college-card college-scout-inbox-card">
+              <div class="college-card-head-inline">
+                <h4>리포트 인박스</h4>
+                <span id="college-scout-inbox-summary" class="college-inline-meta">최신 리포트를 불러오는 중입니다...</span>
+              </div>
+              <div id="college-scout-report-inbox-list" class="college-scout-report-inbox-list"></div>
+            </article>
+            <article class="college-card college-scout-guide-card">
+              <h4>운영 가이드</h4>
+              <ul class="college-scout-guide-list">
+                <li><strong>1.</strong> 리포트 Ready 스카우터 우선 확인</li>
+                <li><strong>2.</strong> 미배정 스카우터는 즉시 타겟 지정</li>
+                <li><strong>3.</strong> 리스크 높은 선수는 의료/수비 스카우터 교차 검토</li>
+              </ul>
+            </article>
+          </div>
+        </div>
       </section>
     </section>
 
