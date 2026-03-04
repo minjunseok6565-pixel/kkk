@@ -1,3 +1,5 @@
+import { els } from "./dom.js";
+
 function activateScreen(target) {
   [
     els.startScreen,
