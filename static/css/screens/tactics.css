@@ -117,6 +117,16 @@
   box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
 }
 
+#tactics-screen .tactics-options button {
+  background: rgba(241, 245, 249, 0.92);
+  color: #0f172a;
+  border-color: rgba(148, 163, 184, 0.55);
+}
+
+#tactics-screen .tactics-options button:hover {
+  background: rgba(219, 234, 254, 0.92);
+}
+
 #tactics-screen .tactics-lineup-row select,
 #tactics-screen .tactics-lineup-row input {
   background: #ffffff;
@@ -216,6 +226,19 @@
   max-height: 280px;
   overflow: auto;
 }
+
+#tactics-screen .tactics-options button {
+  width: 100%;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #0f172a;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 0.86rem;
+}
+
+#tactics-screen .tactics-options button:hover { background: #eff6ff; border-color: rgba(59,130,246,.4); }
 
 #tactics-screen .tactics-workbench {
   display: grid;
