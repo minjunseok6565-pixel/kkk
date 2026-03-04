@@ -55,6 +55,38 @@ body:has(#main-screen.active) .app-shell {
 .panel.active { display: block; }
 .hidden { display: none !important; }
 
+body.is-modal-open {
+  overflow: hidden;
+}
+
+.ui-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  width: 100%;
+  min-height: 42px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  padding: 9px 38px 9px 12px;
+  font-size: 0.95rem;
+  line-height: 1.25;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% - 2px),
+    calc(100% - 12px) calc(50% - 2px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
+
+.ui-select:focus {
+  outline: none;
+  border-color: rgba(37, 99, 235, 0.8);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+
 #start-screen,
 #team-screen,
 #main-screen,
@@ -968,6 +1000,23 @@ h1, h2, h3 { margin: 0 0 12px; }
   gap: 10px;
 }
 
+#college-screen .college-actions-row .btn {
+  min-width: 96px;
+  border-radius: 12px;
+  font-weight: 700;
+}
+
+#college-screen .college-actions-row #college-assign-btn {
+  background: linear-gradient(135deg, #1d4ed8, #1e3a8a);
+  border-color: rgba(96, 165, 250, 0.52);
+}
+
+#college-screen .college-actions-row #college-unassign-btn {
+  background: linear-gradient(135deg, #e2e8f0, #cbd5e1);
+  border-color: rgba(148, 163, 184, 0.65);
+  color: #1f2937;
+}
+
 #college-screen {
   --college-accent: #1d4ed8;
   --college-accent-soft: rgba(29, 78, 216, 0.12);
@@ -1090,6 +1139,35 @@ h1, h2, h3 { margin: 0 0 12px; }
 #college-screen .college-filter-row select {
   width: 100%;
   min-width: 160px;
+}
+
+#college-screen .ui-select {
+  color: #0f172a;
+  background-color: #fff;
+}
+
+#college-screen .college-form-grid .ui-select {
+  min-height: 44px;
+}
+
+#college-screen #college-scouting-feedback {
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #334155;
+}
+
+#college-screen #college-scouting-feedback[data-tone="ok"] {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.12);
+  color: #065f46;
+}
+
+#college-screen #college-scouting-feedback[data-tone="warn"] {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.16);
+  color: #92400e;
 }
 
 #college-screen .college-two-col-7-5 {
@@ -2122,10 +2200,22 @@ h1, h2, h3 { margin: 0 0 12px; }
 .tactics-lineup-row input {
   width: 100%;
   border: 1px solid rgba(184, 201, 255, 0.35);
-  border-radius: 8px;
-  background: rgba(255,255,255,0.04);
+  border-radius: 10px;
+  background: rgba(17, 24, 39, 0.7);
   color: #eef3ff;
-  padding: 7px 8px;
+  min-height: 42px;
+  padding: 8px 10px;
+}
+
+.tactics-lineup-row .ui-select {
+  border-color: rgba(148, 163, 184, 0.35);
+  background-color: rgba(17, 24, 39, 0.72);
+  color: #eef3ff;
+}
+
+.tactics-lineup-row .ui-select:focus {
+  border-color: rgba(96, 165, 250, 0.84);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16);
 }
 .tactics-lineup-row input[type="number"] { text-align: center; }
 .tactics-roster-box h3,
@@ -2155,6 +2245,67 @@ h1, h2, h3 { margin: 0 0 12px; }
 
 
 .status-warn { color: #f4d06f; }
+
+.confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+}
+
+.confirm-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.64);
+  backdrop-filter: blur(2px);
+}
+
+.confirm-modal-panel {
+  position: relative;
+  z-index: 1;
+  width: min(520px, calc(100vw - 32px));
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  background:
+    radial-gradient(circle at 92% -32%, rgba(59, 130, 246, 0.22), transparent 45%),
+    linear-gradient(160deg, rgba(15, 23, 42, 0.94), rgba(15, 23, 42, 0.98));
+  color: #f8fafc;
+  padding: 24px;
+  box-shadow: 0 30px 70px rgba(2, 6, 23, 0.6);
+}
+
+.confirm-modal-eyebrow {
+  margin: 0 0 10px;
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  color: #93c5fd;
+}
+
+.confirm-modal-title {
+  margin: 0;
+  font-size: 1.28rem;
+  font-weight: 700;
+}
+
+.confirm-modal-body {
+  margin: 12px 0 0;
+  color: #cbd5e1;
+  line-height: 1.55;
+}
+
+.confirm-modal-actions {
+  margin-top: 22px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.confirm-modal-actions .btn {
+  min-width: 110px;
+  border-radius: 12px;
+}
 
 .medical-alert-bar {
   display: grid;

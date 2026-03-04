@@ -156,6 +156,12 @@ const els = {
   collegeAssignBtn: document.getElementById("college-assign-btn"),
   collegeUnassignBtn: document.getElementById("college-unassign-btn"),
   collegeScoutingFeedback: document.getElementById("college-scouting-feedback"),
+  confirmModal: document.getElementById("confirm-modal"),
+  confirmModalBackdrop: document.getElementById("confirm-modal-backdrop"),
+  confirmModalTitle: document.getElementById("confirm-modal-title"),
+  confirmModalBody: document.getElementById("confirm-modal-body"),
+  confirmModalOk: document.getElementById("confirm-modal-ok"),
+  confirmModalCancel: document.getElementById("confirm-modal-cancel"),
   collegeReportsBody: document.getElementById("college-reports-body"),
   collegeTeamsKpi: document.getElementById("college-teams-kpi"),
   collegeRosterSummary: document.getElementById("college-roster-summary"),
@@ -235,6 +241,46 @@ function setLoading(show, msg = "") {
   if (msg) els.loadingText.textContent = msg;
 }
 
+function showConfirmModal({ title, body, okLabel = "확인", cancelLabel = "취소" }) {
+  if (!els.confirmModal) return Promise.resolve(window.confirm(body || title || "진행하시겠습니까?"));
+  return new Promise((resolve) => {
+    const active = document.activeElement;
+    if (els.confirmModalTitle) els.confirmModalTitle.textContent = title || "확인";
+    if (els.confirmModalBody) els.confirmModalBody.textContent = body || "";
+    if (els.confirmModalOk) els.confirmModalOk.textContent = okLabel;
+    if (els.confirmModalCancel) els.confirmModalCancel.textContent = cancelLabel;
+
+    els.confirmModal.classList.remove("hidden");
+    document.body.classList.add("is-modal-open");
+
+    const close = (result) => {
+      els.confirmModal.classList.add("hidden");
+      document.body.classList.remove("is-modal-open");
+      els.confirmModalOk?.removeEventListener("click", onOk);
+      els.confirmModalCancel?.removeEventListener("click", onCancel);
+      els.confirmModalBackdrop?.removeEventListener("click", onCancel);
+      document.removeEventListener("keydown", onKeydown);
+      if (active instanceof HTMLElement) active.focus();
+      resolve(result);
+    };
+
+    const onOk = () => close(true);
+    const onCancel = () => close(false);
+    const onKeydown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close(false);
+      }
+    };
+
+    els.confirmModalOk?.addEventListener("click", onOk);
+    els.confirmModalCancel?.addEventListener("click", onCancel);
+    els.confirmModalBackdrop?.addEventListener("click", onCancel);
+    document.addEventListener("keydown", onKeydown);
+    els.confirmModalOk?.focus();
+  });
+}
+
 function activateScreen(target) {
   [
     els.startScreen,
@@ -257,6 +303,12 @@ function activateScreen(target) {
 
 function renderCollegeEmpty(tbody, colspan, msg) {
   tbody.innerHTML = `<tr><td class="schedule-empty" colspan="${colspan}">${msg}</td></tr>`;
+}
+
+function setCollegeScoutingFeedback(message, tone = "info") {
+  if (!els.collegeScoutingFeedback) return;
+  els.collegeScoutingFeedback.textContent = message;
+  els.collegeScoutingFeedback.dataset.tone = tone;
 }
 
 function escapeHtml(value) {
@@ -1326,7 +1378,12 @@ async function showMyTeamScreen() {
 }
 
 async function confirmTeamSelection(teamId, fullName) {
-  const confirmed = window.confirm(`${fullName}을(를) 선택하시겠습니까?`);
+  const confirmed = await showConfirmModal({
+    title: "팀 선택 확인",
+    body: `${fullName}으로 GM 커리어를 시작하시겠습니까? 선택 후 메인 화면으로 이동합니다.`,
+    okLabel: "선택 확정",
+    cancelLabel: "취소",
+  });
   if (!confirmed) return;
 
   state.selectedTeamId = teamId;
@@ -2266,9 +2323,9 @@ function buildLineupRowHtml(group, idx, row, defenseRoles, insights) {
   const health = rowHealthState(row, insights);
   return `
     <div class="tactics-lineup-row" data-group="${group}" data-idx="${idx}">
-      <select data-field="pid">${playerOptions}</select>
-      <select data-field="offenseRole">${offOptions}</select>
-      <select data-field="defenseRole">${defOptions}</select>
+      <select data-field="pid" class="ui-select">${playerOptions}</select>
+      <select data-field="offenseRole" class="ui-select">${offOptions}</select>
+      <select data-field="defenseRole" class="ui-select">${defOptions}</select>
       <input data-field="minutes" type="number" min="0" max="48" value="${Number(row.minutes || 0)}" />
       <span class="tactics-role-badge ${health.cls}">${health.text}</span>
     </div>
@@ -2682,7 +2739,7 @@ els.collegeAssignBtn.addEventListener("click", async () => {
   const scoutId = els.collegeScoutSelect.value;
   const playerId = els.collegeScoutPlayerSelect.value;
   if (!scoutId || !playerId) {
-    alert("스카우터와 선수를 선택하세요.");
+    setCollegeScoutingFeedback("스카우터와 대상을 모두 선택한 뒤 배정하세요.", "warn");
     return;
   }
   await fetchJson("/api/scouting/assign", {
@@ -2694,14 +2751,13 @@ els.collegeAssignBtn.addEventListener("click", async () => {
   if (els.collegeScoutingFeedback) {
     const scoutName = els.collegeScoutSelect.options[els.collegeScoutSelect.selectedIndex]?.textContent || scoutId;
     const playerName = els.collegeScoutPlayerSelect.options[els.collegeScoutPlayerSelect.selectedIndex]?.textContent || playerId;
-    els.collegeScoutingFeedback.textContent = `${scoutName} → ${playerName} 배정 완료`;
+    setCollegeScoutingFeedback(`${scoutName} → ${playerName} 배정 완료 · 리포트는 월말 진행 시 생성됩니다.`, "ok");
   }
-  alert("스카우터를 배정했습니다. 리포트는 월말 진행 시 생성됩니다.");
 });
 els.collegeUnassignBtn.addEventListener("click", async () => {
   const scoutId = els.collegeScoutSelect.value;
   if (!scoutId) {
-    alert("해제할 스카우터를 선택하세요.");
+    setCollegeScoutingFeedback("해제할 스카우터를 먼저 선택하세요.", "warn");
     return;
   }
   await fetchJson("/api/scouting/unassign", {
@@ -2712,9 +2768,8 @@ els.collegeUnassignBtn.addEventListener("click", async () => {
   await loadCollegeScouting();
   if (els.collegeScoutingFeedback) {
     const scoutName = els.collegeScoutSelect.options[els.collegeScoutSelect.selectedIndex]?.textContent || scoutId;
-    els.collegeScoutingFeedback.textContent = `${scoutName} 배정을 해제했습니다.`;
+    setCollegeScoutingFeedback(`${scoutName} 배정을 해제했습니다.`, "info");
   }
-  alert("배정을 해제했습니다.");
 });
 els.trainingTypeButtons.querySelectorAll("button[data-training-type]").forEach((btn) => {
   btn.addEventListener("click", () => renderTrainingDetail(btn.dataset.trainingType).catch((e) => alert(e.message)));
