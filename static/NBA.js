@@ -63,6 +63,24 @@ function applyTeamLogo(el, teamId) {
   el.classList.remove("team-logo-image");
 }
 
+function renderTeamLogoMark(teamId, extraClass = "") {
+  const branding = getTeamBranding(teamId);
+  const classes = ["team-logo-mark", extraClass, branding.logoUrl ? "has-image" : ""]
+    .filter(Boolean)
+    .join(" ");
+  const style = branding.logoUrl ? ` style="background-image:url('${branding.logoUrl}')"` : "";
+  return `<span class="${classes}" aria-hidden="true"${style}></span>`;
+}
+
+function getScheduleVenueText(game) {
+  const label = String(game?.opponent_label || "").trim().toLowerCase();
+  const isAwayGame = label.startsWith("@");
+  const venueTeamId = isAwayGame
+    ? String(game?.opponent_team_id || "").toUpperCase()
+    : String(state.selectedTeamId || "").toUpperCase();
+  return getTeamBranding(venueTeamId).arenaName || game?.opponent_team_name || game?.opponent_team_id || "";
+}
+
 const TACTICS_OFFENSE_SCHEMES = [
   { key: "Spread_HeavyPnR", label: "heavy_pnr" },
   { key: "Drive_Kick", label: "drive_kick" },
@@ -783,10 +801,12 @@ function renderScheduleTables(games) {
       const result = g.result || {};
       const record = g.record_after_game || {};
       const leaders = g.leaders || {};
+      const opponentTeamId = String(g.opponent_team_id || "").toUpperCase();
+      const venueName = getScheduleVenueText(g);
       return `
         <tr>
           <td>${g.date_mmdd || "--/--"}</td>
-          <td class="schedule-opponent-cell">${g.opponent_label || "-"} <span class="schedule-opponent-name">${g.opponent_team_name || g.opponent_team_id || ""}</span></td>
+          <td class="schedule-opponent-cell">${g.opponent_label || "-"} ${renderTeamLogoMark(opponentTeamId, "schedule-team-logo")}<span class="schedule-opponent-name">${venueName}</span></td>
           <td><span class="schedule-result-badge ${result.wl === "W" ? "schedule-result-win" : "schedule-result-loss"}">${result.display || "-"}</span></td>
           <td>${record.display || "-"}</td>
           <td>${formatLeader(leaders.points)}</td>
@@ -798,13 +818,17 @@ function renderScheduleTables(games) {
     : renderEmptyScheduleRow(7, "완료된 경기가 없습니다.");
 
   els.scheduleUpcomingBody.innerHTML = upcoming.length
-    ? upcoming.map((g) => `
-      <tr>
-        <td>${g.date_mmdd || "--/--"}</td>
-        <td class="schedule-opponent-cell">${g.opponent_label || "-"} <span class="schedule-opponent-name">${g.opponent_team_name || g.opponent_team_id || ""}</span></td>
-        <td><span class="schedule-time-chip">${g.tipoff_time || "--:-- --"}</span></td>
-      </tr>
-    `).join("")
+    ? upcoming.map((g) => {
+      const opponentTeamId = String(g.opponent_team_id || "").toUpperCase();
+      const venueName = getScheduleVenueText(g);
+      return `
+        <tr>
+          <td>${g.date_mmdd || "--/--"}</td>
+          <td class="schedule-opponent-cell">${g.opponent_label || "-"} ${renderTeamLogoMark(opponentTeamId, "schedule-team-logo")}<span class="schedule-opponent-name">${venueName}</span></td>
+          <td><span class="schedule-time-chip">${g.tipoff_time || "--:-- --"}</span></td>
+        </tr>
+      `;
+    }).join("")
     : renderEmptyScheduleRow(3, "예정된 경기가 없습니다.");
 }
 
@@ -2098,7 +2122,7 @@ async function renderTeams() {
         const card = document.createElement("button");
         card.className = "team-card";
         card.type = "button";
-        card.innerHTML = `<strong>${fullName}</strong><small>${conference} · ${division}</small>`;
+        card.innerHTML = `${renderTeamLogoMark(id, "team-card-logo")}<strong>${fullName}</strong><small>${conference} · ${division}</small>`;
         card.addEventListener("click", () => {
           confirmTeamSelection(id, fullName).catch((e) => alert(e.message));
         });
@@ -2130,7 +2154,7 @@ function renderStandingsRows(tbody, rows) {
     const diffClass = diff > 0 ? "standings-diff-positive" : diff < 0 ? "standings-diff-negative" : "";
     tr.innerHTML = `
       <td>${row?.rank ?? "-"}</td>
-      <td class="standings-team-cell">${TEAM_FULL_NAMES[teamId] || teamId || "-"}</td>
+      <td class="standings-team-cell">${renderTeamLogoMark(teamId, "standings-team-logo")}${TEAM_FULL_NAMES[teamId] || teamId || "-"}</td>
       <td>${row?.wins ?? 0}</td>
       <td>${row?.losses ?? 0}</td>
       <td>${row?.pct || ".000"}</td>
