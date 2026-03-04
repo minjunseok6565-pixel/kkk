@@ -1141,6 +1141,79 @@ h1, h2, h3 { margin: 0 0 12px; }
   min-width: 160px;
 }
 
+#college-screen .college-bigboard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+#college-screen .college-bigboard-card {
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+
+#college-screen .college-bigboard-card:hover,
+#college-screen .college-bigboard-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(29, 78, 216, 0.48);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+}
+
+#college-screen .college-bigboard-card-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+#college-screen .college-bigboard-card-title strong {
+  color: #0f172a;
+}
+
+#college-screen .college-bigboard-mini-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#college-screen .college-bigboard-mini-table th,
+#college-screen .college-bigboard-mini-table td {
+  font-size: .8rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 5px 4px;
+  text-align: left;
+}
+
+#college-screen .college-bigboard-mini-table th:first-child,
+#college-screen .college-bigboard-mini-table td:first-child {
+  width: 30px;
+}
+
+#college-screen .college-bigboard-mini-table th:last-child,
+#college-screen .college-bigboard-mini-table td:last-child {
+  width: 38px;
+}
+
+#college-screen .college-bigboard-modal-panel {
+  width: min(1080px, 92vw);
+}
+
+#college-screen .college-bigboard-modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+#college-screen #college-bigboard-modal-summary {
+  margin: 4px 0 0;
+}
+
 #college-screen .ui-select {
   color: #0f172a;
   background-color: #fff;
@@ -1229,12 +1302,27 @@ h1, h2, h3 { margin: 0 0 12px; }
 }
 
 @media (max-width: 1220px) {
+  #college-screen .college-bigboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   #college-screen .college-kpi-grid,
   #college-screen .college-two-col,
   #college-screen .college-two-col-7-5 {
     grid-template-columns: 1fr;
   }
   #college-screen .college-insight-card { min-height: 0; }
+}
+
+@media (max-width: 640px) {
+  #college-screen .college-bigboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #college-screen .college-bigboard-modal-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 .roster-table-wrap,
