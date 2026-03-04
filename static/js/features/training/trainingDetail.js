@@ -2,6 +2,7 @@ import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { fetchJson } from "../../core/api.js";
 import { dateToIso, parseIsoDate, addDays } from "../../core/format.js";
+import { TACTICS_OFFENSE_SCHEMES, TACTICS_DEFENSE_SCHEMES } from "../../core/constants/tactics.js";
 import { loadTrainingData } from "./trainingScreen.js";
 import { renderTrainingCalendar } from "./trainingCalendar.js";
 
