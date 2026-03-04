@@ -581,33 +581,14 @@
       </section>
 
       <section id="college-panel-scouting" class="college-panel" aria-hidden="true">
-        <div class="college-two-col">
-          <article class="college-card">
-            <h3>스카우터 배정</h3>
-            <div class="college-form-grid">
-              <label>스카우터<select id="college-scout-select" class="ui-select"></select></label>
-              <label>대상 선수<select id="college-scout-player-select" class="ui-select"></select></label>
-              <div class="college-actions-row">
-                <button id="college-assign-btn" type="button" class="btn btn-primary">배정</button>
-                <button id="college-unassign-btn" type="button" class="btn btn-secondary">해제</button>
-              </div>
-              <p id="college-scouting-feedback" class="college-inline-meta">스카우터와 선수를 선택한 뒤 배정하세요.</p>
-            </div>
-          </article>
-          <article class="college-card">
-            <h3>스카우팅 리포트</h3>
-            <div class="college-table-wrap">
-              <table class="college-table">
-                <thead>
-                  <tr>
-                    <th>날짜</th><th>스카우터</th><th>선수</th><th>상태</th><th>요약</th>
-                  </tr>
-                </thead>
-                <tbody id="college-reports-body"></tbody>
-              </table>
-            </div>
-          </article>
-        </div>
+        <article class="college-card scouting-overview-card">
+          <div class="college-card-head-inline">
+            <h3>스카우팅 오퍼레이션</h3>
+            <p id="college-scouting-summary" class="college-inline-meta">스카우터 카드를 불러오는 중입니다...</p>
+          </div>
+          <p id="college-scouting-feedback" class="college-inline-meta">스카우터 카드를 통해 선수 배정과 리포트 확인을 진행하세요.</p>
+        </article>
+        <div id="college-scout-cards" class="college-scout-grid" role="list"></div>
       </section>
     </section>
 
@@ -753,6 +734,39 @@
           <tbody id="college-bigboard-modal-body"></tbody>
         </table>
       </div>
+    </article>
+  </div>
+
+  <div id="college-scout-player-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="college-scout-player-modal-title">
+    <div id="college-scout-player-modal-backdrop" class="confirm-modal-backdrop"></div>
+    <article class="confirm-modal-panel college-scout-modal-panel">
+      <p class="confirm-modal-eyebrow">SCOUT ASSIGNMENT</p>
+      <div class="college-bigboard-modal-head">
+        <div>
+          <h3 id="college-scout-player-modal-title" class="confirm-modal-title">선수 선택</h3>
+          <p id="college-scout-player-modal-meta" class="college-inline-meta"></p>
+        </div>
+        <button id="college-scout-player-modal-close" type="button" class="btn btn-secondary">닫기</button>
+      </div>
+      <label class="college-scout-search-label">선수 검색
+        <input id="college-scout-player-search" type="search" class="ui-input" placeholder="선수명 / 학교 / 포지션 검색" />
+      </label>
+      <div id="college-scout-player-list" class="college-scout-player-list" role="list"></div>
+    </article>
+  </div>
+
+  <div id="college-scout-reports-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="college-scout-reports-modal-title">
+    <div id="college-scout-reports-modal-backdrop" class="confirm-modal-backdrop"></div>
+    <article class="confirm-modal-panel college-scout-modal-panel">
+      <p class="confirm-modal-eyebrow">SCOUTING REPORTS</p>
+      <div class="college-bigboard-modal-head">
+        <div>
+          <h3 id="college-scout-reports-modal-title" class="confirm-modal-title">스카우팅 리포트</h3>
+          <p id="college-scout-reports-modal-meta" class="college-inline-meta"></p>
+        </div>
+        <button id="college-scout-reports-modal-close" type="button" class="btn btn-secondary">닫기</button>
+      </div>
+      <div id="college-scout-reports-list" class="college-scout-reports-list"></div>
     </article>
   </div>
 
