@@ -1423,10 +1423,18 @@ h1, h2, h3 { margin: 0 0 12px; }
   width: min(860px, 92vw);
 }
 
-#college-screen .college-scout-search-label {
+#college-screen .college-scout-search-toolbar {
+  margin: 16px 0 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: 10px;
+  align-items: end;
+}
+
+#college-screen .college-scout-search-label,
+#college-screen .college-scout-filter-label {
   display: grid;
   gap: 8px;
-  margin: 16px 0 10px;
   font-weight: 600;
   color: #cbd5e1;
 }
@@ -1436,6 +1444,13 @@ h1, h2, h3 { margin: 0 0 12px; }
   overflow: auto;
   display: grid;
   gap: 8px;
+  margin-top: 8px;
+}
+
+#college-screen .college-scout-player-actions-row {
+  margin-top: 10px;
+  display: flex;
+  justify-content: center;
 }
 
 #college-screen .college-player-option {
@@ -1444,22 +1459,50 @@ h1, h2, h3 { margin: 0 0 12px; }
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   border: 1px solid rgba(148, 163, 184, 0.34);
-  background: rgba(15, 23, 42, 0.56);
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.75), rgba(15, 23, 42, 0.55));
   color: #f8fafc;
-  border-radius: 10px;
-  padding: 11px 12px;
+  border-radius: 12px;
+  padding: 12px 13px;
+  transition: border-color .15s ease, transform .15s ease, background .15s ease;
 }
 
-#college-screen .college-player-option:hover {
-  border-color: rgba(96, 165, 250, 0.78);
-  background: rgba(30, 64, 175, 0.34);
+#college-screen .college-player-option:hover,
+#college-screen .college-player-option:focus-visible {
+  border-color: rgba(96, 165, 250, 0.88);
+  background: rgba(30, 64, 175, 0.35);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+#college-screen .college-player-option-main {
+  display: grid;
+  gap: 2px;
+}
+
+#college-screen .college-player-option-main strong {
+  font-size: .98rem;
+}
+
+#college-screen .college-player-option-main small {
+  color: rgba(226, 232, 240, 0.85);
+  font-size: .82rem;
+}
+
+#college-screen .college-player-option-badge {
+  border-radius: 999px;
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .03em;
+  padding: 5px 9px;
+  color: #065f46;
+  background: rgba(110, 231, 183, 0.85);
 }
 
 #college-screen .college-player-option.is-current {
-  border-color: rgba(16, 185, 129, 0.64);
-  background: rgba(16, 185, 129, 0.22);
+  border-color: rgba(16, 185, 129, 0.72);
+  background: rgba(16, 185, 129, 0.18);
 }
 
 #college-screen .college-scout-reports-list {
@@ -3705,4 +3748,11 @@ body:has(#player-detail-screen.active) .app-shell {
   }
   #tactics-screen .tactics-lineup-head span:nth-child(n+3) { display: none; }
   #tactics-screen .tactics-lineup-row > :nth-child(n+3) { grid-column: span 2; }
+}
+
+
+@media (max-width: 900px) {
+  #college-screen .college-scout-search-toolbar {
+    grid-template-columns: 1fr;
+  }
 }

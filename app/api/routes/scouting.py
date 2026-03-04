@@ -16,6 +16,114 @@ from app.schemas.scouting import ScoutingAssignRequest, ScoutingUnassignRequest
 router = APIRouter()
 
 
+def _clamp_int(value: Any, lo: int, hi: int) -> int:
+    try:
+        num = int(value)
+    except Exception:
+        return int(lo)
+    if num < lo:
+        return int(lo)
+    if num > hi:
+        return int(hi)
+    return int(num)
+
+
+@router.get("/api/scouting/players/search")
+async def api_scouting_search_players(
+    q: str,
+    status: Optional[Literal["ACTIVE", "DECLARED", "ALL"]] = "ALL",
+    limit: int = 30,
+    offset: int = 0,
+):
+    """Search college players for scouting assignment modal (server-side)."""
+    try:
+        keyword = str(q or "").strip()
+        if len(keyword) < 2:
+            raise HTTPException(status_code=400, detail="q must be at least 2 characters.")
+
+        st = str(status or "ALL").strip().upper()
+        if st not in {"ACTIVE", "DECLARED", "ALL"}:
+            raise HTTPException(status_code=400, detail="status must be one of ACTIVE, DECLARED, ALL.")
+
+        lim = _clamp_int(limit, 1, 50)
+        off = _clamp_int(offset, 0, 1_000_000)
+
+        keyword_like = f"%{keyword.lower()}%"
+        where = ["(LOWER(p.name) LIKE ? OR LOWER(COALESCE(t.name, '')) LIKE ? OR LOWER(COALESCE(p.pos, '')) LIKE ?)"]
+        params: List[Any] = [keyword_like, keyword_like, keyword_like]
+
+        if st in {"ACTIVE", "DECLARED"}:
+            where.append("p.status = ?")
+            params.append(st)
+        else:
+            where.append("p.status IN ('ACTIVE', 'DECLARED')")
+
+        where_sql = " AND ".join(where)
+        db_path = state.get_db_path()
+
+        with LeagueRepo(db_path) as repo:
+            repo.init_db()
+            total_row = repo._conn.execute(
+                f"""
+                SELECT COUNT(*) AS n
+                FROM college_players p
+                LEFT JOIN college_teams t
+                  ON t.college_team_id = p.college_team_id
+                WHERE {where_sql};
+                """,
+                tuple(params),
+            ).fetchone()
+            total = int(total_row[0] or 0) if total_row else 0
+
+            rows = repo._conn.execute(
+                f"""
+                SELECT
+                    p.player_id,
+                    p.name,
+                    p.pos,
+                    p.college_team_id,
+                    t.name AS college_team_name,
+                    p.class_year,
+                    p.status
+                FROM college_players p
+                LEFT JOIN college_teams t
+                  ON t.college_team_id = p.college_team_id
+                WHERE {where_sql}
+                ORDER BY p.name ASC, p.player_id ASC
+                LIMIT ? OFFSET ?;
+                """,
+                tuple(params + [int(lim), int(off)]),
+            ).fetchall()
+
+        players = [
+            {
+                "player_id": str(r[0] or ""),
+                "name": str(r[1] or ""),
+                "pos": str(r[2] or ""),
+                "college_team_id": str(r[3] or ""),
+                "college_team_name": str(r[4] or ""),
+                "class_year": int(r[5] or 0),
+                "status": str(r[6] or ""),
+            }
+            for r in rows
+        ]
+
+        return {
+            "ok": True,
+            "q": keyword,
+            "status": st,
+            "total": int(total),
+            "offset": int(off),
+            "limit": int(lim),
+            "players": players,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search scouting players: {e}") from e
+
+
 
 
 

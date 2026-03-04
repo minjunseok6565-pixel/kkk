@@ -155,7 +155,18 @@ const state = {
   scoutingScouts: [],
   scoutingReports: [],
   scoutingPlayers: [],
+  scoutingPlayerLookup: {},
   scoutingPlayerSearch: "",
+  scoutingPlayerSearchStatus: "ALL",
+  scoutingPlayerSearchResults: [],
+  scoutingPlayerSearchTotal: 0,
+  scoutingPlayerSearchOffset: 0,
+  scoutingPlayerSearchLimit: 30,
+  scoutingPlayerSearchLoading: false,
+  scoutingPlayerSearchError: "",
+  scoutingPlayerSearchHasSearched: false,
+  scoutingPlayerSearchRequestSeq: 0,
+  scoutingPlayerSearchDebounceTimer: null,
   scoutingActiveScoutId: "",
 };
 
@@ -270,7 +281,10 @@ const els = {
   collegeScoutPlayerModalTitle: document.getElementById("college-scout-player-modal-title"),
   collegeScoutPlayerModalMeta: document.getElementById("college-scout-player-modal-meta"),
   collegeScoutPlayerSearch: document.getElementById("college-scout-player-search"),
+  collegeScoutPlayerStatus: document.getElementById("college-scout-player-status"),
+  collegeScoutPlayerSearchMeta: document.getElementById("college-scout-player-search-meta"),
   collegeScoutPlayerList: document.getElementById("college-scout-player-list"),
+  collegeScoutPlayerLoadMore: document.getElementById("college-scout-player-load-more"),
   collegeScoutReportsModal: document.getElementById("college-scout-reports-modal"),
   collegeScoutReportsModalBackdrop: document.getElementById("college-scout-reports-modal-backdrop"),
   collegeScoutReportsModalClose: document.getElementById("college-scout-reports-modal-close"),
@@ -818,14 +832,13 @@ function closeCollegeBigboardDetailScreen() {
 
 async function loadCollegeScouting() {
   if (!state.selectedTeamId) return;
-  const [scoutsPayload, playersPayload, reportsPayload] = await Promise.all([
+  const [scoutsPayload, reportsPayload] = await Promise.all([
     fetchJson(`/api/scouting/scouts/${encodeURIComponent(state.selectedTeamId)}`),
-    fetchJson("/api/college/players?sort=pts&order=desc&limit=200"),
     fetchJson(`/api/scouting/reports?team_id=${encodeURIComponent(state.selectedTeamId)}&limit=50`),
   ]);
   state.scoutingScouts = scoutsPayload?.scouts || [];
   state.scoutingReports = reportsPayload?.reports || [];
-  state.scoutingPlayers = playersPayload?.players || [];
+  state.scoutingPlayers = [];
   renderCollegeScoutCards();
 }
 
@@ -864,6 +877,12 @@ function getScoutUnreadCount(scoutId) {
   }).length;
 }
 
+function getScoutingPlayerName(playerId, fallback = "-") {
+  if (!playerId) return fallback;
+  const player = state.scoutingPlayerLookup[playerId];
+  return player?.name || fallback;
+}
+
 function renderCollegeScoutCards() {
   if (!els.collegeScoutCards) return;
   if (!state.scoutingScouts.length) {
@@ -880,7 +899,8 @@ function renderCollegeScoutCards() {
   els.collegeScoutCards.innerHTML = state.scoutingScouts.map((scout) => {
     const scoutId = String(scout?.scout_id || "");
     const assignment = scout?.active_assignment;
-    const player = state.scoutingPlayers.find((candidate) => String(candidate?.player_id || "") === String(assignment?.target_player_id || ""));
+    const targetId = String(assignment?.target_player_id || "");
+    const playerName = assignment ? getScoutingPlayerName(targetId, targetId || "-") : "미배정";
     const unread = getScoutUnreadCount(scoutId);
     const focusAxes = Array.isArray(scout?.profile?.focus_axes) ? scout.profile.focus_axes.slice(0, 2) : [];
     const styleTags = Array.isArray(scout?.profile?.style_tags) ? scout.profile.style_tags.slice(0, 2) : [];
@@ -894,14 +914,14 @@ function renderCollegeScoutCards() {
           ${unread > 0 ? `<span class="college-scout-unread-badge">NEW ${unread}</span>` : ""}
         </div>
         <p class="college-inline-meta">
-          현재 배정: ${assignment ? escapeHtml(player?.name || assignment?.target_player_id || "-") : "미배정"}
+          현재 배정: ${escapeHtml(playerName)}
         </p>
         <div class="college-tag-wrap">
           ${focusAxes.map((axis) => `<span class="college-tag">${escapeHtml(axis)}</span>`).join("")}
           ${styleTags.map((tag) => `<span class="college-tag is-strength">${escapeHtml(tag)}</span>`).join("")}
         </div>
         <div class="college-actions-row college-scout-actions">
-          <button type="button" class="btn btn-primary" data-action="pick-player" data-scout-id="${escapeHtml(scoutId)}">선수 선택</button>
+          <button type="button" class="btn btn-primary" data-action="pick-player" data-scout-id="${escapeHtml(scoutId)}">선수 배정</button>
           <button type="button" class="btn btn-secondary" data-action="open-reports" data-scout-id="${escapeHtml(scoutId)}">스카우팅 리포트${unread > 0 ? ` (${unread})` : ""}</button>
         </div>
       </article>
@@ -909,19 +929,162 @@ function renderCollegeScoutCards() {
   }).join("");
 }
 
+function resetScoutPlayerSearchState() {
+  state.scoutingPlayerSearch = "";
+  state.scoutingPlayerSearchStatus = "ALL";
+  state.scoutingPlayerSearchResults = [];
+  state.scoutingPlayerSearchTotal = 0;
+  state.scoutingPlayerSearchOffset = 0;
+  state.scoutingPlayerSearchLoading = false;
+  state.scoutingPlayerSearchError = "";
+  state.scoutingPlayerSearchHasSearched = false;
+}
+
+function renderScoutPlayerList() {
+  if (!els.collegeScoutPlayerList) return;
+
+  const keyword = String(state.scoutingPlayerSearch || "").trim();
+  const hasKeyword = keyword.length >= 2;
+  const loading = !!state.scoutingPlayerSearchLoading;
+  const err = String(state.scoutingPlayerSearchError || "");
+  const rows = Array.isArray(state.scoutingPlayerSearchResults) ? state.scoutingPlayerSearchResults : [];
+  const scout = state.scoutingScouts.find((item) => String(item?.scout_id || "") === String(state.scoutingActiveScoutId || ""));
+
+  if (els.collegeScoutPlayerSearchMeta) {
+    if (!hasKeyword) {
+      els.collegeScoutPlayerSearchMeta.textContent = "2글자 이상 입력하면 전체 대학 선수 대상 검색이 시작됩니다.";
+    } else if (loading) {
+      els.collegeScoutPlayerSearchMeta.textContent = "선수를 검색 중입니다...";
+    } else if (err) {
+      els.collegeScoutPlayerSearchMeta.textContent = err;
+    } else {
+      const total = Number(state.scoutingPlayerSearchTotal || 0);
+      const shown = rows.length;
+      els.collegeScoutPlayerSearchMeta.textContent = `검색어 '${keyword}' · ${total}명 중 ${shown}명 표시`;
+    }
+  }
+
+  if (els.collegeScoutPlayerLoadMore) {
+    const hasMore = rows.length < Number(state.scoutingPlayerSearchTotal || 0);
+    els.collegeScoutPlayerLoadMore.classList.toggle("hidden", !hasKeyword || loading || !!err || !hasMore);
+    els.collegeScoutPlayerLoadMore.disabled = loading;
+  }
+
+  if (!hasKeyword) {
+    els.collegeScoutPlayerList.innerHTML = `<p class="college-inline-meta">선수명을 2글자 이상 입력해주세요.</p>`;
+    return;
+  }
+  if (loading && !rows.length) {
+    els.collegeScoutPlayerList.innerHTML = `<p class="college-inline-meta">검색 결과를 불러오는 중입니다...</p>`;
+    return;
+  }
+  if (err && !rows.length) {
+    els.collegeScoutPlayerList.innerHTML = `<p class="college-inline-meta">${escapeHtml(err)}</p>`;
+    return;
+  }
+  if (!rows.length) {
+    els.collegeScoutPlayerList.innerHTML = `<p class="college-inline-meta">검색 결과가 없습니다.</p>`;
+    return;
+  }
+
+  els.collegeScoutPlayerList.innerHTML = rows.map((player) => {
+    const pid = String(player?.player_id || "");
+    const assignedNow = String(scout?.active_assignment?.target_player_id || "") === pid;
+    return `
+      <button type="button" role="option" class="college-player-option ${assignedNow ? "is-current" : ""}" data-player-id="${escapeHtml(pid)}">
+        <span class="college-player-option-main">
+          <strong>${escapeHtml(player?.name || "-")}</strong>
+          <small>${escapeHtml(player?.college_team_name || player?.college_team_id || "-")} · ${escapeHtml(player?.pos || "-")} · ${escapeHtml(player?.status || "-")}</small>
+        </span>
+        ${assignedNow ? `<span class="college-player-option-badge">현재 배정</span>` : ""}
+      </button>
+    `;
+  }).join("");
+}
+
+async function searchScoutingPlayers({ append = false } = {}) {
+  const keyword = String(state.scoutingPlayerSearch || "").trim();
+  if (keyword.length < 2) {
+    state.scoutingPlayerSearchResults = [];
+    state.scoutingPlayerSearchTotal = 0;
+    state.scoutingPlayerSearchOffset = 0;
+    state.scoutingPlayerSearchError = "";
+    state.scoutingPlayerSearchLoading = false;
+    state.scoutingPlayerSearchHasSearched = false;
+    renderScoutPlayerList();
+    return;
+  }
+
+  const nextOffset = append ? state.scoutingPlayerSearchResults.length : 0;
+  const reqSeq = Number(state.scoutingPlayerSearchRequestSeq || 0) + 1;
+  state.scoutingPlayerSearchRequestSeq = reqSeq;
+  state.scoutingPlayerSearchLoading = true;
+  state.scoutingPlayerSearchError = "";
+  if (!append) state.scoutingPlayerSearchHasSearched = true;
+  renderScoutPlayerList();
+
+  try {
+    const query = new URLSearchParams({
+      q: keyword,
+      status: String(state.scoutingPlayerSearchStatus || "ALL"),
+      limit: String(state.scoutingPlayerSearchLimit || 30),
+      offset: String(nextOffset),
+    });
+    const payload = await fetchJson(`/api/scouting/players/search?${query.toString()}`);
+    if (reqSeq !== state.scoutingPlayerSearchRequestSeq) return;
+
+    const rows = Array.isArray(payload?.players) ? payload.players : [];
+    state.scoutingPlayerSearchOffset = Number(payload?.offset || nextOffset);
+    state.scoutingPlayerSearchTotal = Number(payload?.total || 0);
+    state.scoutingPlayerSearchResults = append
+      ? [...state.scoutingPlayerSearchResults, ...rows]
+      : rows;
+
+    rows.forEach((p) => {
+      const pid = String(p?.player_id || "");
+      if (pid) state.scoutingPlayerLookup[pid] = p;
+    });
+  } catch (error) {
+    if (reqSeq !== state.scoutingPlayerSearchRequestSeq) return;
+    state.scoutingPlayerSearchError = error?.message || "선수 검색 중 오류가 발생했습니다.";
+    if (!append) state.scoutingPlayerSearchResults = [];
+  } finally {
+    if (reqSeq === state.scoutingPlayerSearchRequestSeq) {
+      state.scoutingPlayerSearchLoading = false;
+      renderScoutPlayerList();
+    }
+  }
+}
+
+function queueScoutingPlayerSearch() {
+  if (state.scoutingPlayerSearchDebounceTimer) {
+    clearTimeout(state.scoutingPlayerSearchDebounceTimer);
+  }
+  state.scoutingPlayerSearchDebounceTimer = setTimeout(() => {
+    searchScoutingPlayers({ append: false }).catch((e) => {
+      state.scoutingPlayerSearchError = e?.message || "선수 검색 중 오류가 발생했습니다.";
+      state.scoutingPlayerSearchLoading = false;
+      renderScoutPlayerList();
+    });
+  }, 280);
+}
+
 function openScoutPlayerModal(scoutId) {
   if (!els.collegeScoutPlayerModal) return;
   state.scoutingActiveScoutId = scoutId;
-  state.scoutingPlayerSearch = "";
+  resetScoutPlayerSearchState();
   const scout = state.scoutingScouts.find((item) => String(item?.scout_id || "") === scoutId);
   if (els.collegeScoutPlayerModalTitle) {
-    els.collegeScoutPlayerModalTitle.textContent = `${scout?.display_name || scoutId} · 선수 선택`;
+    els.collegeScoutPlayerModalTitle.textContent = `${scout?.display_name || scoutId} · 선수 배정`;
   }
   if (els.collegeScoutPlayerModalMeta) {
-    els.collegeScoutPlayerModalMeta.textContent = `전문분야 ${scout?.specialty_key || "GENERAL"} · 대상 선수를 선택하면 즉시 배정합니다.`;
+    els.collegeScoutPlayerModalMeta.textContent = `전문분야 ${scout?.specialty_key || "GENERAL"} · 전체 대학 선수 검색으로 대상 선수를 배정합니다.`;
   }
   if (els.collegeScoutPlayerSearch) {
     els.collegeScoutPlayerSearch.value = "";
+  }
+  if (els.collegeScoutPlayerStatus) {
+    els.collegeScoutPlayerStatus.value = "ALL";
   }
   renderScoutPlayerList();
   els.collegeScoutPlayerModal.classList.remove("hidden");
@@ -931,33 +1094,12 @@ function openScoutPlayerModal(scoutId) {
 
 function closeScoutPlayerModal() {
   if (!els.collegeScoutPlayerModal) return;
+  if (state.scoutingPlayerSearchDebounceTimer) {
+    clearTimeout(state.scoutingPlayerSearchDebounceTimer);
+    state.scoutingPlayerSearchDebounceTimer = null;
+  }
   els.collegeScoutPlayerModal.classList.add("hidden");
   document.body.classList.remove("is-modal-open");
-}
-
-function renderScoutPlayerList() {
-  if (!els.collegeScoutPlayerList) return;
-  const keyword = String(state.scoutingPlayerSearch || "").trim().toLowerCase();
-  const scout = state.scoutingScouts.find((item) => String(item?.scout_id || "") === String(state.scoutingActiveScoutId || ""));
-  const filtered = state.scoutingPlayers.filter((player) => {
-    if (!keyword) return true;
-    const corpus = `${player?.name || ""} ${player?.college_team_name || player?.college_team_id || ""} ${player?.pos || ""}`.toLowerCase();
-    return corpus.includes(keyword);
-  }).slice(0, 80);
-
-  if (!filtered.length) {
-    els.collegeScoutPlayerList.innerHTML = `<p class="college-inline-meta">검색 결과가 없습니다.</p>`;
-    return;
-  }
-  els.collegeScoutPlayerList.innerHTML = filtered.map((player) => {
-    const assignedNow = String(scout?.active_assignment?.target_player_id || "") === String(player?.player_id || "");
-    return `
-      <button type="button" class="college-player-option ${assignedNow ? "is-current" : ""}" data-player-id="${escapeHtml(player?.player_id || "")}">
-        <span>${escapeHtml(player?.name || "-")}</span>
-        <span>${escapeHtml(player?.pos || "-")} · ${escapeHtml(player?.college_team_name || player?.college_team_id || "-")}</span>
-      </button>
-    `;
-  }).join("");
 }
 
 function openScoutReportsModal(scoutId) {
@@ -3171,7 +3313,20 @@ els.collegeBigboardDetailBackBtn?.addEventListener("click", () => closeCollegeBi
 
 els.collegeScoutPlayerSearch?.addEventListener("input", () => {
   state.scoutingPlayerSearch = els.collegeScoutPlayerSearch.value || "";
-  renderScoutPlayerList();
+  queueScoutingPlayerSearch();
+});
+
+els.collegeScoutPlayerStatus?.addEventListener("change", () => {
+  state.scoutingPlayerSearchStatus = els.collegeScoutPlayerStatus.value || "ALL";
+  queueScoutingPlayerSearch();
+});
+
+els.collegeScoutPlayerLoadMore?.addEventListener("click", () => {
+  searchScoutingPlayers({ append: true }).catch((e) => {
+    state.scoutingPlayerSearchError = e?.message || "선수 검색 중 오류가 발생했습니다.";
+    state.scoutingPlayerSearchLoading = false;
+    renderScoutPlayerList();
+  });
 });
 
 els.collegeScoutPlayerList?.addEventListener("click", async (event) => {
@@ -3182,7 +3337,9 @@ els.collegeScoutPlayerList?.addEventListener("click", async (event) => {
   if (!scoutId || !playerId) return;
 
   const scout = state.scoutingScouts.find((item) => String(item?.scout_id || "") === scoutId);
-  const player = state.scoutingPlayers.find((item) => String(item?.player_id || "") === playerId);
+  const player = state.scoutingPlayerSearchResults.find((item) => String(item?.player_id || "") === playerId)
+    || state.scoutingPlayerLookup[playerId]
+    || null;
   if (String(scout?.active_assignment?.target_player_id || "") === playerId) {
     setCollegeScoutingFeedback("이미 이 선수에게 배정된 스카우터입니다.", "warn");
     closeScoutPlayerModal();
@@ -3212,6 +3369,7 @@ els.collegeScoutPlayerList?.addEventListener("click", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ team_id: state.selectedTeamId, scout_id: scoutId, player_id: playerId, target_kind: "COLLEGE" })
     });
+    if (player && playerId) state.scoutingPlayerLookup[playerId] = player;
     await loadCollegeScouting();
     setCollegeScoutingFeedback(`${scout?.display_name || scoutId} → ${player?.name || playerId} 배정 완료`, "ok");
     closeScoutPlayerModal();
