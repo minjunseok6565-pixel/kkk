@@ -1,0 +1,362 @@
+/* Training screen */
+
+.training-top-tabs {
+  display: flex;
+  gap: 14px;
+  justify-content: flex-start;
+  margin: 18px 0;
+}
+
+.training-summary-strip {
+  margin: 4px 0 16px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.training-kpi-card {
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  padding: 11px 12px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
+.training-kpi-title {
+  font-size: 12px;
+  color: #64748b;
+  margin: 0 0 6px;
+}
+
+.training-kpi-value {
+  margin: 0;
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.training-kpi-sub {
+  margin: 5px 0 0;
+  color: #475569;
+  font-size: 12px;
+}
+
+.training-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.9fr) minmax(320px, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.training-main-col { min-width: 0; }
+
+.training-context-panel {
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 14px;
+  background: linear-gradient(165deg, #ffffff, #f8fafc);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  padding: 14px;
+  min-height: 220px;
+}
+
+.training-context-title {
+  margin: 0 0 10px;
+  font-size: 16px;
+  color: #0f172a;
+}
+
+.training-context-kv {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 7px;
+}
+
+.training-context-kv li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: #334155;
+}
+
+.training-context-kv span:first-child {
+  color: #64748b;
+}
+
+.training-recommend {
+  margin-top: 12px;
+  border: 1px solid rgba(37, 99, 235, 0.24);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(219, 234, 254, 0.66), rgba(239, 246, 255, 0.75));
+  padding: 10px;
+}
+
+.training-recommend strong {
+  display: block;
+  color: #1e3a8a;
+  margin-bottom: 4px;
+}
+
+.training-recommend p {
+  margin: 0;
+  font-size: 13px;
+  color: #1e293b;
+}
+
+.training-top-tabs .is-active {
+  border-color: #2f4f8f;
+  box-shadow: 0 0 0 2px rgba(47, 79, 143, 0.18) inset;
+}
+
+.training-calendar-panel {
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  background: var(--card-bg);
+  padding: 14px;
+}
+
+.training-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.training-day-cell {
+  min-height: 88px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.97), rgba(241, 245, 249, 0.92));
+  font-size: 14px;
+  color: #0f172a;
+  text-align: left;
+  padding: 8px 9px;
+  cursor: pointer;
+  position: relative;
+  transition: border-color .12s ease, transform .12s ease, box-shadow .12s ease, background .16s ease;
+}
+
+.training-day-cell:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.42);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.12);
+}
+
+.training-day-cell:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.training-day-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.training-day-icon {
+  font-size: 13px;
+  opacity: 0.86;
+}
+
+.training-day-date {
+  font-weight: 800;
+  margin-bottom: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.training-day-note {
+  font-size: 12px;
+  color: #1e3a8a;
+  font-weight: 700;
+}
+
+.training-day-sub {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.training-risk-dot {
+  position: absolute;
+  right: 9px;
+  bottom: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--training-ok);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+}
+
+.training-risk-dot.is-medium {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+}
+
+.training-risk-dot.is-high {
+  background: var(--training-warn);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18);
+}
+
+.training-day-cell.is-selected {
+  border: 1px solid rgba(37, 99, 235, 0.65);
+  background: linear-gradient(145deg, rgba(219, 234, 254, 0.96), rgba(224, 231, 255, 0.94));
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2) inset;
+}
+
+.training-day-cell.is-game {
+  background: linear-gradient(145deg, rgba(226, 232, 240, 0.95), rgba(203, 213, 225, 0.85));
+}
+
+.training-type-buttons {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.training-detail-panel {
+  margin-top: 18px;
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  background: var(--card-bg);
+  padding: 14px;
+}
+
+.training-detail-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.training-inline-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.training-inline-row select {
+  min-width: 220px;
+  padding: 6px;
+}
+
+.training-section-title {
+  margin: 0 0 8px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.training-scheme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.training-scheme-card {
+  border: 1px solid rgba(59, 130, 246, 0.32);
+  border-radius: 10px;
+  background: #f8fbff;
+  color: #0f172a;
+  padding: 10px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+}
+
+.training-scheme-card span {
+  color: #334155;
+  font-size: 12px;
+}
+
+.training-scheme-card.is-selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  background: #eff6ff;
+}
+
+.training-player-select-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.training-selected-copy {
+  margin: 2px 0 2px;
+  color: #334155;
+}
+
+.training-preview-box {
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 10px;
+  color: #0f172a;
+}
+
+.training-preview-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 2px 0;
+  color: #0f172a;
+}
+
+.training-preview-list li span {
+  color: #334155;
+}
+
+.training-preview-list strong {
+  color: #1d4ed8;
+}
+
+.training-preview-report {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.training-preview-row {
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.65);
+  padding: 8px 10px;
+}
+
+.training-preview-head {
+  margin: 0 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: #475569;
+  font-weight: 700;
+}
+
+.training-preview-copy {
+  margin: 0;
+  color: #0f172a;
+}
+
+.training-preview-subcopy {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.training-preview-coach {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+#training-screen .training-preview-box strong.is-positive {
+  color: #166534;
+}
+
+#training-screen .training-preview-box strong.is-neutral {
+  color: #1d4ed8;
+}
+
+#training-screen .training-preview-box strong.is-caution {
+  color: #b45309;
+}

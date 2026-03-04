@@ -1,0 +1,45 @@
+/* Standings screen */
+
+.standings-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+
+.standings-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.32);
+}
+
+.standings-card-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(90deg, rgba(203, 18, 54, 0.32), rgba(47, 92, 168, 0.24));
+}
+
+.standings-card-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+  letter-spacing: 0.03em;
+}
+
+.standings-team-cell {
+  text-align: left !important;
+  font-weight: 700;
+  min-width: 188px;
+  display: flex;
+  align-items: center;
+}
+
+.standings-diff-positive {
+  color: #2fdb8d;
+  font-weight: 700;
+}
+
+.standings-diff-negative {
+  color: #ff6f7d;
+  font-weight: 700;
+}

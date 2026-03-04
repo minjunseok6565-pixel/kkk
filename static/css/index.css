@@ -1,0 +1,25 @@
+@import "./base/tokens.css";
+@import "./base/reset.css";
+@import "./base/typography.css";
+@import "./base/utilities.css";
+
+@import "./layout/shell.css";
+@import "./layout/grid.css";
+@import "./layout/responsive.css";
+
+@import "./components/buttons.css";
+@import "./components/cards.css";
+@import "./components/tables.css";
+@import "./components/modal.css";
+@import "./components/logos.css";
+@import "./components/chips.css";
+
+@import "./screens/start.css";
+@import "./screens/main.css";
+@import "./screens/schedule.css";
+@import "./screens/myteam.css";
+@import "./screens/training.css";
+@import "./screens/tactics.css";
+@import "./screens/standings.css";
+@import "./screens/college.css";
+@import "./screens/medical.css";

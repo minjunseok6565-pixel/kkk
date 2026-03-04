@@ -1,0 +1,249 @@
+@media (max-width: 1220px) {
+  #college-screen .college-bigboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #college-screen .college-kpi-grid,
+  #college-screen .college-two-col,
+  #college-screen .college-two-col-7-5 {
+    grid-template-columns: 1fr;
+  }
+  #college-screen .college-insight-card { min-height: 0; }
+}
+
+@media (max-width: 640px) {
+  #college-screen .college-bigboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1120px) {
+  #main-screen .top-league-nav,
+  #main-screen .main-overview {
+    width: min(1680px, 98vw);
+  }
+
+  .top-league-nav {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 8px 0 12px;
+  }
+
+  .top-league-brand {
+    border-right: none;
+    padding-right: 0;
+  }
+
+  .next-game-panel {
+    padding: 26px 22px 28px;
+  }
+
+  .next-game-team-name {
+    font-size: 1.9rem;
+  }
+
+  .player-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "header"
+      "contract"
+      "dissatisfaction"
+      "health"
+      "attr"
+      "stats";
+  }
+
+  .player-detail-panel {
+    min-height: 300px;
+    padding: 14px;
+  }
+
+  .schedule-card-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .college-two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  #main-screen {
+    padding-bottom: 36px;
+  }
+
+  .main-overview-header {
+    flex-direction: column;
+    align-items: stretch;
+    margin-bottom: 14px;
+  }
+
+  .franchise-header-actions {
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .top-league-tab {
+    font-size: .95rem;
+    padding: 10px 8px;
+  }
+
+  .next-game-team-row,
+  .next-game-logo-row,
+  .next-game-meta-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  #team-a-logo,
+  #team-b-logo {
+    grid-column: auto;
+    width: 132px;
+    height: 132px;
+  }
+
+  .next-game-vs {
+    order: 3;
+  }
+
+  .next-game-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1365px) {
+  .training-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .training-layout { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .training-calendar-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .training-type-buttons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1024px) {
+  .tactics-lineup-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 1320px) {
+  .medical-risk-calendar-list { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1100px) {
+  .medical-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .medical-layout,
+  .medical-layout-primary,
+  .medical-alert-bar { grid-template-columns: 1fr; }
+  .medical-alert-actions { justify-content: flex-start; flex-wrap: wrap; }
+  .medical-risk-calendar-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .medical-risk-calendar-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 980px) {
+  #team-screen .team-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 980px) {
+  .start-hero-shell {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 18px;
+  }
+
+  .start-hero-main {
+    min-height: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  #start-screen,
+  #team-screen {
+    padding: 20px 0 28px;
+  }
+
+  #start-screen > *,
+  #team-screen > * {
+    width: min(1280px, 98vw);
+  }
+
+  #start-screen .button-group {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .start-hero-shell {
+    text-align: center;
+  }
+
+  .start-badges {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 720px) {
+  #schedule-screen,
+  #my-team-screen,
+  #tactics-screen,
+  #training-screen,
+  #standings-screen,
+  #college-screen,
+  #medical-screen,
+  #player-detail-screen {
+    padding: 12px 0 24px;
+  }
+
+  #schedule-screen > *,
+  #my-team-screen > *,
+  #tactics-screen > *,
+  #training-screen > *,
+  #standings-screen > *,
+  #college-screen > *,
+  #medical-screen > *,
+  #player-detail-screen > * {
+    width: min(1680px, 98vw);
+  }
+}
+
+@media (min-width: 1201px) {
+  #my-team-screen .myteam-overview {
+    transform: none;
+  }
+}
+
+@media (max-width: 1200px) {
+  #my-team-screen .myteam-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #player-detail-screen .hero-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  #my-team-screen .myteam-overview { grid-template-columns: 1fr; }
+  #player-detail-screen .attr-intel-columns { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 1180px) {
+  #tactics-screen .tactics-hero { grid-template-columns: 1fr; }
+  #tactics-screen .tactics-workbench { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 780px) {
+  #tactics-screen .tactics-kpi-row,
+  #tactics-screen .tactics-scheme-strip { grid-template-columns: 1fr; }
+  #tactics-screen .tactics-lineup-head,
+  #tactics-screen .tactics-lineup-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  #tactics-screen .tactics-lineup-head span:nth-child(n+3) { display: none; }
+  #tactics-screen .tactics-lineup-row > :nth-child(n+3) { grid-column: span 2; }
+}
+
+@media (max-width: 900px) {
+  #college-screen .college-scout-search-toolbar {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,191 @@
+#start-screen {
+  text-align: center;
+  background:
+    radial-gradient(circle at 82% -18%, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0) 42%),
+    linear-gradient(180deg, #f4f7fb 0%, #e9edf5 55%, #e3e8f1 100%);
+}
+
+.start-hero-shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 18px;
+  align-items: stretch;
+  text-align: left;
+  padding: 22px;
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.75), rgba(241, 245, 249, 0.88));
+  box-shadow: 0 24px 46px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+}
+
+.start-hero-shell::before,
+.start-hero-shell::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.start-hero-shell::before {
+  width: 320px;
+  height: 320px;
+  right: -120px;
+  top: -120px;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.22), rgba(37, 99, 235, 0));
+}
+
+.start-hero-shell::after {
+  width: 260px;
+  height: 260px;
+  left: -100px;
+  bottom: -120px;
+  background: radial-gradient(circle, rgba(225, 29, 72, 0.16), rgba(225, 29, 72, 0));
+}
+
+.start-hero-main,
+.start-hero-side {
+  position: relative;
+  z-index: 1;
+}
+
+.start-hero-main {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  min-height: 380px;
+}
+
+.start-hero-side {
+  display: grid;
+  gap: 12px;
+  align-content: center;
+}
+
+.start-info-card {
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  border-radius: 14px;
+  padding: 14px 15px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
+}
+
+.start-info-card h3 {
+  margin: 0 0 10px;
+  color: #0f172a;
+  font-size: 1.02rem;
+}
+
+.start-info-card p,
+.start-info-card li {
+  color: #334155;
+  font-size: .92rem;
+  line-height: 1.45;
+}
+
+.start-info-card ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+#start-screen h1 {
+  color: #0f172a;
+  font-size: clamp(2rem, 4vw, 2.8rem);
+}
+
+#start-screen .eyebrow,
+#team-screen .eyebrow {
+  color: #64748b;
+}
+
+#start-screen .subtitle,
+#team-screen .subtitle {
+  color: #334155;
+}
+
+#start-screen .button-group {
+  justify-content: flex-start;
+}
+
+#start-screen .hint {
+  color: #475569;
+}
+
+#team-screen {
+  background:
+    radial-gradient(circle at 78% -20%, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0) 40%),
+    linear-gradient(180deg, #f2f5fa 0%, #e8edf5 52%, #e2e8f1 100%);
+}
+
+#team-screen h2 {
+  color: #0f172a;
+}
+
+#start-screen h1,
+#team-screen h2 {
+  margin-bottom: 14px;
+}
+
+#team-screen .team-grid {
+  gap: 22px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.team-conference {
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(241, 245, 249, 0.9));
+  padding: 20px;
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+}
+
+.team-division {
+  margin-bottom: 20px;
+}
+
+.team-division:last-child {
+  margin-bottom: 0;
+}
+
+.team-division-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+#team-screen .team-card {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  gap: 8px;
+  justify-items: center;
+  padding: 18px 16px 16px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.94));
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  color: #0f172a;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease, background .2s ease;
+}
+
+#team-screen .team-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(37, 99, 235, 0.55);
+  background: linear-gradient(180deg, #f8fbff, #e9f1ff);
+  box-shadow: 0 16px 32px rgba(30, 64, 175, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+#team-screen .team-card small {
+  color: #475569;
+  font-size: .79rem;
+  line-height: 1.35;
+  margin-top: 0;
+}
+
+#team-screen .team-card strong {
+  font-size: 1rem;
+  letter-spacing: -.01em;
+  line-height: 1.2;
+}

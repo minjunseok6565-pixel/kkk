@@ -193,3 +193,210 @@ static/css/
 - 현재 구조에서는 **한 번에 크게 나누는 방식**보다, **상수/유틸 → 화면 로직 → 이벤트 → CSS** 순서의 점진 분할이 가장 안전하다.
 - 장기적으로는 `app/core/features` + `base/components/screens` 이중 축 구조가, 기능 추가 시 충돌을 가장 적게 만든다.
 - 핵심은 파일 개수보다 **의존성 방향과 초기화 순서 고정**이다.
+
+---
+
+## 10) `static/NBA.css` → 분할 파일 **정밀 매핑 설계안**
+
+> 원칙: 아래 매핑은 **이동(move)이 아니라 복사(copy) 기준**이다. `static/NBA.css`는 분할 작업 전/후로 원본을 그대로 유지한다. 각 규칙은 대응 분할 파일에 복사 배치하되, 최종 단계에서 `NBA.css`와 분할 파일 전체를 비교해 누락·변형이 없는지 검증한다.
+
+### 10-1. 집합 파일(`static/css/index.css`) import 순서
+```css
+@import "./base/tokens.css";
+@import "./base/typography.css";
+@import "./base/utilities.css";
+
+@import "./layout/shell.css";
+@import "./layout/grid.css";
+@import "./layout/responsive.css";
+
+@import "./components/buttons.css";
+@import "./components/cards.css";
+@import "./components/tables.css";
+@import "./components/modal.css";
+@import "./components/logos.css";
+@import "./components/chips.css";
+
+@import "./screens/start.css";
+@import "./screens/main.css";
+@import "./screens/schedule.css";
+@import "./screens/myteam.css";
+@import "./screens/training.css";
+@import "./screens/tactics.css";
+@import "./screens/standings.css";
+@import "./screens/college.css";
+@import "./screens/medical.css";
+```
+
+---
+
+### 10-2. 베이스/레이아웃/컴포넌트 매핑
+
+#### `base/tokens.css`
+- `:root` 커스텀 프로퍼티 전체 (`L1–L14`)
+- 화면 스코프 변수 선언
+  - `#college-screen` 변수 블록 (`L1094–L1098`)
+  - `#training-screen` 변수 블록 (`L2002–L2007`)
+
+#### `base/typography.css`
+- `body`의 글꼴/기본 글자색 (`L17–L21`) + 라이트 테마 영역의 `color` 오버라이드
+- `h1, h2, h3` 기본 마진 (`L110`)
+- `.eyebrow`, `.subtitle`, `.hint`, `.section-note`, `.section-copy`, `.empty-copy` 같은 텍스트 유틸/문구 클래스
+- 상태 텍스트: `.status-ok`, `.status-danger`, `.status-warn`, `.text-accent`
+
+#### `base/utilities.css`
+- 전역 유틸: `.hidden`, `.panel`, `.panel.active`, `body.is-modal-open`
+- `* { box-sizing: border-box; }`
+- `.ui-input`(college 스코프 내부 입력 포함)은 스타일 성격상 유틸에 고정
+- 로딩 관련 공통 유틸: `.loading-overlay`, `.loading-box`, `.spinner`, `@keyframes spin`
+
+#### `layout/shell.css`
+- 페이지 배경/오버레이/셸:
+  - `body` 배경 그래디언트
+  - `.bg-overlay`
+  - `.app-shell`
+  - `body:has(...active) .app-shell` 계열(초기 3개 + unified light mood 8개)
+- 화면 공통 박스 기본형 (`#start-screen ... #player-detail-screen` 블록)
+- 풀블리드 화면 구조 규칙
+  - `#start-screen`, `#team-screen`, `#main-screen`
+  - `#schedule-screen ... #player-detail-screen`
+  - 각 `> *` 내부 width 정렬
+
+#### `layout/grid.css`
+- 레이아웃/배치 전용 클래스(화면 비종속):
+  - `.button-group`, `.team-grid`, `.main-menu-grid`
+  - `.screen-header-row`, `.roster-shell`, `.schedule-shell`
+  - `.college-two-col`, `.college-two-col-7-5`
+  - `.player-layout`, `.player-layout-v2`
+  - 공용 `display:grid/flex` 유틸 성격 블록
+
+#### `layout/responsive.css`
+- **모든 `@media` 블록** 이동 (원본 순서 유지):
+  - college: `1220`, `640`, `900`
+  - main/schedule/player: `1120`, `720`
+  - training: `1365`, `900`
+  - tactics: `1024`, `1180`, `780`
+  - medical: `1320`, `1100`, `760`
+  - start/team: `980`, `720`
+  - light mood 공통: `720`
+  - myteam/player: `1200`, `760`
+
+#### `components/buttons.css`
+- `.btn`, `.btn:hover`, `.btn:disabled`, `.btn-primary`, `.btn-secondary`
+- 화면 스코프 버튼 오버라이드
+  - `#start-screen/#team-screen .btn-*`
+  - `#main-screen .btn-secondary`
+  - 라이트 무드 공통 `#schedule-screen ... #player-detail-screen .btn-secondary`
+  - `.home-inline-cta`, `.training-top-tabs .is-active`
+
+#### `components/cards.css`
+- 카드 컨테이너 계열(테이블 제외):
+  - `.team-card`, `.menu-card`, `.menu-card-highlight`, hover 계열
+  - `.next-game-panel`, `.home-kpi-card`, `.home-panel`
+  - `.college-card`, `.training-kpi-card`, `.training-context-panel`, `.training-detail-panel`
+  - `.standings-card`, `.medical-card`, `.detail-card`, `#player-detail-screen .detail-card-*`
+  - 라이트 무드 공통 카드 오버라이드(`L2997–L3009`)
+
+#### `components/tables.css`
+- 모든 table/wrap/thead/tbody/cell 규칙:
+  - schedule/college/roster/training-player/standings/medical 관련 `*-table*`
+  - `.schedule-opponent-cell`, `.standings-team-cell`, `.roster-row` 등 행/셀 규칙
+  - 라이트 무드 공통 표 헤더/셀 오버라이드(`L3017–L3033`)
+
+#### `components/modal.css`
+- `.confirm-modal*` 전체
+- `#college-screen .college-scout-modal-panel`
+- 기타 모달/오버레이 성격 컨테이너
+
+#### `components/logos.css`
+- 로고/마크 전용:
+  - `.team-logo-image`, `.team-logo-mark*`, `.team-logo-placeholder*`
+  - `.schedule-team-logo`, `.standings-team-logo`, `.team-card-logo*`
+  - `#team-a-logo`, `#team-b-logo`
+
+#### `components/chips.css`
+- 칩/배지/필/상태 태그 전용:
+  - `.schedule-result-badge*`, `.schedule-time-chip`
+  - `.home-badge*`, `.home-day-chip*`
+  - `.sharpness-badge`, `.sharpness-badge-v2*`
+  - college chip/tag (`.college-*-chip`, `.college-tag*`)
+  - medical chip/badge (`.medical-chip`, `.medical-alert-badge*`)
+  - tactics role/pill/warning item
+  - training chip/badge (`.training-session-badge*`, `.training-player-chip*`)
+
+---
+
+### 10-3. 화면 파일 매핑 (screen 전용 규칙)
+
+#### `screens/start.css`
+- `#start-screen` 및 `.start-*` 전체
+- 시작 화면 내부 타이포/버튼/히어로 오버라이드
+- `#team-screen`과 시작 플로우를 함께 묶는 규칙 중 **팀 선택 전용은 제외**하고, 시작 전용만 유지
+
+#### `screens/main.css`
+- `#main-screen` 전체
+- `.top-league-*`, `.main-overview*`, `.franchise-*`
+- `.next-game-*`, `.home-*` 위젯 전체
+
+#### `screens/schedule.css`
+- `.schedule-shell`, `.schedule-card*`, `.schedule-*` (테이블 구조는 `tables.css`로 분리하되 schedule 전용 색/칩은 유지)
+- `#schedule-screen` 스코프 오버라이드
+
+#### `screens/myteam.css`
+- `#my-team-screen` 스코프 전부
+- `.roster-*`, `.condition-*` 중 마이팀 전용
+- `L3168` 이후 My Team premium 블록에서 `#my-team-screen` 대상 규칙 전체
+
+#### `screens/training.css`
+- `/* Training screen */` 이후 `.training-*` 전부
+- `#training-screen` 스코프 오버라이드
+- 캘린더/세션/미리보기/선수 선택 관련 규칙
+
+#### `screens/tactics.css`
+- `/* tactics screen */` 이후 `.tactics-*` 전부
+- `#tactics-screen` 스코프 오버라이드 전부
+- `/* Tactics Command Center */` 블록 전체
+
+#### `screens/standings.css`
+- `/* Standings screen */` 이후 `.standings-*` 전부
+- `#standings-screen` 스코프 규칙
+
+#### `screens/college.css`
+- `.college-*` + `#college-screen` + `#college-bigboard-detail-screen` 전부
+- 스카우팅/빅보드/리더/배정/피드백 관련 규칙
+
+#### `screens/medical.css`
+- `.medical-*` 전부
+- `#medical-screen` 스코프 전부
+- 메디컬 대시보드/타임라인/캘린더/액션 리스트 관련 규칙
+
+---
+
+### 10-4. 중복·누락 방지 규칙 (필수)
+1. **동일 선택자 다중 선언은 동일 파일로 집결**
+   - 예: `.tactics-options` 기본 선언 + `#tactics-screen .tactics-options` 선언 + 후반 premium 선언 → 모두 `screens/tactics.css`.
+2. **공통 컴포넌트와 화면 오버라이드 분리**
+   - 기본 컴포넌트(예: `.btn`, `.team-card`, `.schedule-table`)는 components,
+   - 화면 색상/테마 오버라이드는 screens.
+3. **라이트 무드 통합 블록(`L2881–L3065`) 처리**
+   - 구조/폭/패딩은 `layout/shell.css`.
+   - 공통 타이포 색은 `base/typography.css`.
+   - 공통 버튼/카드/테이블 오버라이드는 각 components 파일.
+   - screen별 전용 문맥 색상은 해당 screen 파일.
+4. **`@media`는 전부 `layout/responsive.css`로 이동**
+   - 단, 이동 후 내부 선언이 참조하는 기본 규칙이 먼저 import되도록 `index.css` 순서 고정.
+
+---
+
+### 10-5. 실제 분할 작업 최적 순서 (무손실 기준)
+1. `static/css/` 트리와 빈 파일 생성 + `index.css` import 뼈대만 구성.
+2. `NBA.css`는 **절대 수정/삭제하지 않고 유지**한다. 분할 파일은 `NBA.css`에서 선택자를 복사해 붙여넣는 방식으로만 작성한다.
+3. `tokens → typography → utilities` 이동.
+4. `shell → grid → responsive` 이동.
+5. `buttons/cards/tables/modal/logos/chips` 이동.
+6. `screens/start → main → schedule → standings → college → training → tactics → myteam → medical` 순서로 이동.
+7. 모든 분할 파일 작성 후 `NBA.css`와 분할 파일 집합을 대조해 누락/변형 여부를 검증한다(선택자/선언/미디어쿼리 단위).
+8. 회귀검증: 화면 전환/모달/테이블/로고/칩/반응형 폭(720, 900, 980, 1120, 1365) 순서로 스모크 테스트.
+9. `NBA.css` 원본 유지 상태(`git diff static/NBA.css` 무변경)와 분할 파일 커버리지 비교 결과를 기록한다.
+
+> 위 순서를 지키면 “기본토큰/공통컴포넌트/화면오버라이드”의 계층이 먼저 안정화되고, 나중에 스크린별 이전 시 충돌을 최소화할 수 있다.

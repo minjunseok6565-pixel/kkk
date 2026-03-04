@@ -1,0 +1,66 @@
+.schedule-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+
+.schedule-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.11);
+  background: linear-gradient(120deg, rgba(203, 18, 54, 0.28), rgba(28, 35, 52, 0.55));
+}
+
+.schedule-card-head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.schedule-meta {
+  margin: 0;
+  color: #9fb2d4;
+  font-size: .76rem;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.schedule-opponent-cell {
+  text-align: left !important;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.schedule-opponent-name {
+  color: #9fb2d4;
+  font-weight: 500;
+  margin-left: 6px;
+}
+
+.schedule-result-win {
+  color: #7ff0a7;
+  background: rgba(22, 102, 56, 0.34);
+}
+
+.schedule-result-loss {
+  color: #ffadb8;
+  background: rgba(125, 29, 49, 0.38);
+}
+
+.schedule-empty {
+  color: #9fb2d4;
+  text-align: center !important;
+  padding: 18px 8px !important;
+}
+
+#schedule-screen .schedule-card-head,
+#standings-screen .standings-card-header {
+  background: linear-gradient(90deg, rgba(29, 78, 216, 0.1), rgba(225, 29, 72, 0.08));
+  border-bottom: 1px solid rgba(148, 163, 184, 0.34);
+}

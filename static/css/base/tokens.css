@@ -1,0 +1,27 @@
+:root {
+  --bg-primary: #0f1116;
+  --bg-secondary: #171a22;
+  --bg-elevated: #1d212b;
+  --nba-blue: #2f5ca8;
+  --nba-red: #cb1236;
+  --text-main: #f5f7fb;
+  --text-sub: #aab2c7;
+  --text-dim: #8893ad;
+  --card-bg: rgba(21, 24, 33, 0.88);
+  --card-bg-soft: rgba(28, 33, 44, 0.84);
+  --card-border: rgba(255, 255, 255, 0.11);
+  --card-shadow: 0 16px 38px rgba(0, 0, 0, 0.42);
+}
+
+#college-screen {
+  --college-accent: #1d4ed8;
+  --college-accent-soft: rgba(29, 78, 216, 0.12);
+  --college-danger-soft: rgba(220, 38, 38, 0.12);
+}
+
+#training-screen {
+  --training-accent: #2563eb;
+  --training-accent-2: #7c3aed;
+  --training-warn: #ef4444;
+  --training-ok: #10b981;
+}

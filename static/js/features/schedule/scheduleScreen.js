@@ -2,7 +2,7 @@ import { els } from "../../app/dom.js";
 import { state } from "../../app/state.js";
 import { activateScreen } from "../../app/router.js";
 import { fetchJson, setLoading } from "../../core/api.js";
-import { getScheduleVenueText, renderTeamLogoMark } from "../../core/constants/teams.js";
+import { TEAM_FULL_NAMES, getScheduleVenueText, renderTeamLogoMark } from "../../core/constants/teams.js";
 import { formatLeader } from "../main/homeWidgets.js";
 
 function isCompletedGame(game) {
