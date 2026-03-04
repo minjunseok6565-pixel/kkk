@@ -9,6 +9,78 @@ const TEAM_FULL_NAMES = {
   UTA: "유타 재즈", WAS: "워싱턴 위저즈"
 };
 
+const TEAM_LOGO_BASE_PATH = "/static/team_logos";
+
+const TEAM_BRANDING = {
+  ATL: { arenaName: "State Farm Arena", logoFile: "ATL.png" },
+  BOS: { arenaName: "TD Garden", logoFile: "BOS.png" },
+  BKN: { arenaName: "Barclays Center", logoFile: "BKN.png" },
+  CHA: { arenaName: "Spectrum Center", logoFile: "CHA.png" },
+  CHI: { arenaName: "United Center", logoFile: "CHI.png" },
+  CLE: { arenaName: "Rocket Mortgage FieldHouse", logoFile: "CLE.png" },
+  DAL: { arenaName: "American Airlines Center", logoFile: "DAL.png" },
+  DEN: { arenaName: "Ball Arena", logoFile: "DEN.png" },
+  DET: { arenaName: "Little Caesars Arena", logoFile: "DET.png" },
+  GSW: { arenaName: "Chase Center", logoFile: "GSW.png" },
+  HOU: { arenaName: "Toyota Center", logoFile: "HOU.png" },
+  IND: { arenaName: "Gainbridge Fieldhouse", logoFile: "IND.png" },
+  LAC: { arenaName: "Intuit Dome", logoFile: "LAC.png" },
+  LAL: { arenaName: "Crypto.com Arena", logoFile: "LAL.png" },
+  MEM: { arenaName: "FedExForum", logoFile: "MEM.png" },
+  MIA: { arenaName: "Kaseya Center", logoFile: "MIA.png" },
+  MIL: { arenaName: "Fiserv Forum", logoFile: "MIL.png" },
+  MIN: { arenaName: "Target Center", logoFile: "MIN.png" },
+  NOP: { arenaName: "Smoothie King Center", logoFile: "NOP.png" },
+  NYK: { arenaName: "Madison Square Garden", logoFile: "NYK.png" },
+  OKC: { arenaName: "Paycom Center", logoFile: "OKC.png" },
+  ORL: { arenaName: "Kia Center", logoFile: "ORL.png" },
+  PHI: { arenaName: "Wells Fargo Center", logoFile: "PHI.png" },
+  PHX: { arenaName: "Footprint Center", logoFile: "PHX.png" },
+  POR: { arenaName: "Moda Center", logoFile: "POR.png" },
+  SAC: { arenaName: "Golden 1 Center", logoFile: "SAC.png" },
+  SAS: { arenaName: "Frost Bank Center", logoFile: "SAS.png" },
+  TOR: { arenaName: "Scotiabank Arena", logoFile: "TOR.png" },
+  UTA: { arenaName: "Delta Center", logoFile: "UTA.png" },
+  WAS: { arenaName: "Capital One Arena", logoFile: "WAS.png" },
+};
+
+function getTeamBranding(teamId) {
+  const id = String(teamId || "").toUpperCase();
+  const branding = TEAM_BRANDING[id] || { arenaName: "", logoFile: "" };
+  const logoUrl = branding.logoFile ? `${TEAM_LOGO_BASE_PATH}/${branding.logoFile}` : "";
+  return { ...branding, logoUrl };
+}
+
+function applyTeamLogo(el, teamId) {
+  if (!el) return;
+  const branding = getTeamBranding(teamId);
+  if (branding.logoUrl) {
+    el.style.backgroundImage = `url("${branding.logoUrl}")`;
+    el.classList.add("team-logo-image");
+    return;
+  }
+  el.style.backgroundImage = "";
+  el.classList.remove("team-logo-image");
+}
+
+function renderTeamLogoMark(teamId, extraClass = "") {
+  const branding = getTeamBranding(teamId);
+  const classes = ["team-logo-mark", extraClass, branding.logoUrl ? "has-image" : ""]
+    .filter(Boolean)
+    .join(" ");
+  const style = branding.logoUrl ? ` style="background-image:url('${branding.logoUrl}')"` : "";
+  return `<span class="${classes}" aria-hidden="true"${style}></span>`;
+}
+
+function getScheduleVenueText(game) {
+  const label = String(game?.opponent_label || "").trim().toLowerCase();
+  const isAwayGame = label.startsWith("@");
+  const venueTeamId = isAwayGame
+    ? String(game?.opponent_team_id || "").toUpperCase()
+    : String(state.selectedTeamId || "").toUpperCase();
+  return getTeamBranding(venueTeamId).arenaName || game?.opponent_team_name || game?.opponent_team_id || "";
+}
+
 const TACTICS_OFFENSE_SCHEMES = [
   { key: "Spread_HeavyPnR", label: "heavy_pnr" },
   { key: "Drive_Kick", label: "drive_kick" },
@@ -85,6 +157,9 @@ const els = {
   mainCurrentDate: document.getElementById("main-current-date"),
   teamAName: document.getElementById("team-a-name"),
   teamBName: document.getElementById("team-b-name"),
+  teamALogo: document.getElementById("team-a-logo"),
+  teamBLogo: document.getElementById("team-b-logo"),
+  nextGameArena: document.getElementById("next-game-arena"),
   nextGameDatetime: document.getElementById("next-game-datetime"),
   nextGamePlayBtn: document.getElementById("next-game-play-btn"),
   nextGameQuickBtn: document.getElementById("next-game-quick-btn"),
@@ -694,6 +769,9 @@ async function fetchInGameDate() {
 function resetNextGameCard() {
   els.teamAName.textContent = "Team A";
   els.teamBName.textContent = "Team B";
+  applyTeamLogo(els.teamALogo, "");
+  applyTeamLogo(els.teamBLogo, "");
+  if (els.nextGameArena) els.nextGameArena.textContent = "";
   els.nextGameDatetime.textContent = "YYYY-MM-DD --:-- PM";
 }
 
@@ -775,10 +853,12 @@ function renderScheduleTables(games) {
       const result = g.result || {};
       const record = g.record_after_game || {};
       const leaders = g.leaders || {};
+      const opponentTeamId = String(g.opponent_team_id || "").toUpperCase();
+      const venueName = getScheduleVenueText(g);
       return `
         <tr>
           <td>${g.date_mmdd || "--/--"}</td>
-          <td class="schedule-opponent-cell">${g.opponent_label || "-"} <span class="schedule-opponent-name">${g.opponent_team_name || g.opponent_team_id || ""}</span></td>
+          <td class="schedule-opponent-cell">${g.opponent_label || "-"} ${renderTeamLogoMark(opponentTeamId, "schedule-team-logo")}<span class="schedule-opponent-name">${venueName}</span></td>
           <td><span class="schedule-result-badge ${result.wl === "W" ? "schedule-result-win" : "schedule-result-loss"}">${result.display || "-"}</span></td>
           <td>${record.display || "-"}</td>
           <td>${formatLeader(leaders.points)}</td>
@@ -790,13 +870,17 @@ function renderScheduleTables(games) {
     : renderEmptyScheduleRow(7, "완료된 경기가 없습니다.");
 
   els.scheduleUpcomingBody.innerHTML = upcoming.length
-    ? upcoming.map((g) => `
-      <tr>
-        <td>${g.date_mmdd || "--/--"}</td>
-        <td class="schedule-opponent-cell">${g.opponent_label || "-"} <span class="schedule-opponent-name">${g.opponent_team_name || g.opponent_team_id || ""}</span></td>
-        <td><span class="schedule-time-chip">${g.tipoff_time || "--:-- --"}</span></td>
-      </tr>
-    `).join("")
+    ? upcoming.map((g) => {
+      const opponentTeamId = String(g.opponent_team_id || "").toUpperCase();
+      const venueName = getScheduleVenueText(g);
+      return `
+        <tr>
+          <td>${g.date_mmdd || "--/--"}</td>
+          <td class="schedule-opponent-cell">${g.opponent_label || "-"} ${renderTeamLogoMark(opponentTeamId, "schedule-team-logo")}<span class="schedule-opponent-name">${venueName}</span></td>
+          <td><span class="schedule-time-chip">${g.tipoff_time || "--:-- --"}</span></td>
+        </tr>
+      `;
+    }).join("")
     : renderEmptyScheduleRow(3, "예정된 경기가 없습니다.");
 }
 
@@ -847,6 +931,11 @@ async function refreshMainDashboard() {
     const gameDate = formatIsoDate(nextGame.date);
     els.teamAName.textContent = TEAM_FULL_NAMES[homeId] || homeId || "Team A";
     els.teamBName.textContent = TEAM_FULL_NAMES[awayId] || awayId || "Team B";
+    applyTeamLogo(els.teamALogo, homeId);
+    applyTeamLogo(els.teamBLogo, awayId);
+    if (els.nextGameArena) {
+      els.nextGameArena.textContent = getTeamBranding(homeId).arenaName || "Arena 정보 없음";
+    }
     const tipoffTime = nextGame.tipoff_time || randomTipoffTime();
     els.nextGameDatetime.textContent = `${gameDate} ${tipoffTime}`;
 
@@ -2090,7 +2179,7 @@ async function renderTeams() {
         const card = document.createElement("button");
         card.className = "team-card";
         card.type = "button";
-        card.innerHTML = `<strong>${fullName}</strong><small>${conference} · ${division}</small>`;
+        card.innerHTML = `${renderTeamLogoMark(id, "team-card-logo")}<strong>${fullName}</strong><small>${conference} · ${division}</small>`;
         card.addEventListener("click", () => {
           confirmTeamSelection(id, fullName).catch((e) => alert(e.message));
         });
@@ -2122,7 +2211,7 @@ function renderStandingsRows(tbody, rows) {
     const diffClass = diff > 0 ? "standings-diff-positive" : diff < 0 ? "standings-diff-negative" : "";
     tr.innerHTML = `
       <td>${row?.rank ?? "-"}</td>
-      <td class="standings-team-cell">${TEAM_FULL_NAMES[teamId] || teamId || "-"}</td>
+      <td class="standings-team-cell">${renderTeamLogoMark(teamId, "standings-team-logo")}${TEAM_FULL_NAMES[teamId] || teamId || "-"}</td>
       <td>${row?.wins ?? 0}</td>
       <td>${row?.losses ?? 0}</td>
       <td>${row?.pct || ".000"}</td>
