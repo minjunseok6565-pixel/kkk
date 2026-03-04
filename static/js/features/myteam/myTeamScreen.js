@@ -4,6 +4,7 @@ import { activateScreen } from "../../app/router.js";
 import { fetchJson, setLoading } from "../../core/api.js";
 import { num, clamp } from "../../core/guards.js";
 import { formatHeightIn, formatWeightLb, formatMoney, formatWinPct } from "../../core/format.js";
+import { TEAM_FULL_NAMES } from "../../core/constants/teams.js";
 import { loadPlayerDetail } from "./playerDetail.js";
 
 function ratioToColor(ratio) {
