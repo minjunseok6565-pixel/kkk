@@ -173,6 +173,8 @@
 
 #college-screen .scouting-overview-card {
   margin-bottom: 12px;
+  background: linear-gradient(135deg, #ffffff, #f3f7ff);
+  border-color: rgba(59, 130, 246, 0.25);
 }
 
 #college-screen .college-scout-grid {
@@ -181,14 +183,32 @@
   gap: 12px;
 }
 
+#college-screen .college-scout-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 220px;
+  background: linear-gradient(160deg, #ffffff, #f8fbff 55%, #eef4ff);
+  border-color: rgba(148, 163, 184, 0.45);
+}
+
 #college-screen .college-scout-card h4 {
   margin: 0;
   font-size: 1rem;
 }
 
+#college-screen .college-scout-card .college-inline-meta {
+  margin-bottom: 0;
+}
+
 #college-screen .college-scout-actions {
-  margin-top: 12px;
-  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 14px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#college-screen .college-scout-actions .btn {
+  width: 100%;
 }
 
 #college-screen .college-scout-search-toolbar {
@@ -204,7 +224,7 @@
   display: grid;
   gap: 8px;
   font-weight: 600;
-  color: #cbd5e1;
+  color: #475569;
 }
 
 #college-screen .college-scout-player-list {
@@ -229,8 +249,8 @@
   align-items: center;
   gap: 12px;
   border: 1px solid rgba(148, 163, 184, 0.34);
-  background: linear-gradient(145deg, rgba(15, 23, 42, 0.75), rgba(15, 23, 42, 0.55));
-  color: #f8fafc;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  color: #0f172a;
   border-radius: 12px;
   padding: 12px 13px;
   transition: border-color .15s ease, transform .15s ease, background .15s ease;
@@ -239,7 +259,7 @@
 #college-screen .college-player-option:hover,
 #college-screen .college-player-option:focus-visible {
   border-color: rgba(96, 165, 250, 0.88);
-  background: rgba(30, 64, 175, 0.35);
+  background: rgba(191, 219, 254, 0.38);
   transform: translateY(-1px);
   outline: none;
 }
@@ -254,13 +274,13 @@
 }
 
 #college-screen .college-player-option-main small {
-  color: rgba(226, 232, 240, 0.85);
+  color: #64748b;
   font-size: .82rem;
 }
 
 #college-screen .college-player-option.is-current {
   border-color: rgba(16, 185, 129, 0.72);
-  background: rgba(16, 185, 129, 0.18);
+  background: rgba(16, 185, 129, 0.12);
 }
 
 #college-screen .college-scout-reports-list {
@@ -275,12 +295,12 @@
   border: 1px solid rgba(148, 163, 184, 0.32);
   border-radius: 12px;
   padding: 12px;
-  background: rgba(15, 23, 42, 0.45);
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
 }
 
 #college-screen .college-report-item p {
   margin: 8px 0 0;
-  color: #dbe7ff;
+  color: #334155;
 }
 
 #college-screen .college-insight-card {

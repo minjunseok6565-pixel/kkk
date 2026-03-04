@@ -85,8 +85,6 @@ function renderCollegeScoutCards() {
     const targetId = String(assignment?.target_player_id || "");
     const playerName = assignment ? getScoutingPlayerName(targetId, targetId || "-") : "미배정";
     const unread = getScoutUnreadCount(scoutId);
-    const focusAxes = Array.isArray(scout?.profile?.focus_axes) ? scout.profile.focus_axes.slice(0, 2) : [];
-    const styleTags = Array.isArray(scout?.profile?.style_tags) ? scout.profile.style_tags.slice(0, 2) : [];
     return `
       <article class="college-card college-scout-card" data-scout-id="${escapeHtml(scoutId)}" role="listitem">
         <div class="college-card-head-inline">
@@ -99,13 +97,9 @@ function renderCollegeScoutCards() {
         <p class="college-inline-meta">
           현재 배정: ${escapeHtml(playerName)}
         </p>
-        <div class="college-tag-wrap">
-          ${focusAxes.map((axis) => `<span class="college-tag">${escapeHtml(axis)}</span>`).join("")}
-          ${styleTags.map((tag) => `<span class="college-tag is-strength">${escapeHtml(tag)}</span>`).join("")}
-        </div>
         <div class="college-actions-row college-scout-actions">
           <button type="button" class="btn btn-primary" data-action="pick-player" data-scout-id="${escapeHtml(scoutId)}">선수 배정</button>
-          <button type="button" class="btn btn-secondary" data-action="open-reports" data-scout-id="${escapeHtml(scoutId)}">스카우팅 리포트${unread > 0 ? ` (${unread})` : ""}</button>
+          <button type="button" class="btn btn-secondary" data-action="open-reports" data-scout-id="${escapeHtml(scoutId)}">리포트 보기${unread > 0 ? ` (${unread})` : ""}</button>
         </div>
       </article>
     `;
