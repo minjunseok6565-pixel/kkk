@@ -56,11 +56,17 @@ function applyTeamLogo(el, teamId) {
   const branding = getTeamBranding(teamId);
   if (branding.logoUrl) {
     el.style.backgroundImage = `url("${branding.logoUrl}")`;
+    el.style.backgroundPosition = "center";
+    el.style.backgroundRepeat = "no-repeat";
+    el.style.backgroundSize = "contain";
     el.classList.add("team-logo-image");
     el.classList.add("has-team-logo");
     return;
   }
   el.style.backgroundImage = "";
+  el.style.backgroundPosition = "";
+  el.style.backgroundRepeat = "";
+  el.style.backgroundSize = "";
   el.classList.remove("team-logo-image");
   el.classList.remove("has-team-logo");
 }
