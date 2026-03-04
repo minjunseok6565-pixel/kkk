@@ -532,13 +532,13 @@
             <h3>대학 리더보드</h3>
             <div class="college-filter-row">
             <label>정렬
-              <select id="college-leader-sort"></select>
+              <select id="college-leader-sort" class="ui-select"></select>
             </label>
             <label>포지션
-              <select id="college-leader-pos-filter"></select>
+              <select id="college-leader-pos-filter" class="ui-select"></select>
             </label>
             <label>팀
-              <select id="college-leader-team-filter"></select>
+              <select id="college-leader-team-filter" class="ui-select"></select>
             </label>
             </div>
           </div>
@@ -590,8 +590,8 @@
           <article class="college-card">
             <h3>스카우터 배정</h3>
             <div class="college-form-grid">
-              <label>스카우터<select id="college-scout-select"></select></label>
-              <label>대상 선수<select id="college-scout-player-select"></select></label>
+              <label>스카우터<select id="college-scout-select" class="ui-select"></select></label>
+              <label>대상 선수<select id="college-scout-player-select" class="ui-select"></select></label>
               <div class="college-actions-row">
                 <button id="college-assign-btn" type="button" class="btn btn-primary">배정</button>
                 <button id="college-unassign-btn" type="button" class="btn btn-secondary">해제</button>
@@ -722,6 +722,19 @@
       <div class="spinner"></div>
       <p id="loading-text">새 게임을 준비하는 중입니다...</p>
     </div>
+  </div>
+
+  <div id="confirm-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+    <div id="confirm-modal-backdrop" class="confirm-modal-backdrop"></div>
+    <article class="confirm-modal-panel">
+      <p class="confirm-modal-eyebrow">FRANCHISE START</p>
+      <h3 id="confirm-modal-title" class="confirm-modal-title">팀 선택 확인</h3>
+      <p id="confirm-modal-body" class="confirm-modal-body">이 팀으로 새 게임을 시작하시겠습니까?</p>
+      <div class="confirm-modal-actions">
+        <button id="confirm-modal-cancel" type="button" class="btn btn-secondary">취소</button>
+        <button id="confirm-modal-ok" type="button" class="btn btn-primary">선택 확정</button>
+      </div>
+    </article>
   </div>
 
   <script src="/static/NBA.js" defer></script>
