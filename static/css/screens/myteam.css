@@ -116,6 +116,8 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin: 12px 0 14px;
+  width: min(1680px, 96vw);
+  margin-inline: auto;
 }
 
 #my-team-screen .myteam-overview-block {
@@ -157,6 +159,13 @@
   gap: 10px;
   margin-bottom: 12px;
   flex-wrap: wrap;
+  width: min(1680px, 96vw);
+  margin-inline: auto;
+}
+
+#my-team-screen .roster-shell {
+  width: min(1680px, 96vw);
+  margin-inline: auto;
 }
 
 #my-team-screen .myteam-command-group {
