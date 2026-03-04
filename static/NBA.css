@@ -536,6 +536,40 @@ h1, h2, h3 { margin: 0 0 12px; }
   background-size: 72%;
 }
 
+
+.team-logo-mark {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.95), rgba(203, 213, 225, 0.75)),
+    linear-gradient(140deg, rgba(29, 78, 216, 0.2), rgba(225, 29, 72, 0.2));
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.team-logo-mark.has-image {
+  background-color: #fff;
+  background-size: 75%;
+}
+
+.schedule-team-logo {
+  margin: 0 6px;
+}
+
+.standings-team-logo {
+  margin-right: 8px;
+}
+
+.team-card-logo {
+  width: 34px;
+  height: 34px;
+  margin-right: 10px;
+}
 .team-logo-placeholder {
   width: 138px;
   height: 138px;
@@ -771,6 +805,7 @@ h1, h2, h3 { margin: 0 0 12px; }
   border-color: rgba(255,255,255,0.42);
   background: linear-gradient(140deg, rgba(44, 51, 68, 0.95), rgba(24, 28, 38, 0.95));
 }
+.team-card strong { display: inline-block; vertical-align: middle; }
 .team-card small { display: block; color: #9fb2d4; margin-top: 6px; }
 
 #team-screen .team-card {
@@ -867,6 +902,9 @@ h1, h2, h3 { margin: 0 0 12px; }
 .schedule-opponent-cell {
   text-align: left !important;
   font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .schedule-opponent-name {
@@ -2052,6 +2090,8 @@ h1, h2, h3 { margin: 0 0 12px; }
   text-align: left !important;
   font-weight: 700;
   min-width: 188px;
+  display: flex;
+  align-items: center;
 }
 
 .standings-diff-positive {
