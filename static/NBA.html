@@ -772,10 +772,23 @@
         </div>
         <button id="college-scout-player-modal-close" type="button" class="btn btn-secondary">닫기</button>
       </div>
-      <label class="college-scout-search-label">선수 검색
-        <input id="college-scout-player-search" type="search" class="ui-input" placeholder="선수명 / 학교 / 포지션 검색" />
-      </label>
-      <div id="college-scout-player-list" class="college-scout-player-list" role="list"></div>
+      <div class="college-scout-search-toolbar" role="group" aria-label="스카우팅 선수 검색">
+        <label class="college-scout-search-label">선수 검색
+          <input id="college-scout-player-search" type="search" class="ui-input" placeholder="선수명 (2글자 이상)" />
+        </label>
+        <label class="college-scout-filter-label">상태
+          <select id="college-scout-player-status" class="ui-input">
+            <option value="ALL">ALL</option>
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="DECLARED">DECLARED</option>
+          </select>
+        </label>
+      </div>
+      <p id="college-scout-player-search-meta" class="college-inline-meta">2글자 이상 입력하면 전체 대학 선수 대상 검색이 시작됩니다.</p>
+      <div id="college-scout-player-list" class="college-scout-player-list" role="listbox" aria-label="스카우팅 선수 검색 결과"></div>
+      <div class="college-scout-player-actions-row">
+        <button id="college-scout-player-load-more" type="button" class="btn btn-secondary hidden">더 보기</button>
+      </div>
     </article>
   </div>
 
