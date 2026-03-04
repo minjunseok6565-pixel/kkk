@@ -3,7 +3,7 @@ import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
 import { fetchJson, setLoading } from "../../core/api.js";
 import { formatSignedDiff } from "../../core/format.js";
-import { renderTeamLogoMark } from "../../core/constants/teams.js";
+import { TEAM_FULL_NAMES, renderTeamLogoMark } from "../../core/constants/teams.js";
 
 function renderStandingsRows(tbody, rows) {
   tbody.innerHTML = "";

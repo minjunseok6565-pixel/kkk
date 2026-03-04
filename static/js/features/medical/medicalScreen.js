@@ -4,6 +4,7 @@ import { activateScreen } from "../../app/router.js";
 import { fetchJson, setLoading } from "../../core/api.js";
 import { num, clamp } from "../../core/guards.js";
 import { formatPercent, formatSignedDelta } from "../../core/format.js";
+import { TEAM_FULL_NAMES } from "../../core/constants/teams.js";
 import { renderEmptyScheduleRow } from "../schedule/scheduleScreen.js";
 
 function renderMedicalEmpty(tbody, colSpan, text) {
