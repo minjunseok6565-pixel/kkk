@@ -3152,18 +3152,16 @@ els.collegeScoutCards?.addEventListener("click", async (event) => {
   if (!scoutId) return;
   if (action === "pick-player") {
     openScoutPlayerModal(scoutId);
-els.collegeBigboardDetailBackBtn?.addEventListener("click", () => closeCollegeBigboardDetailScreen());
-els.collegeAssignBtn.addEventListener("click", async () => {
-  const scoutId = els.collegeScoutSelect.value;
-  const playerId = els.collegeScoutPlayerSelect.value;
-  if (!scoutId || !playerId) {
-    setCollegeScoutingFeedback("스카우터와 대상을 모두 선택한 뒤 배정하세요.", "warn");
     return;
   }
   if (action === "open-reports") {
     openScoutReportsModal(scoutId);
+    return;
   }
 });
+
+els.collegeBigboardDetailBackBtn?.addEventListener("click", () => closeCollegeBigboardDetailScreen());
+
 
 els.collegeScoutPlayerSearch?.addEventListener("input", () => {
   state.scoutingPlayerSearch = els.collegeScoutPlayerSearch.value || "";
