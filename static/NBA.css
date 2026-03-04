@@ -614,7 +614,7 @@ h1, h2, h3 { margin: 0 0 12px; }
 
 .team-logo-placeholder.has-team-logo {
   border-color: transparent;
-  background: transparent;
+  background-color: transparent;
   box-shadow: none;
 }
 
