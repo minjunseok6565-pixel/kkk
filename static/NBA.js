@@ -146,6 +146,11 @@ const state = {
   collegeBigboardLastTriggerExpertId: null,
   collegeBigboardOverview: [],
   collegeBigboardByExpert: {},
+  scoutingScouts: [],
+  scoutingReports: [],
+  scoutingPlayers: [],
+  scoutingPlayerSearch: "",
+  scoutingActiveScoutId: "",
 };
 
 const els = {
@@ -245,13 +250,27 @@ const els = {
   collegeAssignBtn: document.getElementById("college-assign-btn"),
   collegeUnassignBtn: document.getElementById("college-unassign-btn"),
   collegeScoutingFeedback: document.getElementById("college-scouting-feedback"),
+  collegeScoutingSummary: document.getElementById("college-scouting-summary"),
+  collegeScoutCards: document.getElementById("college-scout-cards"),
   confirmModal: document.getElementById("confirm-modal"),
   confirmModalBackdrop: document.getElementById("confirm-modal-backdrop"),
   confirmModalTitle: document.getElementById("confirm-modal-title"),
   confirmModalBody: document.getElementById("confirm-modal-body"),
   confirmModalOk: document.getElementById("confirm-modal-ok"),
   confirmModalCancel: document.getElementById("confirm-modal-cancel"),
-  collegeReportsBody: document.getElementById("college-reports-body"),
+  collegeScoutPlayerModal: document.getElementById("college-scout-player-modal"),
+  collegeScoutPlayerModalBackdrop: document.getElementById("college-scout-player-modal-backdrop"),
+  collegeScoutPlayerModalClose: document.getElementById("college-scout-player-modal-close"),
+  collegeScoutPlayerModalTitle: document.getElementById("college-scout-player-modal-title"),
+  collegeScoutPlayerModalMeta: document.getElementById("college-scout-player-modal-meta"),
+  collegeScoutPlayerSearch: document.getElementById("college-scout-player-search"),
+  collegeScoutPlayerList: document.getElementById("college-scout-player-list"),
+  collegeScoutReportsModal: document.getElementById("college-scout-reports-modal"),
+  collegeScoutReportsModalBackdrop: document.getElementById("college-scout-reports-modal-backdrop"),
+  collegeScoutReportsModalClose: document.getElementById("college-scout-reports-modal-close"),
+  collegeScoutReportsModalTitle: document.getElementById("college-scout-reports-modal-title"),
+  collegeScoutReportsModalMeta: document.getElementById("college-scout-reports-modal-meta"),
+  collegeScoutReportsList: document.getElementById("college-scout-reports-list"),
   collegeTeamsKpi: document.getElementById("college-teams-kpi"),
   collegeRosterSummary: document.getElementById("college-roster-summary"),
   teamTrainingTabBtn: document.getElementById("team-training-tab-btn"),
@@ -800,28 +819,187 @@ async function loadCollegeScouting() {
   ]);
   state.scoutingScouts = scoutsPayload?.scouts || [];
   state.scoutingReports = reportsPayload?.reports || [];
-  const players = playersPayload?.players || [];
+  state.scoutingPlayers = playersPayload?.players || [];
+  renderCollegeScoutCards();
+}
 
-  els.collegeScoutSelect.innerHTML = state.scoutingScouts.map((s) => `<option value="${escapeHtml(s.scout_id)}">${escapeHtml(s.display_name)} (${escapeHtml(s.specialty_key)})</option>`).join("");
-  els.collegeScoutPlayerSelect.innerHTML = players.map((p) => `<option value="${escapeHtml(p.player_id)}">${escapeHtml(p.name)} · ${escapeHtml(p.college_team_name || p.college_team_id)}</option>`).join("");
+function getScoutingReadStorageKey(teamId) {
+  return `nba.scouting.read.${String(teamId || "")}`;
+}
 
-  els.collegeReportsBody.innerHTML = state.scoutingReports.length ? state.scoutingReports.map((r) => {
-    const statusRaw = String(r?.status || "-");
+function getScoutingReadMap() {
+  const key = getScoutingReadStorageKey(state.selectedTeamId);
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function markScoutReportsRead(scoutId) {
+  if (!scoutId || !state.selectedTeamId) return;
+  const key = getScoutingReadStorageKey(state.selectedTeamId);
+  const readMap = getScoutingReadMap();
+  readMap[scoutId] = new Date().toISOString();
+  localStorage.setItem(key, JSON.stringify(readMap));
+}
+
+function getScoutUnreadCount(scoutId) {
+  if (!scoutId) return 0;
+  const readMap = getScoutingReadMap();
+  const lastRead = Date.parse(String(readMap[scoutId] || ""));
+  const threshold = Number.isFinite(lastRead) ? lastRead : 0;
+  return state.scoutingReports.filter((report) => {
+    if (String(report?.scout?.scout_id || "") !== scoutId) return false;
+    const created = Date.parse(String(report?.created_at || report?.updated_at || report?.as_of_date || ""));
+    return Number.isFinite(created) ? created > threshold : threshold === 0;
+  }).length;
+}
+
+function renderCollegeScoutCards() {
+  if (!els.collegeScoutCards) return;
+  if (!state.scoutingScouts.length) {
+    els.collegeScoutCards.innerHTML = `<article class="college-card"><p class="college-inline-meta">가용 스카우터가 없습니다.</p></article>`;
+    return;
+  }
+
+  const activeAssignments = state.scoutingScouts.filter((scout) => scout?.active_assignment).length;
+  const unreadTotal = state.scoutingScouts.reduce((acc, scout) => acc + getScoutUnreadCount(String(scout?.scout_id || "")), 0);
+  if (els.collegeScoutingSummary) {
+    els.collegeScoutingSummary.textContent = `활성 배정 ${activeAssignments}/${state.scoutingScouts.length} · 미확인 리포트 ${unreadTotal}건`;
+  }
+
+  els.collegeScoutCards.innerHTML = state.scoutingScouts.map((scout) => {
+    const scoutId = String(scout?.scout_id || "");
+    const assignment = scout?.active_assignment;
+    const player = state.scoutingPlayers.find((candidate) => String(candidate?.player_id || "") === String(assignment?.target_player_id || ""));
+    const unread = getScoutUnreadCount(scoutId);
+    const focusAxes = Array.isArray(scout?.profile?.focus_axes) ? scout.profile.focus_axes.slice(0, 2) : [];
+    const styleTags = Array.isArray(scout?.profile?.style_tags) ? scout.profile.style_tags.slice(0, 2) : [];
+    return `
+      <article class="college-card college-scout-card" data-scout-id="${escapeHtml(scoutId)}" role="listitem">
+        <div class="college-card-head-inline">
+          <div>
+            <h4>${escapeHtml(scout?.display_name || scoutId)}</h4>
+            <p class="college-inline-meta">${escapeHtml(scout?.specialty_key || "GENERAL")}</p>
+          </div>
+          ${unread > 0 ? `<span class="college-scout-unread-badge">NEW ${unread}</span>` : ""}
+        </div>
+        <p class="college-inline-meta">
+          현재 배정: ${assignment ? escapeHtml(player?.name || assignment?.target_player_id || "-") : "미배정"}
+        </p>
+        <div class="college-tag-wrap">
+          ${focusAxes.map((axis) => `<span class="college-tag">${escapeHtml(axis)}</span>`).join("")}
+          ${styleTags.map((tag) => `<span class="college-tag is-strength">${escapeHtml(tag)}</span>`).join("")}
+        </div>
+        <div class="college-actions-row college-scout-actions">
+          <button type="button" class="btn btn-primary" data-action="pick-player" data-scout-id="${escapeHtml(scoutId)}">선수 선택</button>
+          <button type="button" class="btn btn-secondary" data-action="open-reports" data-scout-id="${escapeHtml(scoutId)}">스카우팅 리포트${unread > 0 ? ` (${unread})` : ""}</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+function openScoutPlayerModal(scoutId) {
+  if (!els.collegeScoutPlayerModal) return;
+  state.scoutingActiveScoutId = scoutId;
+  state.scoutingPlayerSearch = "";
+  const scout = state.scoutingScouts.find((item) => String(item?.scout_id || "") === scoutId);
+  if (els.collegeScoutPlayerModalTitle) {
+    els.collegeScoutPlayerModalTitle.textContent = `${scout?.display_name || scoutId} · 선수 선택`;
+  }
+  if (els.collegeScoutPlayerModalMeta) {
+    els.collegeScoutPlayerModalMeta.textContent = `전문분야 ${scout?.specialty_key || "GENERAL"} · 대상 선수를 선택하면 즉시 배정합니다.`;
+  }
+  if (els.collegeScoutPlayerSearch) {
+    els.collegeScoutPlayerSearch.value = "";
+  }
+  renderScoutPlayerList();
+  els.collegeScoutPlayerModal.classList.remove("hidden");
+  document.body.classList.add("is-modal-open");
+  els.collegeScoutPlayerSearch?.focus();
+}
+
+function closeScoutPlayerModal() {
+  if (!els.collegeScoutPlayerModal) return;
+  els.collegeScoutPlayerModal.classList.add("hidden");
+  document.body.classList.remove("is-modal-open");
+}
+
+function renderScoutPlayerList() {
+  if (!els.collegeScoutPlayerList) return;
+  const keyword = String(state.scoutingPlayerSearch || "").trim().toLowerCase();
+  const scout = state.scoutingScouts.find((item) => String(item?.scout_id || "") === String(state.scoutingActiveScoutId || ""));
+  const filtered = state.scoutingPlayers.filter((player) => {
+    if (!keyword) return true;
+    const corpus = `${player?.name || ""} ${player?.college_team_name || player?.college_team_id || ""} ${player?.pos || ""}`.toLowerCase();
+    return corpus.includes(keyword);
+  }).slice(0, 80);
+
+  if (!filtered.length) {
+    els.collegeScoutPlayerList.innerHTML = `<p class="college-inline-meta">검색 결과가 없습니다.</p>`;
+    return;
+  }
+  els.collegeScoutPlayerList.innerHTML = filtered.map((player) => {
+    const assignedNow = String(scout?.active_assignment?.target_player_id || "") === String(player?.player_id || "");
+    return `
+      <button type="button" class="college-player-option ${assignedNow ? "is-current" : ""}" data-player-id="${escapeHtml(player?.player_id || "")}">
+        <span>${escapeHtml(player?.name || "-")}</span>
+        <span>${escapeHtml(player?.pos || "-")} · ${escapeHtml(player?.college_team_name || player?.college_team_id || "-")}</span>
+      </button>
+    `;
+  }).join("");
+}
+
+function openScoutReportsModal(scoutId) {
+  if (!els.collegeScoutReportsModal) return;
+  state.scoutingActiveScoutId = scoutId;
+  const scout = state.scoutingScouts.find((item) => String(item?.scout_id || "") === scoutId);
+  if (els.collegeScoutReportsModalTitle) {
+    els.collegeScoutReportsModalTitle.textContent = `${scout?.display_name || scoutId} · 스카우팅 리포트`;
+  }
+  renderScoutReportsList();
+  markScoutReportsRead(scoutId);
+  renderCollegeScoutCards();
+  els.collegeScoutReportsModal.classList.remove("hidden");
+  document.body.classList.add("is-modal-open");
+  els.collegeScoutReportsModalClose?.focus();
+}
+
+function closeScoutReportsModal() {
+  if (!els.collegeScoutReportsModal) return;
+  els.collegeScoutReportsModal.classList.add("hidden");
+  document.body.classList.remove("is-modal-open");
+}
+
+function renderScoutReportsList() {
+  if (!els.collegeScoutReportsList) return;
+  const reports = state.scoutingReports
+    .filter((report) => String(report?.scout?.scout_id || "") === String(state.scoutingActiveScoutId || ""));
+  if (els.collegeScoutReportsModalMeta) {
+    els.collegeScoutReportsModalMeta.textContent = `총 ${reports.length}건 · 최신순`;
+  }
+  if (!reports.length) {
+    els.collegeScoutReportsList.innerHTML = `<p class="college-inline-meta">리포트가 없습니다. 월말 시뮬레이션 이후 생성됩니다.</p>`;
+    return;
+  }
+  els.collegeScoutReportsList.innerHTML = reports.map((report) => {
+    const statusRaw = String(report?.status || "-");
     const statusClass = /complete|done|finished/i.test(statusRaw) ? "is-complete" : (/pending|in_progress|active/i.test(statusRaw) ? "is-pending" : "");
     return `
-      <tr class="college-data-row">
-        <td>${escapeHtml(String(r?.as_of_date || "-").slice(0, 10))}</td>
-        <td>${escapeHtml(r?.scout?.display_name || r?.scout?.scout_id || "-")}</td>
-        <td>${escapeHtml(r?.player_snapshot?.name || r?.target_player_id || "-")}</td>
-        <td><span class="college-status-chip ${statusClass}">${escapeHtml(statusRaw)}</span></td>
-        <td>${escapeHtml((r?.report_text || "").slice(0, 80) || "(텍스트 리포트 없음)")}</td>
-      </tr>
+      <article class="college-report-item">
+        <div class="college-card-head-inline">
+          <strong>${escapeHtml(report?.player_snapshot?.name || report?.target_player_id || "-")}</strong>
+          <span class="college-status-chip ${statusClass}">${escapeHtml(statusRaw)}</span>
+        </div>
+        <p class="college-inline-meta">${escapeHtml(report?.as_of_date || "-")} · ${escapeHtml(report?.period_key || "-")}</p>
+        <p>${escapeHtml((report?.report_text || "텍스트 리포트가 아직 생성되지 않았습니다.").slice(0, 240))}</p>
+      </article>
     `;
-  }).join("") : `<tr><td class="schedule-empty" colspan="5">리포트가 없습니다. 배정 후 월말 진행 시 생성됩니다.</td></tr>`;
-
-  if (els.collegeScoutingFeedback) {
-    els.collegeScoutingFeedback.textContent = `가용 스카우터 ${state.scoutingScouts.length}명 · 리포트 ${state.scoutingReports.length}건`;
-  }
+  }).join("");
 }
 
 
@@ -2953,6 +3131,27 @@ els.collegeLeaderTeamFilter?.addEventListener("change", () => {
   state.collegeLeaderTeamFilter = els.collegeLeaderTeamFilter.value || "ALL";
   loadCollegeLeaders().catch((e) => alert(e.message));
 });
+els.collegeBigboardModalClose?.addEventListener("click", () => closeCollegeBigboardModal());
+els.collegeBigboardModalBackdrop?.addEventListener("click", () => closeCollegeBigboardModal());
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !els.collegeBigboardModal?.classList.contains("hidden")) {
+    closeCollegeBigboardModal();
+  }
+  if (event.key === "Escape" && !els.collegeScoutPlayerModal?.classList.contains("hidden")) {
+    closeScoutPlayerModal();
+  }
+  if (event.key === "Escape" && !els.collegeScoutReportsModal?.classList.contains("hidden")) {
+    closeScoutReportsModal();
+  }
+});
+els.collegeScoutCards?.addEventListener("click", async (event) => {
+  const target = event.target instanceof HTMLElement ? event.target.closest("button[data-action]") : null;
+  if (!target) return;
+  const action = target.dataset.action;
+  const scoutId = String(target.dataset.scoutId || "");
+  if (!scoutId) return;
+  if (action === "pick-player") {
+    openScoutPlayerModal(scoutId);
 els.collegeBigboardDetailBackBtn?.addEventListener("click", () => closeCollegeBigboardDetailScreen());
 els.collegeAssignBtn.addEventListener("click", async () => {
   const scoutId = els.collegeScoutSelect.value;
@@ -2961,35 +3160,66 @@ els.collegeAssignBtn.addEventListener("click", async () => {
     setCollegeScoutingFeedback("스카우터와 대상을 모두 선택한 뒤 배정하세요.", "warn");
     return;
   }
-  await fetchJson("/api/scouting/assign", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ team_id: state.selectedTeamId, scout_id: scoutId, player_id: playerId, target_kind: "COLLEGE" })
-  });
-  await loadCollegeScouting();
-  if (els.collegeScoutingFeedback) {
-    const scoutName = els.collegeScoutSelect.options[els.collegeScoutSelect.selectedIndex]?.textContent || scoutId;
-    const playerName = els.collegeScoutPlayerSelect.options[els.collegeScoutPlayerSelect.selectedIndex]?.textContent || playerId;
-    setCollegeScoutingFeedback(`${scoutName} → ${playerName} 배정 완료 · 리포트는 월말 진행 시 생성됩니다.`, "ok");
+  if (action === "open-reports") {
+    openScoutReportsModal(scoutId);
   }
 });
-els.collegeUnassignBtn.addEventListener("click", async () => {
-  const scoutId = els.collegeScoutSelect.value;
-  if (!scoutId) {
-    setCollegeScoutingFeedback("해제할 스카우터를 먼저 선택하세요.", "warn");
+
+els.collegeScoutPlayerSearch?.addEventListener("input", () => {
+  state.scoutingPlayerSearch = els.collegeScoutPlayerSearch.value || "";
+  renderScoutPlayerList();
+});
+
+els.collegeScoutPlayerList?.addEventListener("click", async (event) => {
+  const option = event.target instanceof HTMLElement ? event.target.closest(".college-player-option") : null;
+  if (!option) return;
+  const playerId = String(option.dataset.playerId || "");
+  const scoutId = String(state.scoutingActiveScoutId || "");
+  if (!scoutId || !playerId) return;
+
+  const scout = state.scoutingScouts.find((item) => String(item?.scout_id || "") === scoutId);
+  const player = state.scoutingPlayers.find((item) => String(item?.player_id || "") === playerId);
+  if (String(scout?.active_assignment?.target_player_id || "") === playerId) {
+    setCollegeScoutingFeedback("이미 이 선수에게 배정된 스카우터입니다.", "warn");
+    closeScoutPlayerModal();
     return;
   }
-  await fetchJson("/api/scouting/unassign", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ team_id: state.selectedTeamId, scout_id: scoutId })
-  });
-  await loadCollegeScouting();
-  if (els.collegeScoutingFeedback) {
-    const scoutName = els.collegeScoutSelect.options[els.collegeScoutSelect.selectedIndex]?.textContent || scoutId;
-    setCollegeScoutingFeedback(`${scoutName} 배정을 해제했습니다.`, "info");
+
+  if (scout?.active_assignment?.assignment_id) {
+    const ok = await showConfirmModal({
+      title: "스카우팅 배정 교체",
+      body: `${scout?.display_name || scoutId}의 기존 배정을 종료하고 ${player?.name || playerId}로 변경하시겠습니까?`,
+      okLabel: "교체",
+      cancelLabel: "취소",
+    });
+    if (!ok) return;
+  }
+
+  try {
+    if (scout?.active_assignment?.assignment_id) {
+      await fetchJson("/api/scouting/unassign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ team_id: state.selectedTeamId, scout_id: scoutId })
+      });
+    }
+    await fetchJson("/api/scouting/assign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ team_id: state.selectedTeamId, scout_id: scoutId, player_id: playerId, target_kind: "COLLEGE" })
+    });
+    await loadCollegeScouting();
+    setCollegeScoutingFeedback(`${scout?.display_name || scoutId} → ${player?.name || playerId} 배정 완료`, "ok");
+    closeScoutPlayerModal();
+  } catch (error) {
+    setCollegeScoutingFeedback(error?.message || "배정 처리 중 오류가 발생했습니다.", "warn");
   }
 });
+
+els.collegeScoutPlayerModalClose?.addEventListener("click", closeScoutPlayerModal);
+els.collegeScoutPlayerModalBackdrop?.addEventListener("click", closeScoutPlayerModal);
+els.collegeScoutReportsModalClose?.addEventListener("click", closeScoutReportsModal);
+els.collegeScoutReportsModalBackdrop?.addEventListener("click", closeScoutReportsModal);
 els.trainingTypeButtons.querySelectorAll("button[data-training-type]").forEach((btn) => {
   btn.addEventListener("click", () => renderTrainingDetail(btn.dataset.trainingType).catch((e) => alert(e.message)));
 });
