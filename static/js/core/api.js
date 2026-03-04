@@ -1,4 +1,4 @@
-import { els } from "../../app/dom.js";
+import { els } from "../app/dom.js";
 
 async function fetchJson(url, options = {}) {
   const res = await fetch(url, options);
