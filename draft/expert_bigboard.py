@@ -1211,7 +1211,9 @@ def generate_expert_bigboard(
                 draft_year=int(draft_year),
                 run_id=watch_run_id,
                 min_prob=watch_min_prob,
-                limit=limit,
+                # IMPORTANT: do not truncate candidate pool here.
+                # `limit` is an output cap (top-N after full ranking), not an input slice.
+                limit=None,
             )
             pool_mode_used = "watch"
             watch_run_id_used = str(watch_run_id or "") or None
@@ -1227,7 +1229,9 @@ def generate_expert_bigboard(
                 draft_year=int(draft_year),
                 run_id=watch_run_id,
                 min_prob=watch_min_prob,
-                limit=limit,
+                # IMPORTANT: do not truncate candidate pool here.
+                # `limit` is an output cap (top-N after full ranking), not an input slice.
+                limit=None,
             )
             pool_mode_used = "watch"
             watch_run_id_used = str(watch_run_id or "") or None
@@ -1239,9 +1243,6 @@ def generate_expert_bigboard(
         p = pool.prospects_by_temp_id.get(str(tid))
         if isinstance(p, Prospect):
             prospects.append(p)
-
-    if limit is not None:
-        prospects = prospects[: max(0, int(limit))]
 
     # Determine phase automatically
     if ph == PHASE_AUTO:
@@ -1333,6 +1334,9 @@ def generate_expert_bigboard(
         out["rank"] = int(i)
         out["tier"] = _tier_label(i)
         board_out.append(out)
+
+    if limit is not None:
+        board_out = board_out[: max(0, int(limit))]
 
     return {
         "ok": True,
