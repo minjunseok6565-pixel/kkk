@@ -565,20 +565,15 @@
         <article class="college-card">
           <div class="college-card-head-inline">
             <h3>전문가 빅보드</h3>
-            <div class="college-filter-row">
-              <label>전문가
-                <select id="college-expert-select"></select>
-              </label>
-              <div id="college-bigboard-summary" class="college-inline-meta"></div>
-            </div>
+            <div id="college-bigboard-summary" class="college-inline-meta"></div>
           </div>
-          <div class="college-table-wrap">
-            <table class="college-table">
-              <thead>
-                <tr>
-                  <th>RANK</th><th>선수</th><th>POS</th><th>TIER</th><th>요약</th>
-                </tr>
-              </thead>
+          <div id="college-bigboard-overview" class="college-bigboard-grid" role="list"></div>
+          <div id="college-bigboard-empty" class="college-inline-meta hidden">전문가 빅보드 데이터가 없습니다.</div>
+          <div id="college-bigboard-loading" class="college-inline-meta hidden">전문가 빅보드를 불러오는 중입니다...</div>
+          <div id="college-bigboard-error" class="college-inline-meta hidden"></div>
+          <div id="college-bigboard-detail-hint" class="college-inline-meta">카드를 클릭하면 상세 빅보드를 확인할 수 있습니다.</div>
+          <div class="college-table-wrap hidden" aria-hidden="true">
+            <table class="college-table" aria-hidden="true">
               <tbody id="college-bigboard-body"></tbody>
             </table>
           </div>
@@ -733,6 +728,30 @@
       <div class="confirm-modal-actions">
         <button id="confirm-modal-cancel" type="button" class="btn btn-secondary">취소</button>
         <button id="confirm-modal-ok" type="button" class="btn btn-primary">선택 확정</button>
+      </div>
+    </article>
+  </div>
+
+  <div id="college-bigboard-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="college-bigboard-modal-title">
+    <div id="college-bigboard-modal-backdrop" class="confirm-modal-backdrop"></div>
+    <article class="confirm-modal-panel college-bigboard-modal-panel">
+      <p class="confirm-modal-eyebrow">EXPERT BIG BOARD</p>
+      <div class="college-bigboard-modal-head">
+        <div>
+          <h3 id="college-bigboard-modal-title" class="confirm-modal-title">상세 빅보드</h3>
+          <p id="college-bigboard-modal-summary" class="college-inline-meta"></p>
+        </div>
+        <button id="college-bigboard-modal-close" type="button" class="btn btn-secondary">닫기</button>
+      </div>
+      <div class="college-table-wrap">
+        <table class="college-table">
+          <thead>
+            <tr>
+              <th>RANK</th><th>선수</th><th>POS</th><th>TIER</th><th>요약</th>
+            </tr>
+          </thead>
+          <tbody id="college-bigboard-modal-body"></tbody>
+        </table>
       </div>
     </article>
   </div>
