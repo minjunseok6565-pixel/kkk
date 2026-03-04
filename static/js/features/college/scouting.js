@@ -105,7 +105,7 @@ function renderCollegeScoutCards() {
         </div>
         <div class="college-actions-row college-scout-actions">
           <button type="button" class="btn btn-primary" data-action="pick-player" data-scout-id="${escapeHtml(scoutId)}">선수 배정</button>
-          <button type="button" class="btn btn-secondary" data-action="open-reports" data-scout-id="${escapeHtml(scoutId)}">스카우팅 리포트${unread > 0 ? ` (${unread})` : ""}</button>
+          <button type="button" class="btn btn-secondary" data-action="open-reports" data-scout-id="${escapeHtml(scoutId)}">리포트 보기${unread > 0 ? ` (${unread})` : ""}</button>
         </div>
       </article>
     `;
