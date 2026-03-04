@@ -1,0 +1,87 @@
+import { num, clamp } from "./guards.js";
+
+function formatIsoDate(dateString) {
+  const raw = String(dateString || "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "YYYY-MM-DD";
+}
+
+function formatHeightIn(inches) {
+  const inch = Math.max(0, Math.round(num(inches, 0)));
+  const feet = Math.floor(inch / 12);
+  const rem = inch % 12;
+  return `${feet}'${String(rem).padStart(2, "0")}"`;
+}
+
+function formatWeightLb(lb) { return `${Math.round(num(lb, 0))} lb`; }
+
+function formatMoney(n) {
+  return `$${Math.round(num(n, 0)).toLocaleString("en-US")}`;
+}
+
+function formatPercent(value) {
+  return `${Math.round(clamp(num(value, 0), 0, 1) * 100)}%`;
+}
+
+function seasonLabelByYear(year) {
+  const y = Number(year);
+  if (!Number.isFinite(y)) return "시즌 미정";
+  const start = String(y).slice(-2);
+  const end = String(y + 1).slice(-2).padStart(2, "0");
+  return `${start}-${end} 시즌`;
+}
+
+function getOptionTypeLabel(optionType) {
+  if (optionType === "PLAYER") return "플레이어 옵션";
+  if (optionType === "TEAM") return "팀 옵션";
+  return "옵션";
+}
+
+function formatWinPct(pct) {
+  const v = clamp(num(pct, 0), 0, 1);
+  return `WIN% ${v.toFixed(3).replace(/^0/, "")}`;
+}
+
+function dateToIso(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function parseIsoDate(iso) {
+  const v = String(iso || "").slice(0, 10);
+  const d = new Date(`${v}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function startOfWeek(date) {
+  const d = new Date(date.getTime());
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d;
+}
+
+function addDays(date, n) {
+  const d = new Date(date.getTime());
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
+function formatSignedDiff(value) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return "0.0";
+  if (Math.abs(n) < 0.05) return "0.0";
+  return `${n > 0 ? "+" : ""}${n.toFixed(1)}`;
+}
+
+function formatSignedDelta(v) {
+  const n = num(v, 0);
+  if (!n) return { text: '지난 7일 대비 변동 없음', cls: '' };
+  return {
+    text: `지난 7일 대비 ${n > 0 ? '+' : ''}${n}`,
+    cls: n > 0 ? 'pos' : 'neg',
+  };
+}
+
+export { formatIsoDate, formatHeightIn, formatWeightLb, formatMoney, formatPercent, seasonLabelByYear, getOptionTypeLabel, formatWinPct, dateToIso, parseIsoDate, startOfWeek, addDays, formatSignedDiff, formatSignedDelta };

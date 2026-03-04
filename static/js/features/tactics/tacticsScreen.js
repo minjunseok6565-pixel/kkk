@@ -1,0 +1,178 @@
+import { state } from "../../app/state.js";
+import { els } from "../../app/dom.js";
+import { activateScreen } from "../../app/router.js";
+import { fetchJson, setLoading } from "../../core/api.js";
+import { TACTICS_OFFENSE_SCHEMES, TACTICS_DEFENSE_SCHEMES, TACTICS_OFFENSE_ROLES } from "../../core/constants/tactics.js";
+import { tacticsSchemeLabel, tacticDisplayLabel, getDefenseRolesForScheme, buildTacticsDraft, computeTacticsInsights, rowHealthState } from "./tacticsInsights.js";
+
+function renderSchemeOptions(kind) {
+  const isOff = kind === "offense";
+  const optionsEl = isOff ? els.tacticsOffenseOptions : els.tacticsDefenseOptions;
+  const list = isOff ? TACTICS_OFFENSE_SCHEMES : TACTICS_DEFENSE_SCHEMES;
+  const selected = isOff ? state.tacticsDraft.offenseScheme : state.tacticsDraft.defenseScheme;
+  optionsEl.innerHTML = list.map((s) => `<button type="button" data-key="${s.key}">${tacticDisplayLabel(s.label)}${s.key === selected ? " ✓" : ""}</button>`).join("");
+  optionsEl.querySelectorAll("button[data-key]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (isOff) {
+        state.tacticsDraft.offenseScheme = btn.dataset.key;
+      } else {
+        state.tacticsDraft.defenseScheme = btn.dataset.key;
+        const defRoles = getDefenseRolesForScheme(btn.dataset.key);
+        [...state.tacticsDraft.starters, ...state.tacticsDraft.rotation].forEach((row, idx) => {
+          if (!defRoles.includes(row.defenseRole)) row.defenseRole = defRoles[idx % defRoles.length];
+        });
+      }
+      optionsEl.classList.add("hidden");
+      renderTacticsScreen();
+    });
+  });
+}
+
+function buildLineupRowHtml(group, idx, row, defenseRoles, insights) {
+  const players = state.rosterRows || [];
+  const playerOptions = ['<option value="">- 선택 -</option>', ...players.map((r) => `<option value="${r.player_id}" ${String(r.player_id) === String(row.pid) ? "selected" : ""}>${r.name || r.player_id}</option>`)].join("");
+  const offOptions = TACTICS_OFFENSE_ROLES.map((role) => `<option value="${role}" ${role === row.offenseRole ? "selected" : ""}>${tacticDisplayLabel(role)}</option>`).join("");
+  const defOptions = defenseRoles.map((role) => `<option value="${role}" ${role === row.defenseRole ? "selected" : ""}>${tacticDisplayLabel(role)}</option>`).join("");
+  const health = rowHealthState(row, insights);
+  return `
+    <div class="tactics-lineup-row" data-group="${group}" data-idx="${idx}">
+      <select data-field="pid" class="ui-select">${playerOptions}</select>
+      <select data-field="offenseRole" class="ui-select">${offOptions}</select>
+      <select data-field="defenseRole" class="ui-select">${defOptions}</select>
+      <input data-field="minutes" type="number" min="0" max="48" value="${Number(row.minutes || 0)}" />
+      <span class="tactics-role-badge ${health.cls}">${health.text}</span>
+    </div>
+  `;
+}
+
+function validateDefenseRoleUnique(changedEl, nextValue) {
+  const all = [...document.querySelectorAll('.tactics-lineup-row select[data-field="defenseRole"]')];
+  const dup = all.find((el) => el !== changedEl && el.value === nextValue);
+  return !dup;
+}
+
+function bindLineupEvents() {
+  document.querySelectorAll('.tactics-lineup-row').forEach((rowEl) => {
+    const group = rowEl.dataset.group;
+    const idx = Number(rowEl.dataset.idx || 0);
+    rowEl.querySelectorAll('select, input').forEach((control) => {
+      control.addEventListener('change', () => {
+        const field = control.dataset.field;
+        const target = group === 'starters' ? state.tacticsDraft.starters[idx] : state.tacticsDraft.rotation[idx];
+        if (!target || !field) return;
+        if (field === 'defenseRole') {
+          if (!validateDefenseRoleUnique(control, control.value)) {
+            const msg = '수비 역할은 중복 선택할 수 없습니다.';
+            if (els.tacticsTotalMessage) els.tacticsTotalMessage.textContent = msg;
+            rowEl.classList.add('is-edited');
+            setTimeout(() => rowEl.classList.remove('is-edited'), 800);
+            renderTacticsScreen();
+            return;
+          }
+          target.defenseRole = control.value;
+        } else if (field === 'minutes') {
+          target.minutes = Math.max(0, Math.min(48, Number(control.value || 0)));
+        } else {
+          target[field] = control.value;
+        }
+        rowEl.classList.add('is-edited');
+        setTimeout(() => rowEl.classList.remove('is-edited'), 700);
+        renderTacticsScreen();
+      });
+    });
+  });
+}
+
+function renderTacticsRosterList() {
+  els.tacticsRosterList.innerHTML = (state.rosterRows || []).length
+    ? state.rosterRows.map((r) => `<div class="tactics-roster-item"><span>${r.name || r.player_id}</span><span class="tactics-roster-meta">${r.pos || '-'}</span></div>`).join("")
+    : '<p class="empty-copy">로스터 데이터가 없습니다.</p>';
+}
+
+function renderTacticsInsights(insights) {
+  if (!els.tacticsKpiTotal) return;
+
+  els.tacticsKpiTotal.textContent = `${insights.totalMinutes} / 240`;
+  els.tacticsKpiStarters.textContent = `${insights.starterAvg.toFixed(1)}분`;
+  els.tacticsKpiRotation.textContent = `${insights.rotationAvg.toFixed(1)}분`;
+  els.tacticsKpiDiversity.textContent = `${Math.round(insights.roleDiversity * 100)}%`;
+
+  const totalChip = els.tacticsKpiTotal.closest('.tactics-kpi-chip');
+  if (totalChip) totalChip.classList.toggle('kpi-warn', insights.minutesDelta !== 0);
+
+  if (els.tacticsTotalBalance) els.tacticsTotalBalance.textContent = `${insights.totalMinutes} / 240`;
+  if (els.tacticsTotalBar) {
+    const pct = Math.max(0, Math.min(100, Math.round((insights.totalMinutes / 240) * 100)));
+    els.tacticsTotalBar.style.width = `${pct}%`;
+    els.tacticsTotalBar.classList.toggle('warn', insights.minutesDelta !== 0);
+  }
+  if (els.tacticsTotalMessage) {
+    els.tacticsTotalMessage.textContent = insights.minutesDelta === 0
+      ? '출전시간 분배가 안정적입니다.'
+      : `240분 기준에서 ${Math.abs(insights.minutesDelta)}분 ${insights.minutesDelta > 0 ? '부족' : '초과'} 상태입니다.`;
+  }
+
+  if (els.tacticsRoleCoverage) {
+    const topOff = [...insights.offenseCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+    els.tacticsRoleCoverage.innerHTML = topOff.length
+      ? topOff.map(([role, count]) => `<div class="tactics-pill">${tacticDisplayLabel(role)} · ${count}명</div>`).join('')
+      : '<p class="empty-copy">역할 데이터가 없습니다.</p>';
+  }
+
+  if (els.tacticsWarningList) {
+    const warnings = insights.warnings.slice(0, 5);
+    els.tacticsWarningList.innerHTML = warnings.length
+      ? warnings.map((w) => `<div class="tactics-warning-item ${w.level}">${w.text}</div>`).join('')
+      : '<div class="tactics-warning-item">현재 치명적인 전술 경고가 없습니다.</div>';
+  }
+
+  if (els.tacticsHeroSub) {
+    const offLabel = tacticDisplayLabel(tacticsSchemeLabel(TACTICS_OFFENSE_SCHEMES, state.tacticsDraft.offenseScheme));
+    const defLabel = tacticDisplayLabel(tacticsSchemeLabel(TACTICS_DEFENSE_SCHEMES, state.tacticsDraft.defenseScheme));
+    els.tacticsHeroSub.textContent = `${offLabel} × ${defLabel} 조합으로 운영 중`;
+  }
+}
+
+function renderTacticsScreen() {
+  if (!state.tacticsDraft) return;
+  const defRoles = getDefenseRolesForScheme(state.tacticsDraft.defenseScheme);
+  const insights = computeTacticsInsights();
+
+  if (els.tacticsOffenseCurrent) els.tacticsOffenseCurrent.textContent = tacticDisplayLabel(tacticsSchemeLabel(TACTICS_OFFENSE_SCHEMES, state.tacticsDraft.offenseScheme));
+  if (els.tacticsDefenseCurrent) els.tacticsDefenseCurrent.textContent = tacticDisplayLabel(tacticsSchemeLabel(TACTICS_DEFENSE_SCHEMES, state.tacticsDraft.defenseScheme));
+
+  els.tacticsStarters.innerHTML = state.tacticsDraft.starters.map((r, i) => buildLineupRowHtml('starters', i, r, defRoles, insights)).join('');
+  els.tacticsRotation.innerHTML = state.tacticsDraft.rotation.map((r, i) => buildLineupRowHtml('rotation', i, r, defRoles, insights)).join('');
+
+  renderTacticsRosterList();
+  renderTacticsInsights(insights);
+  bindLineupEvents();
+}
+
+async function showTacticsScreen() {
+  if (!state.selectedTeamId) {
+    alert('먼저 팀을 선택해주세요.');
+    return;
+  }
+  setLoading(true, '전술 데이터를 불러오는 중...');
+  try {
+    const detail = await fetchJson(`/api/team-detail/${encodeURIComponent(state.selectedTeamId)}`);
+    state.rosterRows = detail.roster || [];
+    if (!state.tacticsDraft) state.tacticsDraft = buildTacticsDraft(state.rosterRows);
+    renderSchemeOptions('offense');
+    renderSchemeOptions('defense');
+    renderTacticsScreen();
+    activateScreen(els.tacticsScreen);
+  } finally {
+    setLoading(false);
+  }
+}
+
+function toggleTacticsOptions(kind) {
+  const target = kind === 'offense' ? els.tacticsOffenseOptions : els.tacticsDefenseOptions;
+  const other = kind === 'offense' ? els.tacticsDefenseOptions : els.tacticsOffenseOptions;
+  other.classList.add('hidden');
+  target.classList.toggle('hidden');
+}
+
+export { renderSchemeOptions, buildLineupRowHtml, validateDefenseRoleUnique, bindLineupEvents, renderTacticsRosterList, renderTacticsInsights, renderTacticsScreen, showTacticsScreen, toggleTacticsOptions };

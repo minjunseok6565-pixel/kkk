@@ -1,0 +1,78 @@
+import { els } from "../../app/dom.js";
+import { state } from "../../app/state.js";
+import { activateScreen } from "../../app/router.js";
+import { fetchJson, setLoading } from "../../core/api.js";
+import { getScheduleVenueText, renderTeamLogoMark } from "../../core/constants/teams.js";
+import { formatLeader } from "../main/homeWidgets.js";
+
+function isCompletedGame(game) {
+  return game?.home_score != null && game?.away_score != null;
+}
+
+function renderEmptyScheduleRow(colSpan, text) {
+  return `<tr><td colspan="${colSpan}" class="schedule-empty">${text}</td></tr>`;
+}
+
+function renderScheduleTables(games) {
+  const completed = (games || []).filter((g) => g?.is_completed);
+  const upcoming = (games || []).filter((g) => !g?.is_completed);
+
+  els.scheduleCompletedBody.innerHTML = completed.length
+    ? completed.map((g) => {
+      const result = g.result || {};
+      const record = g.record_after_game || {};
+      const leaders = g.leaders || {};
+      const opponentTeamId = String(g.opponent_team_id || "").toUpperCase();
+      const venueName = getScheduleVenueText(g);
+      return `
+        <tr>
+          <td>${g.date_mmdd || "--/--"}</td>
+          <td class="schedule-opponent-cell">${g.opponent_label || "-"} ${renderTeamLogoMark(opponentTeamId, "schedule-team-logo")}<span class="schedule-opponent-name">${venueName}</span></td>
+          <td><span class="schedule-result-badge ${result.wl === "W" ? "schedule-result-win" : "schedule-result-loss"}">${result.display || "-"}</span></td>
+          <td>${record.display || "-"}</td>
+          <td>${formatLeader(leaders.points)}</td>
+          <td>${formatLeader(leaders.rebounds)}</td>
+          <td>${formatLeader(leaders.assists)}</td>
+        </tr>
+      `;
+    }).join("")
+    : renderEmptyScheduleRow(7, "완료된 경기가 없습니다.");
+
+  els.scheduleUpcomingBody.innerHTML = upcoming.length
+    ? upcoming.map((g) => {
+      const opponentTeamId = String(g.opponent_team_id || "").toUpperCase();
+      const venueName = getScheduleVenueText(g);
+      return `
+        <tr>
+          <td>${g.date_mmdd || "--/--"}</td>
+          <td class="schedule-opponent-cell">${g.opponent_label || "-"} ${renderTeamLogoMark(opponentTeamId, "schedule-team-logo")}<span class="schedule-opponent-name">${venueName}</span></td>
+          <td><span class="schedule-time-chip">${g.tipoff_time || "--:-- --"}</span></td>
+        </tr>
+      `;
+    }).join("")
+    : renderEmptyScheduleRow(3, "예정된 경기가 없습니다.");
+}
+
+async function showScheduleScreen() {
+  if (!state.selectedTeamId) {
+    alert("먼저 팀을 선택해주세요.");
+    return;
+  }
+
+  setLoading(true, "스케줄 정보를 불러오는 중...");
+  try {
+    const schedule = await fetchJson(`/api/team-schedule/${encodeURIComponent(state.selectedTeamId)}`);
+    const teamName = state.selectedTeamName || TEAM_FULL_NAMES[state.selectedTeamId] || state.selectedTeamId;
+    els.scheduleTitle.textContent = `${teamName} 정규 시즌 일정`;
+    renderScheduleTables(schedule?.games || []);
+    activateScreen(els.scheduleScreen);
+  } catch (e) {
+    els.scheduleCompletedBody.innerHTML = renderEmptyScheduleRow(7, `스케줄 로딩 실패: ${e.message}`);
+    els.scheduleUpcomingBody.innerHTML = renderEmptyScheduleRow(3, "-");
+    activateScreen(els.scheduleScreen);
+  } finally {
+    setLoading(false);
+  }
+}
+
+export { isCompletedGame, renderEmptyScheduleRow, renderScheduleTables, showScheduleScreen };
