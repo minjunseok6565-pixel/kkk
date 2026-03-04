@@ -96,6 +96,7 @@ body.is-modal-open {
 #training-screen,
 #standings-screen,
 #college-screen,
+#college-bigboard-detail-screen,
 #medical-screen,
 #player-detail-screen {
   background: linear-gradient(150deg, rgba(29, 33, 44, 0.58), rgba(12, 14, 19, 0.82));
@@ -1262,19 +1263,71 @@ h1, h2, h3 { margin: 0 0 12px; }
   width: 38px;
 }
 
-#college-screen .college-bigboard-modal-panel {
-  width: min(1080px, 92vw);
+#college-bigboard-detail-screen .college-bigboard-detail-card {
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: rgba(255, 255, 255, 0.9);
 }
 
-#college-screen .college-bigboard-modal-head {
+#college-bigboard-detail-screen .college-table th,
+#college-bigboard-detail-screen .college-table td {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+#college-bigboard-detail-screen .college-table th {
+  color: #475569;
+  font-size: .75rem;
+  letter-spacing: .06em;
+}
+
+#college-bigboard-detail-screen .college-table td {
+  color: #0f172a;
+}
+
+#college-bigboard-detail-screen .college-pos-chip,
+#college-bigboard-detail-screen .college-tier-chip,
+#college-bigboard-detail-screen .college-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  font-size: .74rem;
+  font-weight: 700;
+  white-space: nowrap;
+  border: 1px solid rgba(148, 163, 184, 0.36);
+}
+
+#college-bigboard-detail-screen .college-pos-chip,
+#college-bigboard-detail-screen .college-tier-chip {
+  padding: 3px 8px;
+}
+
+#college-bigboard-detail-screen .college-pos-chip { background: rgba(14, 165, 233, 0.15); color: #075985; }
+#college-bigboard-detail-screen .college-tier-chip { color: #1e293b; background: rgba(148, 163, 184, 0.2); }
+#college-bigboard-detail-screen .college-tier-chip.is-tier1 { background: rgba(234, 179, 8, 0.2); color: #713f12; }
+#college-bigboard-detail-screen .college-tier-chip.is-lottery { background: rgba(59, 130, 246, 0.18); color: #1e3a8a; }
+#college-bigboard-detail-screen .college-tier-chip.is-round1 { background: rgba(16, 185, 129, 0.18); color: #065f46; }
+#college-bigboard-detail-screen .college-tier-chip.is-round2 { background: rgba(236, 72, 153, 0.16); color: #831843; }
+
+#college-bigboard-detail-screen .college-tag-wrap {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-#college-screen #college-bigboard-modal-summary {
-  margin: 4px 0 0;
+#college-bigboard-detail-screen .college-tag {
+  padding: 2px 9px;
+  background: #fff;
+}
+
+#college-bigboard-detail-screen .college-tag.is-strength {
+  border-color: rgba(16, 185, 129, 0.36);
+  background: rgba(16, 185, 129, 0.1);
+  color: #065f46;
+}
+
+#college-bigboard-detail-screen .college-tag.is-concern {
+  border-color: rgba(220, 38, 38, 0.32);
+  background: rgba(220, 38, 38, 0.12);
+  color: #991b1b;
 }
 
 #college-screen .ui-select {
@@ -1380,11 +1433,6 @@ h1, h2, h3 { margin: 0 0 12px; }
 @media (max-width: 640px) {
   #college-screen .college-bigboard-grid {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  #college-screen .college-bigboard-modal-head {
-    flex-direction: column;
-    align-items: stretch;
   }
 }
 
