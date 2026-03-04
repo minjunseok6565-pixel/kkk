@@ -57,10 +57,12 @@ function applyTeamLogo(el, teamId) {
   if (branding.logoUrl) {
     el.style.backgroundImage = `url("${branding.logoUrl}")`;
     el.classList.add("team-logo-image");
+    el.classList.add("has-team-logo");
     return;
   }
   el.style.backgroundImage = "";
   el.classList.remove("team-logo-image");
+  el.classList.remove("has-team-logo");
 }
 
 function renderTeamLogoMark(teamId, extraClass = "") {
@@ -140,6 +142,8 @@ const state = {
   myTeamSortKey: "ovr",
   myTeamFilters: { risk: false, highsalary: false },
   selectedCollegeLeaderPlayerId: null,
+  selectedCollegeBigboardExpertId: null,
+  collegeBigboardLastTriggerExpertId: null,
   collegeBigboardOverview: [],
   collegeBigboardByExpert: {},
   scoutingScouts: [],
@@ -205,6 +209,7 @@ const els = {
   trainingScreen: document.getElementById("training-screen"),
   standingsScreen: document.getElementById("standings-screen"),
   collegeScreen: document.getElementById("college-screen"),
+  collegeBigboardDetailScreen: document.getElementById("college-bigboard-detail-screen"),
   medicalScreen: document.getElementById("medical-screen"),
   trainingBackBtn: document.getElementById("training-back-btn"),
   standingsBackBtn: document.getElementById("standings-back-btn"),
@@ -236,12 +241,14 @@ const els = {
   collegeBigboardError: document.getElementById("college-bigboard-error"),
   collegeBigboardBody: document.getElementById("college-bigboard-body"),
   collegeBigboardSummary: document.getElementById("college-bigboard-summary"),
-  collegeBigboardModal: document.getElementById("college-bigboard-modal"),
-  collegeBigboardModalBackdrop: document.getElementById("college-bigboard-modal-backdrop"),
-  collegeBigboardModalClose: document.getElementById("college-bigboard-modal-close"),
-  collegeBigboardModalTitle: document.getElementById("college-bigboard-modal-title"),
-  collegeBigboardModalSummary: document.getElementById("college-bigboard-modal-summary"),
-  collegeBigboardModalBody: document.getElementById("college-bigboard-modal-body"),
+  collegeBigboardDetailBackBtn: document.getElementById("college-bigboard-detail-back-btn"),
+  collegeBigboardDetailTitle: document.getElementById("college-bigboard-detail-title"),
+  collegeBigboardDetailSummary: document.getElementById("college-bigboard-detail-summary"),
+  collegeBigboardDetailBody: document.getElementById("college-bigboard-detail-body"),
+  collegeScoutSelect: document.getElementById("college-scout-select"),
+  collegeScoutPlayerSelect: document.getElementById("college-scout-player-select"),
+  collegeAssignBtn: document.getElementById("college-assign-btn"),
+  collegeUnassignBtn: document.getElementById("college-unassign-btn"),
   collegeScoutingFeedback: document.getElementById("college-scouting-feedback"),
   collegeScoutingSummary: document.getElementById("college-scouting-summary"),
   collegeScoutCards: document.getElementById("college-scout-cards"),
@@ -394,6 +401,7 @@ function activateScreen(target) {
     els.trainingScreen,
     els.standingsScreen,
     els.collegeScreen,
+    els.collegeBigboardDetailScreen,
     els.medicalScreen,
   ].forEach((screen) => {
     const active = screen === target;
@@ -733,7 +741,9 @@ function renderCollegeBigboardOverview() {
 
     els.collegeBigboardOverview.querySelectorAll(".college-bigboard-card").forEach((card) => {
       card.addEventListener("click", () => {
-        openCollegeBigboardModal(card.dataset.expertId || "").catch((e) => alert(e.message));
+        const expertId = card.dataset.expertId || "";
+        state.collegeBigboardLastTriggerExpertId = expertId;
+        showCollegeBigboardDetailScreen(expertId).catch((e) => alert(e.message));
       });
     });
   }
@@ -756,38 +766,47 @@ function renderCollegeBigboardDetailRows(board) {
   }).join("") : `<tr><td class="schedule-empty" colspan="5">빅보드 데이터가 없습니다.</td></tr>`;
 }
 
-async function openCollegeBigboardModal(expertId) {
-  if (!expertId || !els.collegeBigboardModal) return;
-  const expert = state.collegeExperts.find((item) => item.expert_id === expertId);
+async function fetchCollegeBigboardByExpert(expertId) {
+  if (!expertId) return [];
   let board = state.collegeBigboardByExpert[expertId];
-
   if (!board) {
     const payload = await fetchJson(`/api/offseason/draft/bigboard/expert?expert_id=${encodeURIComponent(expertId)}&pool_mode=auto`);
     board = payload?.board || [];
     state.collegeBigboardByExpert[expertId] = board;
   }
+  return board;
+}
+
+async function showCollegeBigboardDetailScreen(expertId) {
+  if (!expertId || !els.collegeBigboardDetailScreen) return;
+  const expert = state.collegeExperts.find((item) => item.expert_id === expertId);
+  const board = await fetchCollegeBigboardByExpert(expertId);
 
   const tier1 = board.filter((r) => /tier\s*1/i.test(String(r?.tier || ""))).length;
   const lottery = board.filter((r) => /lottery/i.test(String(r?.tier || ""))).length;
-  if (els.collegeBigboardModalTitle) {
-    els.collegeBigboardModalTitle.textContent = `${expert?.display_name || expertId} 상세 빅보드`;
+  if (els.collegeBigboardDetailTitle) {
+    els.collegeBigboardDetailTitle.textContent = `${expert?.display_name || expertId} 상세 빅보드`;
   }
-  if (els.collegeBigboardModalSummary) {
-    els.collegeBigboardModalSummary.textContent = `Tier1 ${tier1}명 · Lottery ${lottery}명 · 전체 ${board.length}명`;
+  if (els.collegeBigboardDetailSummary) {
+    els.collegeBigboardDetailSummary.textContent = `Tier1 ${tier1}명 · Lottery ${lottery}명 · 전체 ${board.length}명`;
   }
-  if (els.collegeBigboardModalBody) {
-    els.collegeBigboardModalBody.innerHTML = renderCollegeBigboardDetailRows(board);
+  if (els.collegeBigboardDetailBody) {
+    els.collegeBigboardDetailBody.innerHTML = renderCollegeBigboardDetailRows(board);
   }
 
-  els.collegeBigboardModal.classList.remove("hidden");
-  document.body.classList.add("is-modal-open");
-  els.collegeBigboardModalClose?.focus();
+  state.selectedCollegeBigboardExpertId = expertId;
+  activateScreen(els.collegeBigboardDetailScreen);
+  els.collegeBigboardDetailBackBtn?.focus();
 }
 
-function closeCollegeBigboardModal() {
-  if (!els.collegeBigboardModal) return;
-  els.collegeBigboardModal.classList.add("hidden");
-  document.body.classList.remove("is-modal-open");
+function closeCollegeBigboardDetailScreen() {
+  activateScreen(els.collegeScreen);
+  switchCollegeTab("bigboard");
+  const selector = state.collegeBigboardLastTriggerExpertId
+    ? `.college-bigboard-card[data-expert-id="${CSS.escape(state.collegeBigboardLastTriggerExpertId)}"]`
+    : ".college-bigboard-card";
+  const trigger = els.collegeBigboardOverview?.querySelector(selector);
+  trigger?.focus();
 }
 
 
@@ -2442,11 +2461,7 @@ async function renderTeams() {
   conferenceOrder.forEach((conference) => {
     const conferenceSection = document.createElement("section");
     conferenceSection.className = "team-conference";
-
-    const conferenceTitle = document.createElement("h3");
-    conferenceTitle.className = "team-conference-title";
-    conferenceTitle.textContent = conference === "East" ? "동부 컨퍼런스" : "서부 컨퍼런스";
-    conferenceSection.appendChild(conferenceTitle);
+    conferenceSection.setAttribute("aria-label", conference === "East" ? "동부 컨퍼런스" : "서부 컨퍼런스");
 
     (divisionOrder[conference] || Object.keys(grouped[conference])).forEach((division) => {
       const divisionTeams = (grouped[conference][division] || []).sort((a, b) => {
@@ -2458,7 +2473,8 @@ async function renderTeams() {
 
       const divisionSection = document.createElement("div");
       divisionSection.className = "team-division";
-      divisionSection.innerHTML = `<h4 class="team-division-title">${division}</h4>`;
+      divisionSection.setAttribute("data-division", division);
+      divisionSection.setAttribute("aria-label", `${conference} ${division}`);
 
       const divisionGrid = document.createElement("div");
       divisionGrid.className = "team-division-grid";
@@ -2466,10 +2482,15 @@ async function renderTeams() {
       divisionTeams.forEach((team) => {
         const id = String(team.team_id || "").toUpperCase();
         const fullName = TEAM_FULL_NAMES[id] || id;
+        const arenaName = getTeamBranding(id).arenaName || "홈 경기장 정보 없음";
         const card = document.createElement("button");
         card.className = "team-card";
         card.type = "button";
-        card.innerHTML = `${renderTeamLogoMark(id, "team-card-logo")}<strong>${fullName}</strong><small>${conference} · ${division}</small>`;
+        card.innerHTML = `
+          <div class="team-card-top">${renderTeamLogoMark(id, "team-card-logo")}</div>
+          <strong>${fullName}</strong>
+          <small>${arenaName}</small>
+        `;
         card.addEventListener("click", () => {
           confirmTeamSelection(id, fullName).catch((e) => alert(e.message));
         });
@@ -3131,6 +3152,12 @@ els.collegeScoutCards?.addEventListener("click", async (event) => {
   if (!scoutId) return;
   if (action === "pick-player") {
     openScoutPlayerModal(scoutId);
+els.collegeBigboardDetailBackBtn?.addEventListener("click", () => closeCollegeBigboardDetailScreen());
+els.collegeAssignBtn.addEventListener("click", async () => {
+  const scoutId = els.collegeScoutSelect.value;
+  const playerId = els.collegeScoutPlayerSelect.value;
+  if (!scoutId || !playerId) {
+    setCollegeScoutingFeedback("스카우터와 대상을 모두 선택한 뒤 배정하세요.", "warn");
     return;
   }
   if (action === "open-reports") {
