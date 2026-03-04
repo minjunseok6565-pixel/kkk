@@ -562,10 +562,10 @@ h1, h2, h3 { margin: 0 0 12px; }
   grid-column: 3;
 }
 .team-logo-image {
-  background-color: #fff;
+  background-color: transparent;
   background-repeat: no-repeat;
   background-position: center;
-  background-size: 72%;
+  background-size: contain;
 }
 
 
@@ -586,15 +586,19 @@ h1, h2, h3 { margin: 0 0 12px; }
 
 .team-logo-mark.has-image {
   background-color: #fff;
-  background-size: 75%;
+  background-size: contain;
 }
 
 .schedule-team-logo {
   margin: 0 6px;
+  width: 30px;
+  height: 30px;
 }
 
 .standings-team-logo {
   margin-right: 8px;
+  width: 30px;
+  height: 30px;
 }
 
 .team-card-logo {
@@ -603,8 +607,8 @@ h1, h2, h3 { margin: 0 0 12px; }
   margin-right: 10px;
 }
 .team-logo-placeholder {
-  width: 138px;
-  height: 138px;
+  width: 148px;
+  height: 148px;
   margin: 0 auto;
   border-radius: 50%;
   border: 2px solid rgba(148, 163, 184, 0.58);
@@ -612,6 +616,12 @@ h1, h2, h3 { margin: 0 0 12px; }
     radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.95), rgba(203, 213, 225, 0.75)),
     linear-gradient(140deg, rgba(29, 78, 216, 0.2), rgba(225, 29, 72, 0.2));
   box-shadow: inset 0 0 0 8px rgba(255, 255, 255, 0.6);
+}
+
+.team-logo-placeholder.has-team-logo {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 .next-game-meta-row {
@@ -1746,6 +1756,8 @@ h1, h2, h3 { margin: 0 0 12px; }
   #team-a-logo,
   #team-b-logo {
     grid-column: auto;
+    width: 132px;
+    height: 132px;
   }
 
   .next-game-vs {

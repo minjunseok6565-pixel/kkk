@@ -57,10 +57,12 @@ function applyTeamLogo(el, teamId) {
   if (branding.logoUrl) {
     el.style.backgroundImage = `url("${branding.logoUrl}")`;
     el.classList.add("team-logo-image");
+    el.classList.add("has-team-logo");
     return;
   }
   el.style.backgroundImage = "";
   el.classList.remove("team-logo-image");
+  el.classList.remove("has-team-logo");
 }
 
 function renderTeamLogoMark(teamId, extraClass = "") {
