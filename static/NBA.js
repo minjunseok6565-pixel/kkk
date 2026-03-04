@@ -90,24 +90,24 @@ function getScheduleVenueText(game) {
 }
 
 const TACTICS_OFFENSE_SCHEMES = [
-  { key: "Spread_HeavyPnR", label: "heavy_pnr" },
-  { key: "Drive_Kick", label: "drive_kick" },
-  { key: "FiveOut", label: "five_out" },
-  { key: "Motion_SplitCut", label: "motion_split" },
-  { key: "DHO_Chicago", label: "dho_chicago" },
-  { key: "Post_InsideOut", label: "post_inside_out" },
-  { key: "Horns_Elbow", label: "horns_elbow" },
-  { key: "Transition_Early", label: "transition_early" }
+  { key: "Spread_HeavyPnR", label: "헤비 픽앤롤" },
+  { key: "Drive_Kick", label: "드라이브 & 킥" },
+  { key: "FiveOut", label: "5-Out" },
+  { key: "Motion_SplitCut", label: "모션 오펜스" },
+  { key: "DHO_Chicago", label: "시카고 DHO" },
+  { key: "Post_InsideOut", label: "포스트 인사이드-아웃" },
+  { key: "Horns_Elbow", label: "혼즈 엘보" },
+  { key: "Transition_Early", label: "얼리 트랜지션" }
 ];
 
 const TACTICS_DEFENSE_SCHEMES = [
-  { key: "Drop", label: "drop" },
-  { key: "Switch_Everything", label: "switch_everything" },
-  { key: "Switch_1_4", label: "switch_1_4" },
-  { key: "Hedge_ShowRecover", label: "hedge_show_recover" },
-  { key: "Blitz_TrapPnR", label: "blitz_trap" },
-  { key: "AtTheLevel", label: "at_the_level" },
-  { key: "Zone", label: "zone" }
+  { key: "Drop", label: "드랍" },
+  { key: "Switch_Everything", label: "올-스위치" },
+  { key: "Switch_1_4", label: "1-4 스위치" },
+  { key: "Hedge_ShowRecover", label: "헷지&쇼앤리커버" },
+  { key: "Blitz_TrapPnR", label: "블리츠&트랩" },
+  { key: "AtTheLevel", label: "엣더레벨" },
+  { key: "Zone", label: "존 디펜스" }
 ];
 
 const TACTICS_OFFENSE_ROLES = [
@@ -2269,7 +2269,9 @@ function renderTrainingCalendar() {
 }
 
 function displaySchemeName(key) {
-  return String(key || "-").replaceAll("_", " ");
+  const allSchemes = [...TACTICS_OFFENSE_SCHEMES, ...TACTICS_DEFENSE_SCHEMES];
+  const found = allSchemes.find((scheme) => scheme.key === key);
+  return found?.label || String(key || "-").replaceAll("_", " ");
 }
 
 function buildSchemeRows(schemeType) {
