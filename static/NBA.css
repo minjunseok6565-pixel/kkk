@@ -529,6 +529,13 @@ h1, h2, h3 { margin: 0 0 12px; }
 #team-b-logo {
   grid-column: 3;
 }
+.team-logo-image {
+  background-color: #fff;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 72%;
+}
+
 .team-logo-placeholder {
   width: 138px;
   height: 138px;

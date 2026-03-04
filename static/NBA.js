@@ -9,6 +9,60 @@ const TEAM_FULL_NAMES = {
   UTA: "유타 재즈", WAS: "워싱턴 위저즈"
 };
 
+const TEAM_LOGO_BASE_PATH = "/static/team_logos";
+
+const TEAM_BRANDING = {
+  ATL: { arenaName: "State Farm Arena", logoFile: "ATL.png" },
+  BOS: { arenaName: "TD Garden", logoFile: "BOS.png" },
+  BKN: { arenaName: "Barclays Center", logoFile: "BKN.png" },
+  CHA: { arenaName: "Spectrum Center", logoFile: "CHA.png" },
+  CHI: { arenaName: "United Center", logoFile: "CHI.png" },
+  CLE: { arenaName: "Rocket Mortgage FieldHouse", logoFile: "CLE.png" },
+  DAL: { arenaName: "American Airlines Center", logoFile: "DAL.png" },
+  DEN: { arenaName: "Ball Arena", logoFile: "DEN.png" },
+  DET: { arenaName: "Little Caesars Arena", logoFile: "DET.png" },
+  GSW: { arenaName: "Chase Center", logoFile: "GSW.png" },
+  HOU: { arenaName: "Toyota Center", logoFile: "HOU.png" },
+  IND: { arenaName: "Gainbridge Fieldhouse", logoFile: "IND.png" },
+  LAC: { arenaName: "Intuit Dome", logoFile: "LAC.png" },
+  LAL: { arenaName: "Crypto.com Arena", logoFile: "LAL.png" },
+  MEM: { arenaName: "FedExForum", logoFile: "MEM.png" },
+  MIA: { arenaName: "Kaseya Center", logoFile: "MIA.png" },
+  MIL: { arenaName: "Fiserv Forum", logoFile: "MIL.png" },
+  MIN: { arenaName: "Target Center", logoFile: "MIN.png" },
+  NOP: { arenaName: "Smoothie King Center", logoFile: "NOP.png" },
+  NYK: { arenaName: "Madison Square Garden", logoFile: "NYK.png" },
+  OKC: { arenaName: "Paycom Center", logoFile: "OKC.png" },
+  ORL: { arenaName: "Kia Center", logoFile: "ORL.png" },
+  PHI: { arenaName: "Wells Fargo Center", logoFile: "PHI.png" },
+  PHX: { arenaName: "Footprint Center", logoFile: "PHX.png" },
+  POR: { arenaName: "Moda Center", logoFile: "POR.png" },
+  SAC: { arenaName: "Golden 1 Center", logoFile: "SAC.png" },
+  SAS: { arenaName: "Frost Bank Center", logoFile: "SAS.png" },
+  TOR: { arenaName: "Scotiabank Arena", logoFile: "TOR.png" },
+  UTA: { arenaName: "Delta Center", logoFile: "UTA.png" },
+  WAS: { arenaName: "Capital One Arena", logoFile: "WAS.png" },
+};
+
+function getTeamBranding(teamId) {
+  const id = String(teamId || "").toUpperCase();
+  const branding = TEAM_BRANDING[id] || { arenaName: "", logoFile: "" };
+  const logoUrl = branding.logoFile ? `${TEAM_LOGO_BASE_PATH}/${branding.logoFile}` : "";
+  return { ...branding, logoUrl };
+}
+
+function applyTeamLogo(el, teamId) {
+  if (!el) return;
+  const branding = getTeamBranding(teamId);
+  if (branding.logoUrl) {
+    el.style.backgroundImage = `url("${branding.logoUrl}")`;
+    el.classList.add("team-logo-image");
+    return;
+  }
+  el.style.backgroundImage = "";
+  el.classList.remove("team-logo-image");
+}
+
 const TACTICS_OFFENSE_SCHEMES = [
   { key: "Spread_HeavyPnR", label: "heavy_pnr" },
   { key: "Drive_Kick", label: "drive_kick" },
@@ -85,6 +139,9 @@ const els = {
   mainCurrentDate: document.getElementById("main-current-date"),
   teamAName: document.getElementById("team-a-name"),
   teamBName: document.getElementById("team-b-name"),
+  teamALogo: document.getElementById("team-a-logo"),
+  teamBLogo: document.getElementById("team-b-logo"),
+  nextGameArena: document.getElementById("next-game-arena"),
   nextGameDatetime: document.getElementById("next-game-datetime"),
   nextGamePlayBtn: document.getElementById("next-game-play-btn"),
   nextGameQuickBtn: document.getElementById("next-game-quick-btn"),
@@ -642,6 +699,9 @@ async function fetchInGameDate() {
 function resetNextGameCard() {
   els.teamAName.textContent = "Team A";
   els.teamBName.textContent = "Team B";
+  applyTeamLogo(els.teamALogo, "");
+  applyTeamLogo(els.teamBLogo, "");
+  if (els.nextGameArena) els.nextGameArena.textContent = "";
   els.nextGameDatetime.textContent = "YYYY-MM-DD --:-- PM";
 }
 
@@ -795,6 +855,11 @@ async function refreshMainDashboard() {
     const gameDate = formatIsoDate(nextGame.date);
     els.teamAName.textContent = TEAM_FULL_NAMES[homeId] || homeId || "Team A";
     els.teamBName.textContent = TEAM_FULL_NAMES[awayId] || awayId || "Team B";
+    applyTeamLogo(els.teamALogo, homeId);
+    applyTeamLogo(els.teamBLogo, awayId);
+    if (els.nextGameArena) {
+      els.nextGameArena.textContent = getTeamBranding(homeId).arenaName || "Arena 정보 없음";
+    }
     const tipoffTime = nextGame.tipoff_time || randomTipoffTime();
     els.nextGameDatetime.textContent = `${gameDate} ${tipoffTime}`;
 
