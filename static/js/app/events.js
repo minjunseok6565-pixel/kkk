@@ -87,6 +87,14 @@ function bindEvents() {
     }
   });
 
+  els.collegeScoutReportInboxList?.addEventListener("click", (event) => {
+    const target = event.target instanceof HTMLElement ? event.target.closest("button[data-action='open-reports']") : null;
+    if (!target) return;
+    const scoutId = String(target.dataset.scoutId || "");
+    if (!scoutId) return;
+    openScoutReportsModal(scoutId);
+  });
+
   els.collegeBigboardDetailBackBtn?.addEventListener("click", () => closeCollegeBigboardDetailScreen());
 
 
