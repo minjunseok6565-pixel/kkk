@@ -1,0 +1,310 @@
+.college-tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.college-panel { display: none; }
+
+.college-panel.active { display: block; }
+
+.college-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.college-card-head-inline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.college-form-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.college-form-grid label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-sub);
+}
+
+.college-actions-row {
+  display: flex;
+  gap: 10px;
+}
+
+#college-screen .college-actions-row #college-assign-btn {
+  background: linear-gradient(135deg, #1d4ed8, #1e3a8a);
+  border-color: rgba(96, 165, 250, 0.52);
+}
+
+#college-screen .college-actions-row #college-unassign-btn {
+  background: linear-gradient(135deg, #e2e8f0, #cbd5e1);
+  border-color: rgba(148, 163, 184, 0.65);
+  color: #1f2937;
+}
+
+#college-screen .college-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+#college-screen .college-kpi-card {
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+
+#college-screen .college-kpi-card strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.06rem;
+  color: #0f172a;
+}
+
+#college-screen .college-kpi-label {
+  color: #64748b;
+  font-size: .78rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+#college-screen .college-inline-meta {
+  margin: 0 0 10px;
+  color: #64748b;
+  font-size: .86rem;
+}
+
+#college-screen .college-team-row.is-selected,
+#college-screen .college-data-row.is-selected {
+  background: linear-gradient(90deg, var(--college-accent-soft), transparent 65%);
+}
+
+#college-screen .college-filter-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+#college-screen .college-filter-row label {
+  min-width: 122px;
+}
+
+#college-screen .college-filter-row select {
+  width: 100%;
+  min-width: 160px;
+}
+
+#college-screen .college-bigboard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+#college-screen .college-bigboard-card {
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+
+#college-screen .college-bigboard-card:hover,
+#college-screen .college-bigboard-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(29, 78, 216, 0.48);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+}
+
+#college-screen .college-bigboard-card-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+#college-screen .college-bigboard-card-title strong {
+  color: #0f172a;
+}
+
+#college-bigboard-detail-screen .college-bigboard-detail-card {
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+#college-screen .ui-select {
+  color: #0f172a;
+  background-color: #fff;
+}
+
+#college-screen #college-scouting-feedback {
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #334155;
+}
+
+#college-screen #college-scouting-feedback[data-tone="ok"] {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.12);
+  color: #065f46;
+}
+
+#college-screen #college-scouting-feedback[data-tone="warn"] {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.16);
+  color: #92400e;
+}
+
+#college-screen .scouting-overview-card {
+  margin-bottom: 12px;
+}
+
+#college-screen .college-scout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+#college-screen .college-scout-card h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+#college-screen .college-scout-actions {
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+#college-screen .college-scout-search-toolbar {
+  margin: 16px 0 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: 10px;
+  align-items: end;
+}
+
+#college-screen .college-scout-search-label,
+#college-screen .college-scout-filter-label {
+  display: grid;
+  gap: 8px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+#college-screen .college-scout-player-list {
+  max-height: 54vh;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+#college-screen .college-scout-player-actions-row {
+  margin-top: 10px;
+  display: flex;
+  justify-content: center;
+}
+
+#college-screen .college-player-option {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.75), rgba(15, 23, 42, 0.55));
+  color: #f8fafc;
+  border-radius: 12px;
+  padding: 12px 13px;
+  transition: border-color .15s ease, transform .15s ease, background .15s ease;
+}
+
+#college-screen .college-player-option:hover,
+#college-screen .college-player-option:focus-visible {
+  border-color: rgba(96, 165, 250, 0.88);
+  background: rgba(30, 64, 175, 0.35);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+#college-screen .college-player-option-main {
+  display: grid;
+  gap: 2px;
+}
+
+#college-screen .college-player-option-main strong {
+  font-size: .98rem;
+}
+
+#college-screen .college-player-option-main small {
+  color: rgba(226, 232, 240, 0.85);
+  font-size: .82rem;
+}
+
+#college-screen .college-player-option.is-current {
+  border-color: rgba(16, 185, 129, 0.72);
+  background: rgba(16, 185, 129, 0.18);
+}
+
+#college-screen .college-scout-reports-list {
+  margin-top: 12px;
+  max-height: 58vh;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+}
+
+#college-screen .college-report-item {
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+#college-screen .college-report-item p {
+  margin: 8px 0 0;
+  color: #dbe7ff;
+}
+
+#college-screen .college-insight-card {
+  min-height: 560px;
+}
+
+#college-screen .college-kv-stack {
+  display: grid;
+  gap: 8px;
+}
+
+#college-screen .college-kv-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.46);
+  padding-bottom: 6px;
+}
+
+#college-screen .college-kv-row span:first-child {
+  color: #64748b;
+}
+
+#college-screen .college-kv-row span:last-child {
+  color: #0f172a;
+  font-weight: 700;
+}

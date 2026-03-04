@@ -1,0 +1,259 @@
+.schedule-table-wrap {
+  overflow: auto;
+}
+
+.schedule-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 900px;
+}
+
+.schedule-table-upcoming {
+  min-width: 560px;
+}
+
+.schedule-table th,
+.schedule-table td {
+  padding: 11px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: center;
+  font-size: .9rem;
+}
+
+.schedule-table th {
+  font-size: .8rem;
+  color: #9fb2d4;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.college-table-wrap { overflow: auto; }
+
+.college-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 620px;
+}
+
+.college-table th,
+.college-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: center;
+  white-space: nowrap;
+}
+
+#college-screen .college-table {
+  font-variant-numeric: tabular-nums;
+}
+
+#college-screen .college-table th {
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  font-size: .76rem;
+}
+
+#college-screen .college-table td {
+  font-size: .9rem;
+}
+
+#college-screen .college-table tbody tr {
+  transition: background-color .16s ease;
+}
+
+#college-screen .college-table tbody tr:hover {
+  background: rgba(148, 163, 184, 0.14);
+}
+
+#college-screen .college-team-row td:first-child,
+#college-screen .college-data-row td:first-child {
+  position: relative;
+}
+
+#college-screen .college-team-row.is-selected td:first-child::before,
+#college-screen .college-data-row.is-selected td:first-child::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--college-accent);
+}
+
+#college-screen .college-bigboard-mini-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#college-screen .college-bigboard-mini-table th,
+#college-screen .college-bigboard-mini-table td {
+  font-size: .8rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 5px 4px;
+  text-align: left;
+}
+
+#college-screen .college-bigboard-mini-table th:first-child,
+#college-screen .college-bigboard-mini-table td:first-child {
+  width: 30px;
+}
+
+#college-screen .college-bigboard-mini-table th:last-child,
+#college-screen .college-bigboard-mini-table td:last-child {
+  width: 38px;
+}
+
+#college-bigboard-detail-screen .college-table th,
+#college-bigboard-detail-screen .college-table td {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+#college-bigboard-detail-screen .college-table th {
+  color: #475569;
+  font-size: .75rem;
+  letter-spacing: .06em;
+}
+
+#college-bigboard-detail-screen .college-table td {
+  color: #0f172a;
+}
+
+.roster-table-wrap,
+.player-detail-panel {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.32);
+}
+
+.roster-table-wrap {
+  overflow: auto;
+}
+
+.roster-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 860px;
+}
+
+.roster-table th,
+.roster-table td {
+  padding: 11px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  text-align: center;
+  font-size: .92rem;
+}
+
+.roster-table th {
+  font-size: .82rem;
+  color: #9fb2d4;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.roster-table td:first-child,
+.roster-table th:first-child {
+  text-align: left;
+  padding-left: 14px;
+}
+
+.roster-row { cursor: pointer; }
+
+.roster-row:hover { background: rgba(255,255,255,0.06); }
+
+.training-player-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.training-player-table th,
+.training-player-table td {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 6px;
+  text-align: left;
+}
+
+.standings-table-wrap {
+  overflow: auto;
+}
+
+.standings-table {
+  width: 100%;
+  min-width: 1120px;
+  border-collapse: collapse;
+}
+
+.standings-table th,
+.standings-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.standings-table thead th {
+  font-size: 0.82rem;
+  color: #d4def3;
+  letter-spacing: 0.04em;
+  position: sticky;
+  top: 0;
+  background: rgba(18, 30, 47, 0.96);
+  z-index: 1;
+}
+
+.standings-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.medical-table-wrap { overflow: auto; }
+
+.medical-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .92rem;
+}
+
+.medical-table th,
+.medical-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  text-align: left;
+  vertical-align: top;
+}
+
+#schedule-screen .schedule-card,
+#my-team-screen .roster-table-wrap,
+#tactics-screen .tactics-shell,
+#standings-screen .standings-card,
+#college-screen .college-card,
+#medical-screen .medical-card,
+#player-detail-screen .player-detail-panel,
+#training-screen .training-calendar-panel,
+#training-screen .training-detail-panel {
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
+}
+
+#schedule-screen .schedule-meta,
+#schedule-screen .schedule-table th,
+#my-team-screen .roster-table th,
+#standings-screen .standings-table th,
+#college-screen .college-table th,
+#medical-screen .medical-table th {
+  color: #64748b;
+}
+
+#schedule-screen .schedule-table td,
+#my-team-screen .roster-table td,
+#standings-screen .standings-table td,
+#college-screen .college-table td,
+#medical-screen .medical-table td {
+  color: #1f2937;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+}
+
+.sharpness-badge-v2.is-stable em { background: #0284c7; }

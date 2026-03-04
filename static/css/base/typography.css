@@ -1,0 +1,98 @@
+h1, h2, h3 { margin: 0 0 12px; }
+.eyebrow {
+  letter-spacing: 0.18em;
+  color: #f4d06f;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+.subtitle { color: var(--text-sub); margin-bottom: 24px; }
+
+.hint { margin-top: 14px; color: #9fb2d4; }
+
+.text-accent {
+  color: #ffd166;
+}
+
+.section-note {
+  margin: 10px 0 0;
+  font-size: .85rem;
+  color: #b2c5e3;
+}
+
+.status-ok {
+  color: #75ec9f;
+  background: rgba(22, 102, 56, 0.35);
+}
+
+.status-danger {
+  color: #ffadb8;
+  background: rgba(125, 29, 49, 0.38);
+}
+
+.section-copy {
+  margin: 0 0 10px;
+  color: #dbe6f7;
+  font-size: .9rem;
+}
+
+.empty-copy {
+  margin: 0;
+  color: #99abc8;
+  font-size: .86rem;
+}
+
+.status-warn { color: #f4d06f; }
+
+#schedule-screen .eyebrow,
+#my-team-screen .eyebrow,
+#tactics-screen .eyebrow,
+#training-screen .eyebrow,
+#standings-screen .eyebrow,
+#college-screen .eyebrow,
+#medical-screen .eyebrow,
+#player-detail-screen .eyebrow {
+  color: #6b7280;
+}
+
+#schedule-screen h2,
+#my-team-screen h2,
+#tactics-screen h2,
+#training-screen h2,
+#standings-screen h2,
+#college-screen h2,
+#medical-screen h2,
+#player-detail-screen h2,
+#schedule-screen h3,
+#my-team-screen h3,
+#tactics-screen h3,
+#training-screen h3,
+#standings-screen h3,
+#college-screen h3,
+#medical-screen h3,
+#player-detail-screen h3 {
+  color: #0f172a;
+}
+
+#schedule-screen .subtitle,
+#my-team-screen .subtitle,
+#tactics-screen .subtitle,
+#training-screen .subtitle,
+#standings-screen .subtitle,
+#college-screen .subtitle,
+#medical-screen .subtitle,
+#player-detail-screen .subtitle {
+  color: #475569;
+}
+
+#tactics-screen .tactics-current-copy,
+#tactics-screen .tactics-lineup-head,
+#tactics-screen .tactics-lineup-row select,
+#tactics-screen .tactics-lineup-row input,
+#training-screen .empty-copy,
+#training-screen .training-day-sub,
+#medical-screen .medical-sub,
+#college-screen label,
+#player-detail-screen .detail-subline,
+#player-detail-screen .compact-kv-list span {
+  color: #64748b;
+}

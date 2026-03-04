@@ -1,0 +1,150 @@
+body {
+  margin: 0;
+  font-family: "Pretendard", "Noto Sans KR", sans-serif;
+  color: var(--text-main);
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 85% -15%, rgba(203, 18, 54, 0.2), transparent 46%),
+    radial-gradient(circle at 14% -8%, rgba(47, 92, 168, 0.24), transparent 38%),
+    linear-gradient(155deg, #0b0d12 0%, var(--bg-primary) 42%, #07090d 100%);
+}
+
+.bg-overlay {
+  position: fixed;
+  inset: 0;
+  background:
+    linear-gradient(132deg, rgba(203, 18, 54, 0.12), transparent 40%),
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0.015) 1px, transparent 1px, transparent 22px);
+  pointer-events: none;
+}
+
+.app-shell {
+  position: relative;
+  z-index: 1;
+  width: min(1280px, 94vw);
+  margin: 0 auto;
+  padding: 44px 0;
+}
+
+body:has(#start-screen.active) .app-shell,
+body:has(#team-screen.active) .app-shell,
+body:has(#main-screen.active) .app-shell {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+#start-screen,
+#team-screen,
+#main-screen,
+#schedule-screen,
+#my-team-screen,
+#tactics-screen,
+#training-screen,
+#standings-screen,
+#college-screen,
+#college-bigboard-detail-screen,
+#medical-screen,
+#player-detail-screen {
+  background: linear-gradient(150deg, rgba(29, 33, 44, 0.58), rgba(12, 14, 19, 0.82));
+  border: 1px solid var(--card-border);
+  border-radius: 20px;
+  padding: 28px;
+  box-shadow: var(--card-shadow);
+  backdrop-filter: blur(8px);
+}
+
+#start-screen,
+#team-screen {
+  position: relative;
+  left: 50%;
+  width: 100vw;
+  margin-left: -50vw;
+  margin-right: -50vw;
+  min-height: 100vh;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 40px 0;
+  color: #0f172a;
+}
+
+#start-screen > *,
+#team-screen > * {
+  width: min(1280px, 94vw);
+  margin-inline: auto;
+}
+
+#main-screen {
+  position: relative;
+  left: 50%;
+  width: 100vw;
+  margin-left: -50vw;
+  margin-right: -50vw;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 78% -22%, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0) 42%),
+    linear-gradient(180deg, #f3f4f7 0%, #eceef2 45%, #e5e8ed 100%);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  color: #111827;
+  padding: 0 0 54px;
+}
+
+#main-screen .top-league-nav,
+#main-screen .main-overview {
+  width: min(1680px, 96vw);
+  margin-inline: auto;
+}
+
+body:has(#schedule-screen.active) .app-shell,
+body:has(#my-team-screen.active) .app-shell,
+body:has(#tactics-screen.active) .app-shell,
+body:has(#training-screen.active) .app-shell,
+body:has(#standings-screen.active) .app-shell,
+body:has(#college-screen.active) .app-shell,
+body:has(#medical-screen.active) .app-shell,
+body:has(#player-detail-screen.active) .app-shell {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+#schedule-screen,
+#my-team-screen,
+#tactics-screen,
+#training-screen,
+#standings-screen,
+#college-screen,
+#medical-screen,
+#player-detail-screen {
+  position: relative;
+  left: 50%;
+  width: 100vw;
+  margin-left: -50vw;
+  margin-right: -50vw;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 80% -22%, rgba(255, 255, 255, 0.88), rgba(255,255,255,0) 40%),
+    linear-gradient(180deg, #f4f6fa 0%, #ebeff5 55%, #e5e9f1 100%);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  color: #111827;
+  padding: 18px 0 42px;
+}
+
+#schedule-screen > *,
+#my-team-screen > *,
+#tactics-screen > *,
+#training-screen > *,
+#standings-screen > *,
+#college-screen > *,
+#medical-screen > *,
+#player-detail-screen > * {
+  width: min(1680px, 96vw);
+  margin-inline: auto;
+}

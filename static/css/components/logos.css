@@ -1,0 +1,89 @@
+.next-game-team-row,
+.next-game-logo-row,
+.next-game-meta-row {
+  display: grid;
+  grid-template-columns: 1fr 120px 1fr;
+  align-items: center;
+}
+
+.next-game-logo-row {
+  margin-top: 20px;
+}
+
+#team-a-logo {
+  grid-column: 1;
+}
+
+#team-b-logo {
+  grid-column: 3;
+}
+
+.team-logo-image {
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+.team-logo-mark {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.95), rgba(203, 213, 225, 0.75)),
+    linear-gradient(140deg, rgba(29, 78, 216, 0.2), rgba(225, 29, 72, 0.2));
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.team-logo-mark.has-image {
+  background-color: #fff;
+  background-size: contain;
+}
+
+.schedule-team-logo {
+  margin: 0 6px;
+  width: 30px;
+  height: 30px;
+}
+
+.standings-team-logo {
+  margin-right: 8px;
+  width: 30px;
+  height: 30px;
+}
+
+.team-card-logo {
+  width: 84px;
+  height: 84px;
+  margin-right: 0;
+  border-radius: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12), inset 0 0 0 8px rgba(255, 255, 255, 0.92);
+}
+
+.team-card-logo.has-image {
+  background-size: 76%;
+}
+
+.team-logo-placeholder {
+  width: 148px;
+  height: 148px;
+  margin: 0 auto;
+  border-radius: 50%;
+  border: 2px solid rgba(148, 163, 184, 0.58);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.95), rgba(203, 213, 225, 0.75)),
+    linear-gradient(140deg, rgba(29, 78, 216, 0.2), rgba(225, 29, 72, 0.2));
+  box-shadow: inset 0 0 0 8px rgba(255, 255, 255, 0.6);
+}
+
+.team-logo-placeholder.has-team-logo {
+  border-color: transparent;
+  background-color: transparent;
+  box-shadow: none;
+}

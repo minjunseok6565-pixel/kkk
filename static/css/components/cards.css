@@ -1,0 +1,79 @@
+.team-card,
+.menu-card {
+  background: linear-gradient(145deg, rgba(36, 41, 55, 0.85), rgba(20, 24, 33, 0.92));
+  border: 1px solid var(--card-border);
+  color: var(--text-main);
+  padding: 16px;
+  border-radius: 12px;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.menu-card {
+  min-height: 92px;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.menu-card-highlight {
+  border-color: rgba(248, 93, 122, 0.66);
+  background: linear-gradient(135deg, rgba(203, 18, 54, 0.28), rgba(47, 92, 168, 0.22));
+}
+
+.team-card:hover,
+.menu-card:hover {
+  border-color: rgba(255,255,255,0.42);
+  background: linear-gradient(140deg, rgba(44, 51, 68, 0.95), rgba(24, 28, 38, 0.95));
+}
+
+.team-card strong { display: inline-block; vertical-align: middle; }
+
+.team-card small { display: block; color: #9fb2d4; margin-top: 6px; }
+
+.team-card-top {
+  width: 100%;
+  display: grid;
+  justify-items: center;
+}
+
+.player-detail-panel {
+  padding: 24px;
+  min-height: 620px;
+}
+
+.detail-card {
+  background: linear-gradient(140deg, rgba(44, 51, 67, 0.86), rgba(20, 24, 33, 0.92));
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 24px;
+  padding: 18px 20px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.09), 0 10px 24px rgba(0,0,0,0.26);
+}
+
+.detail-card h4 {
+  margin: 0 0 10px;
+  font-size: 1.02rem;
+}
+
+.detail-card-header { grid-area: header; }
+
+.detail-card-contract { grid-area: contract; }
+
+.detail-card-dissatisfaction { grid-area: dissatisfaction; }
+
+.detail-card-attr { grid-area: attr; }
+
+.detail-card-health { grid-area: health; }
+
+.detail-card-stats { grid-area: stats; border-radius: 14px; }
+
+.attr-card {
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 12px;
+  padding: 9px 10px;
+  background: rgba(4, 12, 25, 0.45);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}

@@ -1,0 +1,139 @@
+.btn {
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: .95rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.28);
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.42;
+  filter: grayscale(0.8);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #df1b44, #b10b2d);
+  border-color: rgba(255, 94, 126, 0.45);
+  color: white;
+}
+
+.btn-secondary {
+  background: linear-gradient(135deg, #2f5ca8, #1f3f7d);
+  border-color: rgba(124, 167, 250, 0.38);
+  color: white;
+}
+
+#start-screen .btn-primary,
+#team-screen .btn-primary {
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+#start-screen .btn-secondary,
+#team-screen .btn-secondary {
+  background: linear-gradient(180deg, #ffffff, #eef2f7);
+  border: 1px solid rgba(31, 41, 55, 0.22);
+  color: #1f2937;
+}
+
+#main-screen .btn-secondary {
+  background: linear-gradient(180deg, #ffffff, #eef2f7);
+  border: 1px solid rgba(31, 41, 55, 0.2);
+  color: #1f2937;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+#main-screen .btn-secondary:hover {
+  border-color: rgba(31, 41, 55, 0.36);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.14);
+}
+
+.college-tab-row .btn.is-active {
+  background: linear-gradient(135deg, #df1b44, #b10b2d);
+}
+
+#college-screen .college-actions-row .btn {
+  min-width: 96px;
+  border-radius: 12px;
+  font-weight: 700;
+}
+
+#college-screen .college-scout-actions .btn {
+  flex: 1;
+  min-width: 130px;
+  border-radius: 10px;
+}
+
+.training-type-buttons .btn { white-space: nowrap; }
+
+#training-screen .training-type-buttons .btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.tactics-options button {
+  border: 1px solid rgba(184, 201, 255, 0.4);
+  background: rgba(255,255,255,0.03);
+  color: #f3f7ff;
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tactics-options button:hover { background: rgba(130,160,255,0.18); }
+
+#schedule-screen .btn-secondary,
+#my-team-screen .btn-secondary,
+#tactics-screen .btn-secondary,
+#training-screen .btn-secondary,
+#standings-screen .btn-secondary,
+#college-screen .btn-secondary,
+#medical-screen .btn-secondary,
+#player-detail-screen .btn-secondary {
+  background: linear-gradient(180deg, #ffffff, #eef2f7);
+  border: 1px solid rgba(31, 41, 55, 0.2);
+  color: #1f2937;
+}
+
+#schedule-screen .btn-secondary:hover,
+#my-team-screen .btn-secondary:hover,
+#tactics-screen .btn-secondary:hover,
+#training-screen .btn-secondary:hover,
+#standings-screen .btn-secondary:hover,
+#college-screen .btn-secondary:hover,
+#medical-screen .btn-secondary:hover,
+#player-detail-screen .btn-secondary:hover {
+  border-color: rgba(31, 41, 55, 0.36);
+}
+
+#tactics-screen .tactics-options button {
+  background: rgba(241, 245, 249, 0.92);
+  color: #0f172a;
+  border-color: rgba(148, 163, 184, 0.55);
+}
+
+#tactics-screen .tactics-options button:hover {
+  background: rgba(219, 234, 254, 0.92);
+}
+
+#tactics-screen .tactics-options button {
+  width: 100%;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #0f172a;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 0.86rem;
+}
+
+#tactics-screen .tactics-options button:hover { background: #eff6ff; border-color: rgba(59,130,246,.4); }
