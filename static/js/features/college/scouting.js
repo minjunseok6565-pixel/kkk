@@ -13,6 +13,89 @@ function setCollegeScoutingFeedback(message, tone = "info") {
   els.collegeScoutingFeedback.dataset.tone = tone;
 }
 
+function parseDate(input) {
+  const ts = Date.parse(String(input || ""));
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function toYmd(input) {
+  const ts = parseDate(input);
+  if (!ts) return "-";
+  const d = new Date(ts);
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+function getScoutVisualStatus(scout, unread) {
+  if (unread > 0) return { key: "ready", label: "Report Ready" };
+  if (scout?.active_assignment) return { key: "assigned", label: "Assigned" };
+  return { key: "idle", label: "Idle" };
+}
+
+function renderScoutingCommandBar() {
+  const scouts = Array.isArray(state.scoutingScouts) ? state.scoutingScouts : [];
+  const reports = Array.isArray(state.scoutingReports) ? state.scoutingReports : [];
+  const activeAssignments = scouts.filter((scout) => scout?.active_assignment).length;
+  const idleScouts = scouts.length - activeAssignments;
+  const unreadTotal = scouts.reduce((acc, scout) => acc + getScoutUnreadCount(String(scout?.scout_id || "")), 0);
+
+  if (els.collegeScoutingSummary) {
+    els.collegeScoutingSummary.textContent = `활성 배정 ${activeAssignments}/${scouts.length} · 미확인 리포트 ${unreadTotal}건`;
+  }
+
+  if (!els.collegeScoutingKpiRow) return;
+  const recentReports = reports
+    .slice()
+    .sort((a, b) => parseDate(b?.created_at || b?.updated_at || b?.as_of_date) - parseDate(a?.created_at || a?.updated_at || a?.as_of_date));
+  const latestCreated = recentReports[0]?.created_at || recentReports[0]?.updated_at || recentReports[0]?.as_of_date;
+  els.collegeScoutingKpiRow.innerHTML = `
+    <div class="college-scout-kpi-pill"><span>활성 배정</span><strong>${activeAssignments}/${scouts.length}</strong></div>
+    <div class="college-scout-kpi-pill"><span>미배정 스카우터</span><strong>${idleScouts}명</strong></div>
+    <div class="college-scout-kpi-pill"><span>리포트 대기</span><strong>${unreadTotal}건</strong></div>
+    <div class="college-scout-kpi-pill"><span>최신 리포트</span><strong>${escapeHtml(toYmd(latestCreated))}</strong></div>
+  `;
+}
+
+function renderScoutingReportInbox() {
+  if (!els.collegeScoutReportInboxList) return;
+
+  const reports = Array.isArray(state.scoutingReports) ? state.scoutingReports : [];
+  if (els.collegeScoutInboxSummary) {
+    els.collegeScoutInboxSummary.textContent = `총 ${reports.length}건 · 최신순`;
+  }
+
+  if (!reports.length) {
+    els.collegeScoutReportInboxList.innerHTML = `<p class="college-inline-meta">아직 생성된 리포트가 없습니다. 월말 시뮬레이션 이후 확인하세요.</p>`;
+    return;
+  }
+
+  const topReports = reports
+    .slice()
+    .sort((a, b) => parseDate(b?.created_at || b?.updated_at || b?.as_of_date) - parseDate(a?.created_at || a?.updated_at || a?.as_of_date))
+    .slice(0, 6);
+
+  els.collegeScoutReportInboxList.innerHTML = topReports.map((report) => {
+    const scoutId = String(report?.scout?.scout_id || "");
+    const scoutName = report?.scout?.display_name || scoutId || "Scout";
+    const playerName = report?.player_snapshot?.name || report?.target_player_id || "-";
+    const statusRaw = String(report?.status || "-");
+    const statusClass = /complete|done|finished/i.test(statusRaw)
+      ? "is-complete"
+      : (/pending|in_progress|active/i.test(statusRaw) ? "is-pending" : "");
+    return `
+      <button type="button" class="college-inbox-item" data-action="open-reports" data-scout-id="${escapeHtml(scoutId)}">
+        <div class="college-inbox-item-head">
+          <strong>${escapeHtml(scoutName)}</strong>
+          <span class="college-status-chip ${statusClass}">${escapeHtml(statusRaw)}</span>
+        </div>
+        <p>${escapeHtml(playerName)}</p>
+        <small>${escapeHtml(toYmd(report?.created_at || report?.updated_at || report?.as_of_date))}</small>
+      </button>
+    `;
+  }).join("");
+}
+
 async function loadCollegeScouting() {
   if (!state.selectedTeamId) return;
   const [scoutsPayload, reportsPayload] = await Promise.all([
@@ -23,6 +106,7 @@ async function loadCollegeScouting() {
   state.scoutingReports = reportsPayload?.reports || [];
   state.scoutingPlayers = [];
   renderCollegeScoutCards();
+  renderScoutingReportInbox();
 }
 
 function getScoutingReadStorageKey(teamId) {
@@ -69,34 +153,52 @@ function getScoutingPlayerName(playerId, fallback = "-") {
 function renderCollegeScoutCards() {
   if (!els.collegeScoutCards) return;
   if (!state.scoutingScouts.length) {
+    renderScoutingCommandBar();
+    renderScoutingReportInbox();
     els.collegeScoutCards.innerHTML = `<article class="college-card"><p class="college-inline-meta">가용 스카우터가 없습니다.</p></article>`;
     return;
   }
 
-  const activeAssignments = state.scoutingScouts.filter((scout) => scout?.active_assignment).length;
-  const unreadTotal = state.scoutingScouts.reduce((acc, scout) => acc + getScoutUnreadCount(String(scout?.scout_id || "")), 0);
-  if (els.collegeScoutingSummary) {
-    els.collegeScoutingSummary.textContent = `활성 배정 ${activeAssignments}/${state.scoutingScouts.length} · 미확인 리포트 ${unreadTotal}건`;
-  }
+  renderScoutingCommandBar();
 
-  els.collegeScoutCards.innerHTML = state.scoutingScouts.map((scout) => {
+  const scoutsSorted = state.scoutingScouts.slice().sort((a, b) => {
+    const au = getScoutUnreadCount(String(a?.scout_id || ""));
+    const bu = getScoutUnreadCount(String(b?.scout_id || ""));
+    const as = getScoutVisualStatus(a, au).key;
+    const bs = getScoutVisualStatus(b, bu).key;
+    const score = { ready: 0, assigned: 1, idle: 2 };
+    if (score[as] !== score[bs]) return score[as] - score[bs];
+    return String(a?.display_name || "").localeCompare(String(b?.display_name || ""), "ko");
+  });
+
+  els.collegeScoutCards.innerHTML = scoutsSorted.map((scout) => {
     const scoutId = String(scout?.scout_id || "");
     const assignment = scout?.active_assignment;
     const targetId = String(assignment?.target_player_id || "");
     const playerName = assignment ? getScoutingPlayerName(targetId, targetId || "-") : "미배정";
     const unread = getScoutUnreadCount(scoutId);
+    const focusAxes = Array.isArray(scout?.profile?.focus_axes) ? scout.profile.focus_axes.slice(0, 2) : [];
+    const styleTags = Array.isArray(scout?.profile?.style_tags) ? scout.profile.style_tags.slice(0, 2) : [];
+    const status = getScoutVisualStatus(scout, unread);
     return `
-      <article class="college-card college-scout-card" data-scout-id="${escapeHtml(scoutId)}" role="listitem">
+      <article class="college-card college-scout-card is-${status.key}" data-scout-id="${escapeHtml(scoutId)}" role="listitem">
         <div class="college-card-head-inline">
           <div>
+            <p class="college-scout-card-status"><span class="status-dot"></span>${escapeHtml(status.label)}</p>
             <h4>${escapeHtml(scout?.display_name || scoutId)}</h4>
             <p class="college-inline-meta">${escapeHtml(scout?.specialty_key || "GENERAL")}</p>
           </div>
           ${unread > 0 ? `<span class="college-scout-unread-badge">NEW ${unread}</span>` : ""}
         </div>
-        <p class="college-inline-meta">
-          현재 배정: ${escapeHtml(playerName)}
-        </p>
+        <div class="college-scout-assignment-box">
+          <span>현재 배정</span>
+          <strong>${escapeHtml(playerName)}</strong>
+          <small>${assignment?.assigned_date ? `배정일 ${escapeHtml(assignment.assigned_date)}` : "배정 대기 중"}</small>
+        </div>
+        <div class="college-tag-wrap">
+          ${focusAxes.map((axis) => `<span class="college-tag">${escapeHtml(axis)}</span>`).join("")}
+          ${styleTags.map((tag) => `<span class="college-tag is-strength">${escapeHtml(tag)}</span>`).join("")}
+        </div>
         <div class="college-actions-row college-scout-actions">
           <button type="button" class="btn btn-primary" data-action="pick-player" data-scout-id="${escapeHtml(scoutId)}">선수 배정</button>
           <button type="button" class="btn btn-secondary" data-action="open-reports" data-scout-id="${escapeHtml(scoutId)}">리포트 보기${unread > 0 ? ` (${unread})` : ""}</button>
@@ -289,6 +391,7 @@ function openScoutReportsModal(scoutId) {
   renderScoutReportsList();
   markScoutReportsRead(scoutId);
   renderCollegeScoutCards();
+  renderScoutingReportInbox();
   els.collegeScoutReportsModal.classList.remove("hidden");
   document.body.classList.add("is-modal-open");
   els.collegeScoutReportsModalClose?.focus();
@@ -303,7 +406,8 @@ function closeScoutReportsModal() {
 function renderScoutReportsList() {
   if (!els.collegeScoutReportsList) return;
   const reports = state.scoutingReports
-    .filter((report) => String(report?.scout?.scout_id || "") === String(state.scoutingActiveScoutId || ""));
+    .filter((report) => String(report?.scout?.scout_id || "") === String(state.scoutingActiveScoutId || ""))
+    .sort((a, b) => parseDate(b?.created_at || b?.updated_at || b?.as_of_date) - parseDate(a?.created_at || a?.updated_at || a?.as_of_date));
   if (els.collegeScoutReportsModalMeta) {
     els.collegeScoutReportsModalMeta.textContent = `총 ${reports.length}건 · 최신순`;
   }
@@ -320,11 +424,30 @@ function renderScoutReportsList() {
           <strong>${escapeHtml(report?.player_snapshot?.name || report?.target_player_id || "-")}</strong>
           <span class="college-status-chip ${statusClass}">${escapeHtml(statusRaw)}</span>
         </div>
-        <p class="college-inline-meta">${escapeHtml(report?.as_of_date || "-")} · ${escapeHtml(report?.period_key || "-")}</p>
+        <p class="college-inline-meta">${escapeHtml(report?.as_of_date || toYmd(report?.created_at || report?.updated_at))} · ${escapeHtml(report?.period_key || "-")}</p>
         <p>${escapeHtml((report?.report_text || "텍스트 리포트가 아직 생성되지 않았습니다.").slice(0, 240))}</p>
       </article>
     `;
   }).join("");
 }
 
-export { renderCollegeEmpty, setCollegeScoutingFeedback, loadCollegeScouting, getScoutingReadStorageKey, getScoutingReadMap, markScoutReportsRead, getScoutUnreadCount, getScoutingPlayerName, renderCollegeScoutCards, resetScoutPlayerSearchState, renderScoutPlayerList, searchScoutingPlayers, queueScoutingPlayerSearch, openScoutPlayerModal, closeScoutPlayerModal, openScoutReportsModal, closeScoutReportsModal, renderScoutReportsList };
+export {
+  renderCollegeEmpty,
+  setCollegeScoutingFeedback,
+  loadCollegeScouting,
+  getScoutingReadStorageKey,
+  getScoutingReadMap,
+  markScoutReportsRead,
+  getScoutUnreadCount,
+  getScoutingPlayerName,
+  renderCollegeScoutCards,
+  resetScoutPlayerSearchState,
+  renderScoutPlayerList,
+  searchScoutingPlayers,
+  queueScoutingPlayerSearch,
+  openScoutPlayerModal,
+  closeScoutPlayerModal,
+  openScoutReportsModal,
+  closeScoutReportsModal,
+  renderScoutReportsList,
+};
