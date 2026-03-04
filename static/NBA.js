@@ -2268,11 +2268,7 @@ async function renderTeams() {
   conferenceOrder.forEach((conference) => {
     const conferenceSection = document.createElement("section");
     conferenceSection.className = "team-conference";
-
-    const conferenceTitle = document.createElement("h3");
-    conferenceTitle.className = "team-conference-title";
-    conferenceTitle.textContent = conference === "East" ? "동부 컨퍼런스" : "서부 컨퍼런스";
-    conferenceSection.appendChild(conferenceTitle);
+    conferenceSection.setAttribute("aria-label", conference === "East" ? "동부 컨퍼런스" : "서부 컨퍼런스");
 
     (divisionOrder[conference] || Object.keys(grouped[conference])).forEach((division) => {
       const divisionTeams = (grouped[conference][division] || []).sort((a, b) => {
@@ -2284,7 +2280,8 @@ async function renderTeams() {
 
       const divisionSection = document.createElement("div");
       divisionSection.className = "team-division";
-      divisionSection.innerHTML = `<h4 class="team-division-title">${division}</h4>`;
+      divisionSection.setAttribute("data-division", division);
+      divisionSection.setAttribute("aria-label", `${conference} ${division}`);
 
       const divisionGrid = document.createElement("div");
       divisionGrid.className = "team-division-grid";
@@ -2292,10 +2289,15 @@ async function renderTeams() {
       divisionTeams.forEach((team) => {
         const id = String(team.team_id || "").toUpperCase();
         const fullName = TEAM_FULL_NAMES[id] || id;
+        const arenaName = getTeamBranding(id).arenaName || "홈 경기장 정보 없음";
         const card = document.createElement("button");
         card.className = "team-card";
         card.type = "button";
-        card.innerHTML = `${renderTeamLogoMark(id, "team-card-logo")}<strong>${fullName}</strong><small>${conference} · ${division}</small>`;
+        card.innerHTML = `
+          <div class="team-card-top">${renderTeamLogoMark(id, "team-card-logo")}</div>
+          <strong>${fullName}</strong>
+          <small>${arenaName}</small>
+        `;
         card.addEventListener("click", () => {
           confirmTeamSelection(id, fullName).catch((e) => alert(e.message));
         });
