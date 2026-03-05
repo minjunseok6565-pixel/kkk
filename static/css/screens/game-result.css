@@ -333,7 +333,6 @@
 }
 
 .game-result-pbp-list {
-  --pbp-line-x: 18px;
   list-style: none;
   margin: 0;
   padding: 4px 0 0;
@@ -342,23 +341,13 @@
   position: relative;
 }
 
-.game-result-pbp-list::before {
-  content: "";
-  position: absolute;
-  left: var(--pbp-line-x);
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: linear-gradient(180deg, rgba(14, 165, 233, 0.7), rgba(148, 163, 184, 0.35));
-}
-
 .game-result-pbp-item {
   border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 10px;
   background: #ffffff;
   padding: 10px;
   display: grid;
-  grid-template-columns: 28px 112px 1fr auto;
+  grid-template-columns: 36px 112px 1fr auto;
   align-items: start;
   gap: 10px;
 }
@@ -375,36 +364,29 @@
 }
 
 .game-result-pbp-marker {
-  position: relative;
-  width: 24px;
-  min-height: 26px;
+  width: 32px;
+  min-height: 32px;
   display: grid;
-  justify-items: center;
-  gap: 4px;
+  place-items: center;
   z-index: 1;
 }
 
-.game-result-pbp-marker-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 2px solid #ffffff;
-  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.4);
-  background: #94a3b8;
-}
-
-.game-result-pbp-marker-dot.is-home { background: #2563eb; }
-.game-result-pbp-marker-dot.is-away { background: #ef4444; }
-
 .game-result-pbp-marker-logo {
-  width: 16px;
-  height: 16px;
+  width: 28px;
+  height: 28px;
   object-fit: contain;
 }
 
 .game-result-pbp-marker-logo-fallback {
-  font-size: .65rem;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #e2e8f0;
   color: #475569;
+  display: inline-grid;
+  place-items: center;
+  font-size: .72rem;
+  font-weight: 700;
 }
 
 .game-result-pbp-time {
@@ -484,7 +466,7 @@
 
 .game-result-pbp-group-row {
   display: grid;
-  grid-template-columns: 28px 1fr;
+  grid-template-columns: 36px 1fr;
   gap: 10px;
   padding: 8px;
   align-items: start;
@@ -544,12 +526,8 @@
     border-bottom: 1px solid rgba(148, 163, 184, 0.32);
   }
 
-  .game-result-pbp-list::before {
-    left: 12px;
-  }
-
   .game-result-pbp-item {
-    grid-template-columns: 24px 1fr;
+    grid-template-columns: 32px 1fr;
   }
 
   .game-result-pbp-time {
@@ -566,10 +544,10 @@
   }
 
   .game-result-pbp-group-row {
-    grid-template-columns: 24px 1fr;
+    grid-template-columns: 32px 1fr;
   }
 
   .game-result-pbp-group-children {
-    padding-left: 30px;
+    padding-left: 38px;
   }
 }

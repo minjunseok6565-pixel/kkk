@@ -438,11 +438,11 @@ function renderPbpMarker(item = {}, homeId = "", awayId = "") {
   const side = pbpTeamSide(teamId, homeId, awayId);
   const src = teamId ? `/static/team_logos/${teamId}.png` : "";
   const alt = teamId ? `${teamId} logo` : "team logo";
-  const dotClass = `game-result-pbp-marker-dot is-${side}`;
+  const fallbackLabel = side === "home" ? "H" : (side === "away" ? "A" : "-");
   const logoHtml = teamId
     ? `<img class="game-result-pbp-marker-logo" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" loading="lazy" />`
-    : `<span class="game-result-pbp-marker-logo-fallback">${escapeHtml(side === "home" ? "H" : (side === "away" ? "A" : "•"))}</span>`;
-  return `<div class="game-result-pbp-marker" aria-hidden="true"><span class="${dotClass}"></span>${logoHtml}</div>`;
+    : `<span class="game-result-pbp-marker-logo-fallback">${escapeHtml(fallbackLabel)}</span>`;
+  return `<div class="game-result-pbp-marker" aria-hidden="true">${logoHtml}</div>`;
 }
 
 function renderSinglePbpItem(item = {}, homeId = "", awayId = "") {

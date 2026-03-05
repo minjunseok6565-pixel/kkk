@@ -111,3 +111,35 @@ def test_api_game_result_avoids_heavy_state_exports_and_team_schedule(monkeypatc
     assert out["matchups"]["season_record"] == {"user_team_wins": 1, "user_team_losses": 1}
     assert len(out["matchups"]["completed"]) == 2
     assert len(out["matchups"]["upcoming"]) == 1
+
+
+def test_pbp_description_humanizes_shot_codes() -> None:
+    player_lookup = {"p1": "Kristaps Porziņģis"}
+    ev = {"player_id": "p1", "outcome": "SHOT_3_CS", "points": 3, "event_type": "SCORE"}
+
+    desc = core._build_pbp_description("made_3pt", ev, player_lookup)
+
+    assert desc == "Kristaps Porziņģis makes a three-point catch-and-shoot jumper."
+
+
+def test_pbp_description_humanizes_rebound_abbreviations() -> None:
+    player_lookup = {"p2": "Jalen Duren"}
+    ev = {"player_id": "p2", "outcome": "orb", "event_type": "REB"}
+
+    desc = core._build_pbp_description("rebound", ev, player_lookup)
+
+    assert desc == "Jalen Duren grabs an offensive rebound."
+
+
+def test_pbp_description_turnover_and_steal_commentary() -> None:
+    player_lookup = {"p3": "Stephen Curry", "p4": "Jrue Holiday"}
+    ev = {
+        "player_id": "p3",
+        "outcome": "BAD_PASS",
+        "event_type": "TURNOVER",
+        "stealer_pid": "p4",
+    }
+
+    desc = core._build_pbp_description("turnover", ev, player_lookup)
+
+    assert desc == "Stephen Curry commits a bad pass, and Jrue Holiday gets the steal."

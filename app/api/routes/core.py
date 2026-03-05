@@ -5,6 +5,7 @@ import os
 import sqlite3
 import hashlib
 import math
+import re
 from datetime import date, timedelta
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -291,32 +292,165 @@ def _player_name_from_event(ev: Dict[str, Any], player_name_by_id: Dict[str, str
     return ""
 
 
+def _humanize_rebound_outcome(outcome: str) -> str:
+    normalized = outcome.strip().upper()
+    if not normalized:
+        return "rebound"
+    if normalized in {"ORB", "OREB", "OFF_REB", "OFFENSIVE_REBOUND"}:
+        return "offensive rebound"
+    if normalized in {"DRB", "DREB", "DEF_REB", "DEFENSIVE_REBOUND"}:
+        return "defensive rebound"
+    if "OFF" in normalized and "REB" in normalized:
+        return "offensive rebound"
+    if "DEF" in normalized and "REB" in normalized:
+        return "defensive rebound"
+    return "rebound"
+
+
+def _humanize_shot_outcome(outcome: str, points: Optional[int], *, is_miss: bool = False) -> str:
+    normalized = outcome.strip().upper()
+    if not normalized:
+        if points == 3:
+            return "three-point shot"
+        if points == 1:
+            return "free throw"
+        return "shot"
+
+    if "FT" in normalized or "FREE_THROW" in normalized:
+        return "free throw"
+
+    if not normalized.startswith("SHOT_"):
+        words = re.sub(r"[_\s]+", " ", normalized).strip().lower()
+        if words:
+            return words
+        return "shot"
+
+    tokens = [tok for tok in normalized.split("_") if tok]
+    zone = ""
+    style = ""
+
+    if "3" in tokens or "3PT" in tokens:
+        zone = "three-point"
+    elif "MID" in tokens or "MIDRANGE" in tokens:
+        zone = "mid-range"
+    elif any(tok in tokens for tok in ("RIM", "PAINT", "RESTRICTED")):
+        zone = "at-the-rim"
+
+    if "CS" in tokens:
+        style = "catch-and-shoot jumper"
+    elif "PU" in tokens:
+        style = "pull-up jumper"
+    elif "OD" in tokens:
+        style = "off-the-dribble jumper"
+    elif any(tok in tokens for tok in ("STEPBACK", "SB")):
+        style = "step-back jumper"
+    elif any(tok in tokens for tok in ("FADE", "FD", "FADEAWAY")):
+        style = "fadeaway jumper"
+    elif "HOOK" in tokens:
+        style = "hook shot"
+    elif any(tok in tokens for tok in ("LAY", "LAYUP")):
+        style = "layup"
+    elif "DUNK" in tokens:
+        style = "dunk"
+    elif "TIP" in tokens:
+        style = "tip-in"
+    elif "BANK" in tokens:
+        style = "bank shot"
+
+    if zone == "three-point":
+        if style:
+            return f"three-point {style}"
+        return "three-pointer"
+    if zone == "mid-range":
+        if style:
+            return f"mid-range {style}"
+        return "mid-range jumper"
+    if zone == "at-the-rim":
+        if style:
+            return f"{style} at the rim"
+        return "attempt at the rim"
+
+    if style:
+        return style
+    if points == 3:
+        return "three-point shot"
+    if points == 2 and is_miss:
+        return "field-goal attempt"
+    return "shot"
+
+
+def _humanize_turnover_outcome(outcome: str) -> str:
+    normalized = outcome.strip().upper()
+    if not normalized:
+        return "turnover"
+
+    mapping = {
+        "BAD_PASS": "bad pass",
+        "TRAVEL": "traveling",
+        "TRAVELING": "traveling",
+        "DOUBLE_DRIBBLE": "double dribble",
+        "3SEC": "three-second violation",
+        "5SEC": "five-second violation",
+        "8SEC": "eight-second violation",
+        "SHOT_CLOCK": "shot-clock violation",
+        "OFFENSIVE_FOUL": "offensive foul",
+        "OUT_OF_BOUNDS": "out-of-bounds turnover",
+    }
+    if normalized in mapping:
+        return mapping[normalized]
+    return "turnover"
+
+
+def _humanize_foul_outcome(outcome: str, raw_event_type: str) -> str:
+    normalized = outcome.strip().upper()
+    event_type = raw_event_type.strip().upper()
+    if event_type == "OFFENSIVE_FOUL" or normalized == "OFFENSIVE_FOUL":
+        return "offensive foul"
+    if event_type == "FOUL_FT" or "SHOOTING" in normalized:
+        return "shooting foul"
+    if "TECH" in normalized:
+        return "technical foul"
+    if "FLAGRANT" in normalized:
+        return "flagrant foul"
+    return "personal foul"
+
+
 def _build_pbp_description(event_key: str, ev: Dict[str, Any], player_name_by_id: Dict[str, str]) -> str:
     name = _player_name_from_event(ev, player_name_by_id)
     outcome = str(ev.get("outcome") or "").strip()
+    points = _to_int_or_none(ev.get("points"))
+    raw_event_type = str(ev.get("event_type") or "")
     if event_key in {"made_2pt", "made_3pt", "free_throw_made"}:
+        shot = _humanize_shot_outcome(outcome, points)
         if name:
-            return f"{name} makes {outcome or 'shot'}" if outcome else f"{name} scores"
+            article = "an" if shot[:1].lower() in {"a", "e", "i", "o", "u"} else "a"
+            return f"{name} makes {article} {shot}."
         return "Scoring play"
     if event_key in {"missed_fg", "free_throw_miss"}:
+        shot = _humanize_shot_outcome(outcome, points, is_miss=True)
         if name:
-            return f"{name} misses {outcome or 'shot'}" if outcome else f"{name} misses"
+            article = "an" if shot[:1].lower() in {"a", "e", "i", "o", "u"} else "a"
+            return f"{name} misses {article} {shot}."
         return "Missed shot"
     if event_key == "rebound":
+        rebound = _humanize_rebound_outcome(outcome)
         if name:
-            return f"{name} {str(ev.get('outcome') or '').lower() or 'rebound'}"
+            article = "an" if rebound.startswith("offensive") else "a"
+            return f"{name} grabs {article} {rebound}."
         return "Rebound"
     if event_key == "turnover":
         stealer_pid = str(ev.get("stealer_pid") or "").strip()
         stealer = player_name_by_id.get(stealer_pid, "")
+        turnover_kind = _humanize_turnover_outcome(outcome)
         if name and stealer:
-            return f"{name} turnover, {stealer} steals"
+            return f"{name} commits a {turnover_kind}, and {stealer} gets the steal."
         if name:
-            return f"{name} turnover"
+            return f"{name} commits a {turnover_kind}."
         return "Turnover"
     if event_key == "foul":
+        foul_kind = _humanize_foul_outcome(outcome, raw_event_type)
         if name:
-            return f"{name} foul"
+            return f"{name} commits a {foul_kind}."
         return "Foul called"
     if event_key == "timeout":
         team_id = str(ev.get("team_id") or "")
