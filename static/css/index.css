@@ -16,6 +16,7 @@
 
 @import "./screens/start.css";
 @import "./screens/main.css";
+@import "./screens/game-result.css";
 @import "./screens/schedule.css";
 @import "./screens/myteam.css";
 @import "./screens/training.css";
