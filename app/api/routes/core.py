@@ -16,7 +16,14 @@ from league_repo import LeagueRepo
 from schema import normalize_player_id, normalize_team_id
 import state
 from analytics.stats.leaders import compute_leaderboards
-from team_utils import get_conference_standings, get_conference_standings_table, get_team_cards, get_team_detail, get_team_summary_light
+from team_utils import (
+    get_conference_standings,
+    get_conference_standings_home_light,
+    get_conference_standings_table,
+    get_team_cards,
+    get_team_detail,
+    get_team_summary_light,
+)
 
 router = APIRouter()
 
@@ -1221,7 +1228,6 @@ def _build_medical_risk_calendar_payload(
     d0: date,
     days: int,
     schedule: Optional[Dict[str, Any]] = None,
-    overview: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     days = max(1, min(int(days or 14), 31))
     d1 = d0 + timedelta(days=days)
@@ -1230,9 +1236,14 @@ def _build_medical_risk_calendar_payload(
     schedule = schedule or _get_team_schedule_view(tid)
 
     from practice.service import list_team_practice_sessions
+    from fatigue import repo as fatigue_repo
+    from injury import repo as injury_repo
+    from readiness import repo as readiness_repo
 
     with LeagueRepo(state.get_db_path()) as repo:
         repo.init_db()
+        roster_rows = repo.get_team_roster(tid)
+        pids = [str(r.get("player_id")) for r in (roster_rows or []) if r.get("player_id")]
         sessions = list_team_practice_sessions(
             repo=repo,
             team_id=tid,
@@ -1240,34 +1251,47 @@ def _build_medical_risk_calendar_payload(
             date_from=d0.isoformat(),
             date_to=(d1 - timedelta(days=1)).isoformat(),
         )
+        fatigue_by_pid: Dict[str, Dict[str, Any]] = {}
+        sharp_by_pid: Dict[str, Dict[str, Any]] = {}
+        injury_by_pid: Dict[str, Dict[str, Any]] = {}
+        recent_events: List[Dict[str, Any]] = []
+        with repo.transaction() as cur:
+            if pids:
+                fatigue_by_pid = fatigue_repo.get_player_fatigue_states(cur, pids)
+                if season_year > 0:
+                    sharp_by_pid = readiness_repo.get_player_sharpness_states(cur, pids, season_year=season_year)
+                injury_by_pid = injury_repo.get_player_injury_states(cur, pids)
+                recent_events = injury_repo.get_overlapping_injury_events(
+                    cur,
+                    pids,
+                    start_date=d0.isoformat(),
+                    end_date=d1.isoformat(),
+                )
 
-    overview = overview or _medical_team_overview_payload(
-        team_id=tid,
-        season_year=season_year,
-        as_of=d0,
-        history_days=730,
-        top_n=30,
-    )
-    watch = overview.get("watchlists") or {}
-    highest_risk = watch.get("highest_risk") or []
-    unavailable = watch.get("currently_unavailable") or []
-
-    high_pids = {
-        str(r.get("player_id"))
-        for r in highest_risk
-        if str(r.get("risk_tier") or "").upper() == "HIGH" and r.get("player_id")
-    }
-
-    out_pids = {
-        str(r.get("player_id"))
-        for r in unavailable
-        if str(r.get("recovery_status") or "").upper() == "OUT" and r.get("player_id")
-    }
-    returning_pids = {
-        str(r.get("player_id"))
-        for r in unavailable
-        if str(r.get("recovery_status") or "").upper() == "RETURNING" and r.get("player_id")
-    }
+    high_pids = set()
+    out_pids = set()
+    returning_pids = set()
+    for row in roster_rows:
+        pid = str(row.get("player_id") or "")
+        if not pid:
+            continue
+        injury_state = injury_by_pid.get(pid) or {}
+        fatigue_state = fatigue_by_pid.get(pid) or {}
+        sharpness_state = sharp_by_pid.get(pid) or {}
+        prof = _build_risk_profile(
+            row=row,
+            injury_state=injury_state,
+            fatigue_state=fatigue_state,
+            sharpness_state=sharpness_state,
+            as_of_date=d0.isoformat(),
+        )
+        if str(prof.get("risk_tier") or "").upper() == "HIGH":
+            high_pids.add(pid)
+        status = str(prof.get("injury_status") or "").upper()
+        if status == "OUT":
+            out_pids.add(pid)
+        elif status == "RETURNING":
+            returning_pids.add(pid)
 
     games = []
     for g in (schedule.get("games") or []):
@@ -1295,7 +1319,6 @@ def _build_medical_risk_calendar_payload(
             b2b_dates.add(game_dates_sorted[i - 1])
             b2b_dates.add(game_dates_sorted[i])
 
-    recent_events = watch.get("recent_injury_events") or []
     event_count_by_date: Dict[str, int] = {}
     for e in recent_events:
         ds = str(e.get("date") or "")[:10]
@@ -1681,7 +1704,7 @@ async def api_home_dashboard(team_id: str):
 
     schedule = _get_team_schedule_view(tid)
     team_summary = get_team_summary_light(tid)
-    standings_table = get_conference_standings_table()
+    standings_table = get_conference_standings_home_light()
     medical_overview = _medical_team_overview_payload(
         team_id=tid,
         season_year=sy,
