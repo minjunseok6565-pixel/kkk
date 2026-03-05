@@ -475,6 +475,109 @@ def get_conference_standings_table() -> Dict[str, List[Dict[str, Any]]]:
     }
 
 
+def get_conference_standings_home_light() -> Dict[str, List[Dict[str, Any]]]:
+    """Return lightweight standings rows needed by Home dashboard."""
+    games = _get_master_schedule_games()
+    if not games:
+        raise RuntimeError(
+            "Master schedule is not initialized. Expected state.startup_init_state() to run before calling team_utils.get_conference_standings_home_light()."
+        )
+
+    team_ids = _list_active_team_ids()
+    records: Dict[str, Dict[str, int]] = {tid: {"wins": 0, "losses": 0} for tid in team_ids}
+    team_results: Dict[str, List[tuple[str, int]]] = defaultdict(list)
+
+    for g in games:
+        if g.get("status") != "final":
+            continue
+        if str(g.get("phase") or "regular") != "regular":
+            continue
+
+        home_id = str(g.get("home_team_id") or "")
+        away_id = str(g.get("away_team_id") or "")
+        home_score = g.get("home_score")
+        away_score = g.get("away_score")
+        if home_id not in records or away_id not in records:
+            continue
+        if home_score is None or away_score is None:
+            continue
+
+        hs = int(home_score)
+        a_s = int(away_score)
+        game_date = str(g.get("date") or "")[:10]
+        if hs > a_s:
+            records[home_id]["wins"] += 1
+            records[away_id]["losses"] += 1
+            team_results[home_id].append((game_date, 1))
+            team_results[away_id].append((game_date, 0))
+        elif a_s > hs:
+            records[away_id]["wins"] += 1
+            records[home_id]["losses"] += 1
+            team_results[away_id].append((game_date, 1))
+            team_results[home_id].append((game_date, 0))
+
+    standings = {"east": [], "west": []}
+    for tid, rec in records.items():
+        info = TEAM_TO_CONF_DIV.get(tid, {}) or {}
+        conf = str(info.get("conference") or "").lower()
+        if conf not in {"east", "west"}:
+            continue
+
+        wins = int(rec.get("wins", 0) or 0)
+        losses = int(rec.get("losses", 0) or 0)
+        gp = wins + losses
+        win_pct = wins / gp if gp else 0.0
+
+        results_sorted = sorted(team_results.get(tid, []), key=lambda x: x[0])
+        recent = results_sorted[-10:]
+        last10_w = sum(r for _, r in recent)
+        l10 = f"{last10_w}-{len(recent) - last10_w}"
+
+        strk = "-"
+        if results_sorted:
+            last_result = results_sorted[-1][1]
+            streak_len = 0
+            for _, r in reversed(results_sorted):
+                if r != last_result:
+                    break
+                streak_len += 1
+            strk = f"{'W' if last_result == 1 else 'L'}{streak_len}"
+
+        standings[conf].append({
+            "team_id": tid,
+            "wins": wins,
+            "losses": losses,
+            "win_pct": win_pct,
+            "l10": l10,
+            "strk": strk,
+        })
+
+    def _format_gb(gb: float) -> str:
+        if abs(float(gb)) < 1e-9:
+            return "-"
+        rounded = round(float(gb), 1)
+        if abs(rounded - int(rounded)) < 1e-9:
+            return str(int(rounded))
+        return f"{rounded:.1f}"
+
+    def sort_and_finalize(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        rows_sorted = sorted(rows, key=lambda r: (r.get("win_pct", 0), r.get("wins", 0)), reverse=True)
+        if not rows_sorted:
+            return rows_sorted
+        leader = rows_sorted[0]
+        leader_w = int(leader.get("wins", 0) or 0)
+        leader_l = int(leader.get("losses", 0) or 0)
+        for idx, r in enumerate(rows_sorted, start=1):
+            gb = ((leader_w - int(r.get("wins", 0) or 0)) + (int(r.get("losses", 0) or 0) - leader_l)) / 2
+            r["rank"] = idx
+            r["gb_display"] = _format_gb(gb)
+        return rows_sorted
+
+    standings["east"] = sort_and_finalize(standings["east"])
+    standings["west"] = sort_and_finalize(standings["west"])
+    return standings
+
+
 def get_team_cards() -> List[Dict[str, Any]]:
     """Return team summary cards."""
     records = _compute_team_records()
@@ -630,6 +733,40 @@ def get_team_detail(team_id: str) -> Dict[str, Any]:
     }
 
 
+def get_team_summary_light(team_id: str) -> Dict[str, Any]:
+    """Return lightweight team summary for Home/dashboard reads.
+
+    This accessor intentionally avoids roster/player-level DB work done by
+    ``get_team_detail`` and computes only summary fields used in Home.
+    """
+    tid = str(team_id).upper()
+
+    team_ids = set(_list_active_team_ids())
+    if tid not in team_ids:
+        raise ValueError(f"Team '{tid}' not found")
+
+    records = _compute_team_records()
+    rec = records.get(tid, {})
+    wins = int(rec.get("wins", 0) or 0)
+    losses = int(rec.get("losses", 0) or 0)
+    gp = wins + losses
+    win_pct = wins / gp if gp else 0.0
+
+    meta = ui_teams_get().get(tid, {})
+    static_info = TEAM_TO_CONF_DIV.get(tid, {}) or {}
+    conf = meta.get("conference") or static_info.get("conference")
+    div = meta.get("division") or static_info.get("division")
+
+    return {
+        "team_id": tid,
+        "conference": conf,
+        "division": div,
+        "wins": wins,
+        "losses": losses,
+        "win_pct": win_pct,
+        "payroll": _compute_team_payroll(tid),
+        "cap_space": _compute_cap_space(tid),
+    }
 
 
 

@@ -16,7 +16,14 @@ from league_repo import LeagueRepo
 from schema import normalize_player_id, normalize_team_id
 import state
 from analytics.stats.leaders import compute_leaderboards
-from team_utils import get_conference_standings, get_conference_standings_table, get_team_cards, get_team_detail
+from team_utils import (
+    get_conference_standings,
+    get_conference_standings_home_light,
+    get_conference_standings_table,
+    get_team_cards,
+    get_team_detail,
+    get_team_summary_light,
+)
 
 router = APIRouter()
 
@@ -1092,24 +1099,43 @@ async def api_medical_team_alerts(
     league_ctx = state.get_league_context_snapshot() or {}
     sy = int(season_year or (league_ctx.get("season_year") or 0))
     as_of = _parse_iso_date(as_of_date, field="as_of_date") if as_of_date else state.get_current_date_as_date()
-
-    overview_now = _medical_team_overview_payload(
+    return _build_medical_alerts_payload(
         team_id=team_id,
         season_year=sy,
         as_of=as_of,
         history_days=history_days,
         top_n=top_n,
     )
-    overview_prev = _medical_team_overview_payload(
+
+
+def _build_medical_alerts_payload(
+    *,
+    team_id: str,
+    season_year: int,
+    as_of: date,
+    history_days: int,
+    top_n: int,
+    overview_now: Optional[Dict[str, Any]] = None,
+    overview_prev: Optional[Dict[str, Any]] = None,
+    schedule: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    overview_now = overview_now or _medical_team_overview_payload(
         team_id=team_id,
-        season_year=sy,
+        season_year=season_year,
+        as_of=as_of,
+        history_days=history_days,
+        top_n=top_n,
+    )
+    overview_prev = overview_prev or _medical_team_overview_payload(
+        team_id=team_id,
+        season_year=season_year,
         as_of=(as_of - timedelta(days=7)),
         history_days=history_days,
         top_n=top_n,
     )
 
     tid = str(overview_now.get("team_id") or "")
-    schedule = await team_schedule(tid)
+    schedule = schedule or _get_team_schedule_view(tid)
     current_date = str(schedule.get("current_date") or as_of.isoformat())[:10]
     cur_dt = date.fromisoformat(current_date)
     end_dt = cur_dt + timedelta(days=7)
@@ -1187,51 +1213,85 @@ async def api_medical_team_risk_calendar(
     league_ctx = state.get_league_context_snapshot() or {}
     sy = int(season_year or (league_ctx.get("season_year") or 0))
     d0 = _parse_iso_date(date_from, field="date_from") if date_from else state.get_current_date_as_date()
+    return _build_medical_risk_calendar_payload(
+        team_id=team_id,
+        season_year=sy,
+        d0=d0,
+        days=days,
+    )
+
+
+def _build_medical_risk_calendar_payload(
+    *,
+    team_id: str,
+    season_year: int,
+    d0: date,
+    days: int,
+    schedule: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     days = max(1, min(int(days or 14), 31))
     d1 = d0 + timedelta(days=days)
 
     tid = str(normalize_team_id(team_id, strict=True))
-    schedule = await team_schedule(tid)
+    schedule = schedule or _get_team_schedule_view(tid)
 
     from practice.service import list_team_practice_sessions
+    from fatigue import repo as fatigue_repo
+    from injury import repo as injury_repo
+    from readiness import repo as readiness_repo
 
     with LeagueRepo(state.get_db_path()) as repo:
         repo.init_db()
+        roster_rows = repo.get_team_roster(tid)
+        pids = [str(r.get("player_id")) for r in (roster_rows or []) if r.get("player_id")]
         sessions = list_team_practice_sessions(
             repo=repo,
             team_id=tid,
-            season_year=sy,
+            season_year=season_year,
             date_from=d0.isoformat(),
             date_to=(d1 - timedelta(days=1)).isoformat(),
         )
+        fatigue_by_pid: Dict[str, Dict[str, Any]] = {}
+        sharp_by_pid: Dict[str, Dict[str, Any]] = {}
+        injury_by_pid: Dict[str, Dict[str, Any]] = {}
+        recent_events: List[Dict[str, Any]] = []
+        with repo.transaction() as cur:
+            if pids:
+                fatigue_by_pid = fatigue_repo.get_player_fatigue_states(cur, pids)
+                if season_year > 0:
+                    sharp_by_pid = readiness_repo.get_player_sharpness_states(cur, pids, season_year=season_year)
+                injury_by_pid = injury_repo.get_player_injury_states(cur, pids)
+                recent_events = injury_repo.get_overlapping_injury_events(
+                    cur,
+                    pids,
+                    start_date=d0.isoformat(),
+                    end_date=d1.isoformat(),
+                )
 
-    overview = _medical_team_overview_payload(
-        team_id=tid,
-        season_year=sy,
-        as_of=d0,
-        history_days=730,
-        top_n=30,
-    )
-    watch = overview.get("watchlists") or {}
-    highest_risk = watch.get("highest_risk") or []
-    unavailable = watch.get("currently_unavailable") or []
-
-    high_pids = {
-        str(r.get("player_id"))
-        for r in highest_risk
-        if str(r.get("risk_tier") or "").upper() == "HIGH" and r.get("player_id")
-    }
-
-    out_pids = {
-        str(r.get("player_id"))
-        for r in unavailable
-        if str(r.get("recovery_status") or "").upper() == "OUT" and r.get("player_id")
-    }
-    returning_pids = {
-        str(r.get("player_id"))
-        for r in unavailable
-        if str(r.get("recovery_status") or "").upper() == "RETURNING" and r.get("player_id")
-    }
+    high_pids = set()
+    out_pids = set()
+    returning_pids = set()
+    for row in roster_rows:
+        pid = str(row.get("player_id") or "")
+        if not pid:
+            continue
+        injury_state = injury_by_pid.get(pid) or {}
+        fatigue_state = fatigue_by_pid.get(pid) or {}
+        sharpness_state = sharp_by_pid.get(pid) or {}
+        prof = _build_risk_profile(
+            row=row,
+            injury_state=injury_state,
+            fatigue_state=fatigue_state,
+            sharpness_state=sharpness_state,
+            as_of_date=d0.isoformat(),
+        )
+        if str(prof.get("risk_tier") or "").upper() == "HIGH":
+            high_pids.add(pid)
+        status = str(prof.get("injury_status") or "").upper()
+        if status == "OUT":
+            out_pids.add(pid)
+        elif status == "RETURNING":
+            returning_pids.add(pid)
 
     games = []
     for g in (schedule.get("games") or []):
@@ -1259,7 +1319,6 @@ async def api_medical_team_risk_calendar(
             b2b_dates.add(game_dates_sorted[i - 1])
             b2b_dates.add(game_dates_sorted[i])
 
-    recent_events = watch.get("recent_injury_events") or []
     event_count_by_date: Dict[str, int] = {}
     for e in recent_events:
         ds = str(e.get("date") or "")[:10]
@@ -1288,7 +1347,7 @@ async def api_medical_team_risk_calendar(
 
     return {
         "team_id": tid,
-        "season_year": sy,
+        "season_year": season_year,
         "date_from": d0.isoformat(),
         "date_to": d1.isoformat(),
         "days": day_rows,
@@ -1639,13 +1698,44 @@ async def api_home_dashboard(team_id: str):
     - 반환값은 UI 친화 포맷이며, 누락값은 None/기본값으로 안전하게 채운다.
     """
     tid = str(normalize_team_id(team_id, strict=True))
+    league_ctx = state.get_league_context_snapshot() or {}
+    sy = int(league_ctx.get("season_year") or 0)
+    as_of = state.get_current_date_as_date()
 
     schedule = _get_team_schedule_view(tid)
-    team_detail = get_team_detail(tid)
-    standings_table = get_conference_standings_table()
-    medical_overview = await api_medical_team_overview(tid)
-    medical_alerts = await api_medical_team_alerts(tid)
-    risk_calendar = await api_medical_team_risk_calendar(tid, days=14)
+    team_summary = get_team_summary_light(tid)
+    standings_table = get_conference_standings_home_light()
+    medical_overview = _medical_team_overview_payload(
+        team_id=tid,
+        season_year=sy,
+        as_of=as_of,
+        history_days=180,
+        top_n=5,
+    )
+    medical_overview_prev = _medical_team_overview_payload(
+        team_id=tid,
+        season_year=sy,
+        as_of=(as_of - timedelta(days=7)),
+        history_days=180,
+        top_n=5,
+    )
+    medical_alerts = _build_medical_alerts_payload(
+        team_id=tid,
+        season_year=sy,
+        as_of=as_of,
+        history_days=180,
+        top_n=5,
+        overview_now=medical_overview,
+        overview_prev=medical_overview_prev,
+        schedule=schedule,
+    )
+    risk_calendar = _build_medical_risk_calendar_payload(
+        team_id=tid,
+        season_year=sy,
+        d0=as_of,
+        days=14,
+        schedule=schedule,
+    )
 
     current_date = str(schedule.get("current_date") or "")[:10]
     games = schedule.get("games") or []
@@ -1697,7 +1787,7 @@ async def api_home_dashboard(team_id: str):
             {
                 "type": "INJURY_EVENT",
                 "date": str(e.get("date") or "")[:10],
-                "title": f"{e.get('player_name') or 'Unknown'} · {e.get('injury_type') or 'Injury'}",
+                "title": f"{e.get('player_name') or e.get('name') or 'Unknown'} · {e.get('injury_type') or 'Injury'}",
                 "meta": {
                     "player_id": e.get("player_id"),
                     "severity": e.get("severity"),
@@ -1760,9 +1850,9 @@ async def api_home_dashboard(team_id: str):
         "snapshot": {
             "team_name": TEAM_FULL_NAMES.get(tid, tid),
             "record": {
-                "wins": (team_detail.get("summary") or {}).get("wins"),
-                "losses": (team_detail.get("summary") or {}).get("losses"),
-                "win_pct": (team_detail.get("summary") or {}).get("win_pct"),
+                "wins": team_summary.get("wins"),
+                "losses": team_summary.get("losses"),
+                "win_pct": team_summary.get("win_pct"),
             },
             "standing": {
                 "rank": (my_standing or {}).get("rank"),
@@ -1771,8 +1861,8 @@ async def api_home_dashboard(team_id: str):
                 "streak": (my_standing or {}).get("strk"),
             },
             "finance": {
-                "payroll": (team_detail.get("summary") or {}).get("payroll"),
-                "cap_space": (team_detail.get("summary") or {}).get("cap_space"),
+                "payroll": team_summary.get("payroll"),
+                "cap_space": team_summary.get("cap_space"),
             },
             "health": {
                 "out_count": out_count,
