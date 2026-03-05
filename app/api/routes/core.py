@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import hashlib
+import math
 from datetime import date, timedelta
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -73,6 +74,144 @@ def _pick_leader(rows: List[Dict[str, Any]], stat_keys: List[str]) -> Optional[D
                 "value": int(value),
             }
     return best
+
+
+def _to_int_or_none(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _clock_mmss_to_sec(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    if ":" not in raw:
+        return _to_int_or_none(raw)
+    mmss = raw.split(":", 1)
+    if len(mmss) != 2:
+        return None
+    mm = _to_int_or_none(mmss[0])
+    ss = _to_int_or_none(mmss[1])
+    if mm is None or ss is None:
+        return None
+    if mm < 0 or ss < 0:
+        return None
+    return int(mm * 60 + ss)
+
+
+def _build_game_flow_series(
+    replay_events: List[Dict[str, Any]],
+    *,
+    home_final: int,
+    away_final: int,
+    overtime_periods: int,
+) -> List[Dict[str, int]]:
+    if not replay_events:
+        return []
+
+    rows: List[tuple[int, int, int, int]] = []
+    for ev in replay_events:
+        if not isinstance(ev, dict):
+            continue
+        seq = _to_int_or_none(ev.get("seq")) or 0
+        t = _to_int_or_none(ev.get("game_elapsed_sec"))
+        if t is None:
+            q = _to_int_or_none(ev.get("quarter"))
+            clock_left = _clock_mmss_to_sec(ev.get("clock_sec"))
+            if q is not None and clock_left is not None:
+                if q <= 4:
+                    t = max(0, (q - 1) * 720 + (720 - clock_left))
+                else:
+                    t = max(0, 2880 + (q - 5) * 300 + (300 - clock_left))
+        hs = _to_int_or_none(ev.get("score_home"))
+        as_ = _to_int_or_none(ev.get("score_away"))
+        if t is None or hs is None or as_ is None:
+            continue
+        rows.append((t, seq, hs, as_))
+
+    if not rows:
+        return []
+
+    rows.sort(key=lambda x: (x[0], x[1]))
+
+    collapsed: Dict[int, tuple[int, int]] = {}
+    for t, _seq, hs, as_ in rows:
+        collapsed[t] = (hs, as_)
+
+    out: List[Dict[str, int]] = []
+    if 0 not in collapsed:
+        out.append({"t": 0, "home_score": 0, "away_score": 0})
+
+    for t in sorted(collapsed.keys()):
+        hs, as_ = collapsed[t]
+        out.append({"t": int(t), "home_score": int(hs), "away_score": int(as_)})
+
+    total_sec = int(2880 + max(0, int(overtime_periods or 0)) * 300)
+    if not out or out[-1]["t"] < total_sec or out[-1]["home_score"] != home_final or out[-1]["away_score"] != away_final:
+        out.append(
+            {
+                "t": total_sec,
+                "home_score": int(home_final),
+                "away_score": int(away_final),
+            }
+        )
+    return out
+
+
+def _build_win_probability_series(
+    game_flow_series: List[Dict[str, int]],
+    *,
+    overtime_periods: int,
+    pre_game_strength_gap: float,
+) -> List[Dict[str, float]]:
+    if not game_flow_series:
+        return []
+
+    total_sec = float(2880 + max(0, int(overtime_periods or 0)) * 300)
+    if total_sec <= 0:
+        total_sec = 2880.0
+
+    out: List[Dict[str, float]] = []
+    for p in game_flow_series:
+        t = float(p.get("t") or 0)
+        home_score = int(p.get("home_score") or 0)
+        away_score = int(p.get("away_score") or 0)
+        score_diff = float(home_score - away_score)
+        progress = max(0.0, min(1.0, t / total_sec))
+        z = (0.055 * score_diff) + (1.6 * (1.0 - progress) * float(pre_game_strength_gap))
+        home_prob = 1.0 / (1.0 + math.exp(-z))
+        home_prob = max(0.0, min(1.0, home_prob))
+        away_prob = 1.0 - home_prob
+        out.append(
+            {
+                "t": int(t),
+                "home": round(home_prob, 4),
+                "away": round(away_prob, 4),
+            }
+        )
+    return out
+
+
+def _record_before_game(games: List[Dict[str, Any]], *, game_id: str) -> tuple[int, int]:
+    wins = 0
+    losses = 0
+    for g in games:
+        gid = str(g.get("game_id") or "")
+        if gid == game_id:
+            break
+        if not bool(g.get("is_completed")):
+            continue
+        result = g.get("result") if isinstance(g.get("result"), dict) else {}
+        wl = str(result.get("wl") or "")
+        if wl == "W":
+            wins += 1
+        elif wl == "L":
+            losses += 1
+    return wins, losses
 
 
 def _attr_float(attrs: Any, *keys: str) -> Optional[float]:
@@ -1632,6 +1771,217 @@ async def api_home_dashboard(team_id: str):
         "activity_feed": feed_items,
         "risk_calendar": risk_calendar.get("days") if isinstance(risk_calendar, dict) else [],
         "medical_alerts": medical_alerts,
+    }
+
+
+@router.get("/api/game/result/{game_id}")
+async def api_game_result(game_id: str, user_team_id: str):
+    gid = str(game_id or "").strip()
+    if not gid:
+        raise HTTPException(status_code=404, detail="GAME_NOT_FOUND")
+
+    try:
+        tid = str(normalize_team_id(user_team_id, strict=True))
+    except Exception:
+        raise HTTPException(status_code=400, detail="INVALID_USER_TEAM")
+
+    full_state = state.export_full_state_snapshot() or {}
+    league = full_state.get("league") if isinstance(full_state, dict) else {}
+    league = league if isinstance(league, dict) else {}
+    ms = league.get("master_schedule") if isinstance(league, dict) else {}
+    ms = ms if isinstance(ms, dict) else {}
+
+    by_id = ms.get("by_id") if isinstance(ms, dict) else None
+    schedule_entry = by_id.get(gid) if isinstance(by_id, dict) else None
+    if not isinstance(schedule_entry, dict):
+        games = ms.get("games") if isinstance(ms, dict) else []
+        games = games if isinstance(games, list) else []
+        schedule_entry = next((g for g in games if isinstance(g, dict) and str(g.get("game_id") or "") == gid), None)
+    if not isinstance(schedule_entry, dict):
+        raise HTTPException(status_code=404, detail="GAME_NOT_FOUND")
+
+    home_id = str(schedule_entry.get("home_team_id") or "")
+    away_id = str(schedule_entry.get("away_team_id") or "")
+    if tid not in {home_id, away_id}:
+        raise HTTPException(status_code=400, detail="USER_TEAM_NOT_IN_GAME")
+
+    workflow_state = state.export_workflow_state() or {}
+    game_results = workflow_state.get("game_results") if isinstance(workflow_state, dict) else {}
+    game_results = game_results if isinstance(game_results, dict) else {}
+    game_result = game_results.get(gid)
+    if not isinstance(game_result, dict):
+        raise HTTPException(status_code=409, detail="GAME_NOT_FINAL")
+
+    final = game_result.get("final") if isinstance(game_result, dict) else {}
+    final = final if isinstance(final, dict) else {}
+    home_score = _to_int_or_none(final.get(home_id))
+    away_score = _to_int_or_none(final.get(away_id))
+    if home_score is None or away_score is None:
+        raise HTTPException(status_code=409, detail="GAME_NOT_FINAL")
+
+    game_meta = game_result.get("game") if isinstance(game_result, dict) else {}
+    game_meta = game_meta if isinstance(game_meta, dict) else {}
+    overtime_periods = _to_int_or_none(game_meta.get("overtime_periods")) or 0
+    winner_team_id = home_id if home_score >= away_score else away_id
+
+    schedule_user = await team_schedule(tid)
+    opponent_id = away_id if tid == home_id else home_id
+    schedule_opp = await team_schedule(opponent_id)
+    user_games = schedule_user.get("games") if isinstance(schedule_user, dict) else []
+    opp_games = schedule_opp.get("games") if isinstance(schedule_opp, dict) else []
+    user_games = user_games if isinstance(user_games, list) else []
+    opp_games = opp_games if isinstance(opp_games, list) else []
+
+    user_row = next((g for g in user_games if isinstance(g, dict) and str(g.get("game_id") or "") == gid), None)
+    opp_row = next((g for g in opp_games if isinstance(g, dict) and str(g.get("game_id") or "") == gid), None)
+    if not isinstance(user_row, dict) or not bool(user_row.get("is_completed")):
+        raise HTTPException(status_code=409, detail="GAME_NOT_FINAL")
+
+    user_record_after = (user_row.get("record_after_game") or {}).get("display") if isinstance(user_row, dict) else None
+    opp_record_after = (opp_row.get("record_after_game") or {}).get("display") if isinstance(opp_row, dict) else None
+
+    teams_box = game_result.get("teams") if isinstance(game_result, dict) else {}
+    teams_box = teams_box if isinstance(teams_box, dict) else {}
+    home_box = teams_box.get(home_id) if isinstance(teams_box, dict) else None
+    away_box = teams_box.get(away_id) if isinstance(teams_box, dict) else None
+    home_players = (home_box.get("players") if isinstance(home_box, dict) else []) or []
+    away_players = (away_box.get("players") if isinstance(away_box, dict) else []) or []
+    home_players = home_players if isinstance(home_players, list) else []
+    away_players = away_players if isinstance(away_players, list) else []
+
+    leaders = {
+        "points": {
+            "home": _pick_leader(home_players, ["PTS"]),
+            "away": _pick_leader(away_players, ["PTS"]),
+        },
+        "rebounds": {
+            "home": _pick_leader(home_players, ["REB", "TRB"]),
+            "away": _pick_leader(away_players, ["REB", "TRB"]),
+        },
+        "assists": {
+            "home": _pick_leader(home_players, ["AST"]),
+            "away": _pick_leader(away_players, ["AST"]),
+        },
+    }
+
+    replay_events = game_result.get("replay_events") if isinstance(game_result, dict) else []
+    replay_events = replay_events if isinstance(replay_events, list) else []
+    game_flow_series = _build_game_flow_series(
+        [e for e in replay_events if isinstance(e, dict)],
+        home_final=int(home_score),
+        away_final=int(away_score),
+        overtime_periods=int(overtime_periods),
+    )
+
+    user_w_before, user_l_before = _record_before_game(user_games, game_id=gid)
+    opp_w_before, opp_l_before = _record_before_game(opp_games, game_id=gid)
+    user_win_pct = float(user_w_before) / float(max(1, user_w_before + user_l_before))
+    opp_win_pct = float(opp_w_before) / float(max(1, opp_w_before + opp_l_before))
+    pre_game_strength_gap = user_win_pct - opp_win_pct if tid == home_id else opp_win_pct - user_win_pct
+
+    win_probability_series = _build_win_probability_series(
+        game_flow_series,
+        overtime_periods=int(overtime_periods),
+        pre_game_strength_gap=float(pre_game_strength_gap),
+    )
+
+    matchup_games = [
+        g
+        for g in user_games
+        if isinstance(g, dict) and str(g.get("opponent_team_id") or "") == opponent_id
+    ]
+    season_wins = 0
+    season_losses = 0
+    completed: List[Dict[str, Any]] = []
+    upcoming: List[Dict[str, Any]] = []
+    for g in matchup_games:
+        g_completed = bool(g.get("is_completed"))
+        g_is_home = bool(g.get("is_home"))
+        g_home_score = _to_int_or_none(g.get("home_score"))
+        g_away_score = _to_int_or_none(g.get("away_score"))
+        user_score = g_home_score if g_is_home else g_away_score
+        opp_score = g_away_score if g_is_home else g_home_score
+        if g_completed:
+            wl = str(((g.get("result") or {}).get("wl") or ""))
+            if wl == "W":
+                season_wins += 1
+            elif wl == "L":
+                season_losses += 1
+            completed.append(
+                {
+                    "game_id": g.get("game_id"),
+                    "date": str(g.get("date") or "")[:10],
+                    "user_team_home": g_is_home,
+                    "user_team_score": user_score,
+                    "opponent_score": opp_score,
+                    "result": wl if wl in {"W", "L"} else None,
+                }
+            )
+        else:
+            upcoming.append(
+                {
+                    "game_id": g.get("game_id"),
+                    "date": str(g.get("date") or "")[:10],
+                    "user_team_home": g_is_home,
+                    "tipoff_time": g.get("tipoff_time"),
+                }
+            )
+
+    return {
+        "game_id": gid,
+        "status": "final",
+        "as_of_date": state.get_current_date_as_date().isoformat(),
+        "header": {
+            "date": str(schedule_entry.get("date") or "")[:10],
+            "home_team_id": home_id,
+            "away_team_id": away_id,
+            "home_team_name": TEAM_FULL_NAMES.get(home_id, home_id),
+            "away_team_name": TEAM_FULL_NAMES.get(away_id, away_id),
+            "home_score": int(home_score),
+            "away_score": int(away_score),
+            "winner_team_id": winner_team_id,
+            "user_team_id": tid,
+            "user_team_record_after_game": user_record_after,
+            "opponent_record_after_game": opp_record_after,
+            "boxscore_lines": {
+                "quarters": None,
+                "note": "Quarter split unavailable in current GameResultV2 source",
+            },
+        },
+        "tabs": {
+            "default": "gamecast",
+            "enabled": ["gamecast"],
+            "disabled": ["boxscore", "teamstats"],
+        },
+        "leaders": leaders,
+        "gamecast": {
+            "win_probability": {
+                "model": "heuristic_v1",
+                "series": win_probability_series,
+                "inputs": {
+                    "score_diff": True,
+                    "elapsed_seconds": True,
+                    "strength_gap_source": "pre_game_win_pct",
+                },
+                "confidence": "experimental",
+            },
+            "game_flow": {
+                "series": game_flow_series,
+                "source": "replay_events",
+            },
+            "availability": {
+                "replay_events_present": bool(replay_events),
+                "fallback_used": not bool(replay_events),
+            },
+        },
+        "matchups": {
+            "season_record": {
+                "user_team_wins": int(season_wins),
+                "user_team_losses": int(season_losses),
+            },
+            "completed": completed,
+            "upcoming": upcoming,
+        },
     }
 
 
