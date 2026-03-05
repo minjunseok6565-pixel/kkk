@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections import defaultdict
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -767,7 +768,6 @@ def get_team_summary_light(team_id: str) -> Dict[str, Any]:
         "payroll": _compute_team_payroll(tid),
         "cap_space": _compute_cap_space(tid),
     }
-
 
 
 
