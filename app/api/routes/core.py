@@ -1498,35 +1498,17 @@ async def two_way_summary(team_id: str):
 # -------------------------------------------------------------------------
 # 팀별 시즌 스케줄 조회 API
 # -------------------------------------------------------------------------
-@router.get("/api/team-schedule/{team_id}")
-async def team_schedule(team_id: str):
-    """마스터 스케줄 기준으로 특정 팀의 전체 시즌 일정을 UI 친화 포맷으로 반환."""
-    team_id = team_id.upper()
-    if team_id not in ALL_TEAM_IDS:
-        raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found in league")
-
-    # (startup 보장 전제) 마스터 스케줄은 이미 초기화되어 있어야 함
-    league = state.export_full_state_snapshot().get("league", {})
-    master_schedule = league.get("master_schedule", {})
-    games = master_schedule.get("games") or []
-
-    if not games:
-        raise HTTPException(
-            status_code=500,
-            detail="Master schedule is not initialized. Expected server startup_init_state() to run.",
-        )
-        
-
+def _build_formatted_team_schedule_games(
+    *,
+    team_id: str,
+    games: List[Dict[str, Any]],
+    game_results: Mapping[str, Any] | None,
+) -> List[Dict[str, Any]]:
     team_games: List[Dict[str, Any]] = [
-        g for g in games
+        g for g in (games or [])
         if g.get("home_team_id") == team_id or g.get("away_team_id") == team_id
     ]
     team_games.sort(key=lambda g: (g.get("date"), g.get("game_id")))
-
-    workflow_state = state.export_workflow_state() or {}
-    game_results = workflow_state.get("game_results") or {}
-    current_date = str(league.get("current_date") or "")[:10]
-    season_id = str(league.get("active_season_id") or "")
 
     formatted_games: List[Dict[str, Any]] = []
     wins = 0
@@ -1571,7 +1553,7 @@ async def team_schedule(team_id: str):
                 "display": f"{wins}-{losses}",
             }
 
-            gr = game_results.get(str(game_id)) if isinstance(game_results, dict) else None
+            gr = game_results.get(str(game_id)) if isinstance(game_results, Mapping) else None
             team_box = ((gr or {}).get("teams") or {}).get(team_id) if isinstance(gr, dict) else None
             rows = team_box.get("players") if isinstance(team_box, dict) else []
             rows = rows if isinstance(rows, list) else []
@@ -1605,12 +1587,47 @@ async def team_schedule(team_id: str):
             "tipoff_time": None if is_completed else _deterministic_tipoff_time(game_id),
         })
 
+    return formatted_games
+
+
+def _get_team_schedule_view(team_id: str) -> Dict[str, Any]:
+    """Build schedule payload parts for a team using lightweight state accessors.
+
+    Returns the same core shape used by `/api/team-schedule` consumers so
+    endpoints can reuse computed schedule data without route-to-route calls.
+    """
+    team_id = str(team_id or "").upper()
+    if team_id not in ALL_TEAM_IDS:
+        raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found in league")
+
+    schedule_snapshot = state.get_league_schedule_snapshot() or {}
+    master_schedule = schedule_snapshot.get("master_schedule") if isinstance(schedule_snapshot, dict) else {}
+    master_schedule = master_schedule if isinstance(master_schedule, dict) else {}
+    games = master_schedule.get("games") or []
+
+    if not games:
+        raise HTTPException(
+            status_code=500,
+            detail="Master schedule is not initialized. Expected server startup_init_state() to run.",
+        )
+
+    game_results = state.get_game_results_snapshot(phase="regular") or {}
     return {
         "team_id": team_id,
-        "season_id": season_id,
-        "current_date": current_date,
-        "games": formatted_games,
+        "season_id": str(schedule_snapshot.get("active_season_id") or ""),
+        "current_date": str(schedule_snapshot.get("current_date") or "")[:10],
+        "games": _build_formatted_team_schedule_games(
+            team_id=team_id,
+            games=games,
+            game_results=game_results,
+        ),
     }
+
+
+@router.get("/api/team-schedule/{team_id}")
+async def team_schedule(team_id: str):
+    """마스터 스케줄 기준으로 특정 팀의 전체 시즌 일정을 UI 친화 포맷으로 반환."""
+    return _get_team_schedule_view(team_id)
 
 
 @router.get("/api/home/dashboard/{team_id}")
@@ -1623,7 +1640,7 @@ async def api_home_dashboard(team_id: str):
     """
     tid = str(normalize_team_id(team_id, strict=True))
 
-    schedule = await team_schedule(tid)
+    schedule = _get_team_schedule_view(tid)
     team_detail = get_team_detail(tid)
     standings_table = get_conference_standings_table()
     medical_overview = await api_medical_team_overview(tid)
@@ -1646,12 +1663,13 @@ async def api_home_dashboard(team_id: str):
     east_rows = standings_table.get("east") if isinstance(standings_table, dict) else []
     west_rows = standings_table.get("west") if isinstance(standings_table, dict) else []
     all_rows = [r for r in (east_rows or []) + (west_rows or []) if isinstance(r, dict)]
-    my_standing = next((r for r in all_rows if str(r.get("team_id") or "").upper() == tid), None)
+    standings_by_team = {str(r.get("team_id") or "").upper(): r for r in all_rows}
+    my_standing = standings_by_team.get(tid)
 
     opponent_standing = None
     if isinstance(next_game, dict):
         opp_id = str(next_game.get("opponent_team_id") or "").upper()
-        opponent_standing = next((r for r in all_rows if str(r.get("team_id") or "").upper() == opp_id), None)
+        opponent_standing = standings_by_team.get(opp_id)
 
     med_summary = (medical_overview.get("summary") or {}) if isinstance(medical_overview, dict) else {}
     injury_counts = med_summary.get("injury_status_counts") or {}
@@ -1785,17 +1803,14 @@ async def api_game_result(game_id: str, user_team_id: str):
     except Exception:
         raise HTTPException(status_code=400, detail="INVALID_USER_TEAM")
 
-    full_state = state.export_full_state_snapshot() or {}
-    league = full_state.get("league") if isinstance(full_state, dict) else {}
-    league = league if isinstance(league, dict) else {}
-    ms = league.get("master_schedule") if isinstance(league, dict) else {}
-    ms = ms if isinstance(ms, dict) else {}
-
-    by_id = ms.get("by_id") if isinstance(ms, dict) else None
+    schedule_snapshot = state.get_league_schedule_snapshot() or {}
+    master_schedule = schedule_snapshot.get("master_schedule") if isinstance(schedule_snapshot, dict) else {}
+    master_schedule = master_schedule if isinstance(master_schedule, dict) else {}
+    games = master_schedule.get("games") if isinstance(master_schedule, dict) else []
+    games = games if isinstance(games, list) else []
+    by_id = master_schedule.get("by_id") if isinstance(master_schedule, dict) else None
     schedule_entry = by_id.get(gid) if isinstance(by_id, dict) else None
     if not isinstance(schedule_entry, dict):
-        games = ms.get("games") if isinstance(ms, dict) else []
-        games = games if isinstance(games, list) else []
         schedule_entry = next((g for g in games if isinstance(g, dict) and str(g.get("game_id") or "") == gid), None)
     if not isinstance(schedule_entry, dict):
         raise HTTPException(status_code=404, detail="GAME_NOT_FOUND")
@@ -1805,10 +1820,8 @@ async def api_game_result(game_id: str, user_team_id: str):
     if tid not in {home_id, away_id}:
         raise HTTPException(status_code=400, detail="USER_TEAM_NOT_IN_GAME")
 
-    workflow_state = state.export_workflow_state() or {}
-    game_results = workflow_state.get("game_results") if isinstance(workflow_state, dict) else {}
-    game_results = game_results if isinstance(game_results, dict) else {}
-    game_result = game_results.get(gid)
+    game_results = state.get_game_results_snapshot(phase="regular") or {}
+    game_result = game_results.get(gid) if isinstance(game_results, dict) else None
     if not isinstance(game_result, dict):
         raise HTTPException(status_code=409, detail="GAME_NOT_FINAL")
 
@@ -1824,13 +1837,17 @@ async def api_game_result(game_id: str, user_team_id: str):
     overtime_periods = _to_int_or_none(game_meta.get("overtime_periods")) or 0
     winner_team_id = home_id if home_score >= away_score else away_id
 
-    schedule_user = await team_schedule(tid)
     opponent_id = away_id if tid == home_id else home_id
-    schedule_opp = await team_schedule(opponent_id)
-    user_games = schedule_user.get("games") if isinstance(schedule_user, dict) else []
-    opp_games = schedule_opp.get("games") if isinstance(schedule_opp, dict) else []
-    user_games = user_games if isinstance(user_games, list) else []
-    opp_games = opp_games if isinstance(opp_games, list) else []
+    user_games = _build_formatted_team_schedule_games(
+        team_id=tid,
+        games=games,
+        game_results=game_results,
+    )
+    opp_games = _build_formatted_team_schedule_games(
+        team_id=opponent_id,
+        games=games,
+        game_results=game_results,
+    )
 
     user_row = next((g for g in user_games if isinstance(g, dict) and str(g.get("game_id") or "") == gid), None)
     opp_row = next((g for g in opp_games if isinstance(g, dict) and str(g.get("game_id") or "") == gid), None)

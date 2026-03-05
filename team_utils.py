@@ -20,10 +20,10 @@ def _warn_limited(code: str, msg: str, *, limit: int = 5) -> None:
 
 from derived_formulas import compute_derived
 from state import (
-    export_full_state_snapshot,
-    export_workflow_state,
     get_db_path,
     get_league_context_snapshot,
+    get_league_schedule_snapshot,
+    get_player_stats_snapshot,
     ui_cache_set,
     ui_players_get,
     ui_players_set,
@@ -316,11 +316,18 @@ def _compute_cap_space(team_id: str) -> float:
     return salary_cap - payroll
 
 
+def _get_master_schedule_games() -> List[Dict[str, Any]]:
+    """Read master schedule games via lightweight state accessor."""
+    snap = get_league_schedule_snapshot() or {}
+    ms = snap.get("master_schedule") if isinstance(snap, dict) else {}
+    ms = ms if isinstance(ms, dict) else {}
+    games = ms.get("games") or []
+    return games if isinstance(games, list) else []
+
+
 def _compute_team_records() -> Dict[str, Dict[str, Any]]:
     """Compute W/L and points from master_schedule."""
-    league = export_full_state_snapshot().get("league", {})
-    master_schedule = league.get("master_schedule", {})
-    games = master_schedule.get("games") or []
+    games = _get_master_schedule_games()
 
     if not games:
         raise RuntimeError(
@@ -428,9 +435,7 @@ def get_conference_standings_table() -> Dict[str, List[Dict[str, Any]]]:
     - Keeps numeric fields for machine use while also providing display-ready strings
       for the requested table format (PCT '.763', leader GB '-', L10 'W-L').
     """
-    league = export_full_state_snapshot().get("league", {})
-    master_schedule = league.get("master_schedule", {})
-    games = master_schedule.get("games") or []
+    games = _get_master_schedule_games()
 
     if not games:
         raise RuntimeError(
@@ -686,7 +691,7 @@ def get_team_detail(team_id: str) -> Dict[str, Any]:
         "cap_space": _compute_cap_space(tid),
     }
 
-    season_stats = export_workflow_state().get("player_stats", {}) or {}
+    season_stats = get_player_stats_snapshot(phase="regular") or {}
     league_ctx = get_league_context_snapshot() or {}
     season_year = int(league_ctx.get("season_year") or 0)
 
