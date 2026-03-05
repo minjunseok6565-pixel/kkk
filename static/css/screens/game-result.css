@@ -247,6 +247,17 @@
   border-collapse: collapse;
 }
 
+.game-result-boxscore-table {
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.game-result-boxscore-table thead th {
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-weight: 800;
+}
+
 .game-result-boxscore-table th,
 .game-result-boxscore-table td,
 .game-result-teamstats-table th,
@@ -254,6 +265,11 @@
   border-bottom: 1px solid rgba(148, 163, 184, 0.26);
   padding: 8px;
   text-align: center;
+}
+
+.game-result-boxscore-table tbody th,
+.game-result-boxscore-table tbody td {
+  color: #0f172a;
 }
 
 .game-result-boxscore-table tbody th,
