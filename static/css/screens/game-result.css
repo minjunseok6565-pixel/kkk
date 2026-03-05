@@ -1,0 +1,243 @@
+#game-result-screen {
+  margin-top: 14px;
+}
+
+.game-result-screen-head {
+  margin-bottom: 14px;
+}
+
+.game-result-header-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(340px, 1.3fr) minmax(220px, 1fr);
+  gap: 14px;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.08);
+  padding: 20px;
+}
+
+.game-result-team {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 8px;
+}
+
+.game-result-team-logo {
+  width: 84px;
+  height: 84px;
+}
+
+.game-result-team-name {
+  color: #0f172a;
+  font-weight: 800;
+  font-size: 1.15rem;
+}
+
+.game-result-team-record {
+  color: #475569;
+  font-size: .92rem;
+}
+
+.game-result-team-score {
+  color: #0f172a;
+  font-size: 2.4rem;
+  letter-spacing: 0.02em;
+}
+
+.game-result-center {
+  border-left: 1px solid rgba(148, 163, 184, 0.32);
+  border-right: 1px solid rgba(148, 163, 184, 0.32);
+  padding: 6px 12px;
+}
+
+.game-result-final-tag {
+  text-align: center;
+  color: #1d4ed8;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.game-result-linescore-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.game-result-linescore-table th,
+.game-result-linescore-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.23);
+  text-align: center;
+  color: #1e293b;
+}
+
+.game-result-linescore-table th { font-size: .82rem; color: #475569; }
+
+.game-result-tabs {
+  margin-top: 14px;
+  display: flex;
+  gap: 8px;
+}
+
+.game-result-tab {
+  border: 1px solid rgba(59, 130, 246, 0.42);
+  background: #ffffff;
+  color: #1d4ed8;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 700;
+}
+
+.game-result-tab.is-active {
+  background: linear-gradient(180deg, #eff6ff, #dbeafe);
+  border-color: #1d4ed8;
+}
+
+.game-result-tab.is-disabled {
+  color: #64748b;
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
+.game-result-tab span {
+  font-size: .75rem;
+  margin-left: 6px;
+}
+
+.game-result-grid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(420px, 1.8fr) minmax(220px, 1fr);
+  gap: 12px;
+}
+
+.game-result-panel {
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  padding: 14px;
+}
+
+.game-result-panel > h3 {
+  margin-bottom: 12px;
+  color: #0f172a;
+}
+
+.game-result-leaders {
+  display: grid;
+  gap: 10px;
+}
+
+.game-result-leader-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(255, 255, 255, .7);
+  padding: 10px;
+}
+
+.game-result-leader-row > div:last-child,
+.game-result-leader-row > div:first-child {
+  text-align: center;
+}
+
+.game-result-leader-row strong {
+  display: block;
+  color: #0f172a;
+  font-size: 1.3rem;
+}
+
+.game-result-leader-row p {
+  color: #475569;
+  font-size: .86rem;
+}
+
+.game-result-leader-row span {
+  color: #1d4ed8;
+  font-weight: 700;
+  font-size: .88rem;
+}
+
+.game-result-chart-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.game-result-chart-card {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: #fff;
+  padding: 10px;
+}
+
+.game-result-chart-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.game-result-chart-head h4 {
+  color: #0f172a;
+}
+
+.game-result-chart-meta {
+  color: #64748b;
+  font-size: .84rem;
+}
+
+.game-result-chart-wrap { min-height: 184px; }
+
+.game-result-chart {
+  width: 100%;
+  height: 184px;
+  display: block;
+}
+
+.game-result-chart .axis { stroke: #94a3b8; stroke-width: 1; }
+.game-result-chart .grid { stroke: rgba(148, 163, 184, 0.4); stroke-width: 1; stroke-dasharray: 4 3; }
+.game-result-chart .axis-text { fill: #64748b; font-size: 11px; }
+
+.game-result-matchup-record {
+  margin-bottom: 8px;
+  color: #334155;
+}
+
+.game-result-matchups h4 {
+  margin: 12px 0 6px;
+  color: #0f172a;
+}
+
+.game-result-matchups ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.game-result-matchups li {
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  padding: 8px;
+  display: grid;
+  gap: 2px;
+  background: rgba(255, 255, 255, .75);
+}
+
+.game-result-matchups li strong { color: #0f172a; }
+.game-result-matchups li span { color: #475569; font-size: .88rem; }
+
+@media (max-width: 1080px) {
+  .game-result-header-card,
+  .game-result-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .game-result-center {
+    border-left: none;
+    border-right: none;
+    border-top: 1px solid rgba(148, 163, 184, 0.32);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.32);
+  }
+}

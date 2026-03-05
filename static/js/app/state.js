@@ -3,6 +3,7 @@ const state = {
   selectedTeamId: null,
   selectedTeamName: "",
   currentDate: "",
+  lastGameResult: null,
   rosterRows: [],
   selectedPlayerId: null,
   trainingSelectedDates: new Set(),

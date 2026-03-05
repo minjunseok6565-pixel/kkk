@@ -137,6 +137,77 @@
       </section>
     </section>
 
+    <section id="game-result-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row game-result-screen-head">
+        <div>
+          <p class="eyebrow">GAME RESULT</p>
+          <h2 id="game-result-title">경기 결과</h2>
+          <p id="game-result-subtitle" class="subtitle">시뮬레이션 결과를 불러오는 중입니다.</p>
+        </div>
+        <button id="game-result-back-btn" class="btn btn-secondary" type="button">메인으로</button>
+      </div>
+
+      <article class="game-result-header-card">
+        <div class="game-result-team game-result-team-away">
+          <div id="game-result-away-logo" class="team-logo-placeholder game-result-team-logo" aria-label="Away 로고"></div>
+          <p id="game-result-away-name" class="game-result-team-name">Away Team</p>
+          <p id="game-result-away-record" class="game-result-team-record">0-0</p>
+          <strong id="game-result-away-score" class="game-result-team-score">0</strong>
+        </div>
+
+        <div class="game-result-center">
+          <p id="game-result-final-tag" class="game-result-final-tag">FINAL</p>
+          <div id="game-result-linescore" class="game-result-linescore"></div>
+        </div>
+
+        <div class="game-result-team game-result-team-home">
+          <div id="game-result-home-logo" class="team-logo-placeholder game-result-team-logo" aria-label="Home 로고"></div>
+          <p id="game-result-home-name" class="game-result-team-name">Home Team</p>
+          <p id="game-result-home-record" class="game-result-team-record">0-0</p>
+          <strong id="game-result-home-score" class="game-result-team-score">0</strong>
+        </div>
+      </article>
+
+      <div class="game-result-tabs" role="tablist" aria-label="경기 결과 탭">
+        <button type="button" class="game-result-tab is-active" aria-selected="true">Gamecast</button>
+        <button type="button" class="game-result-tab is-disabled" aria-disabled="true">Boxscore <span>준비중</span></button>
+        <button type="button" class="game-result-tab is-disabled" aria-disabled="true">Teamstats <span>준비중</span></button>
+      </div>
+
+      <div class="game-result-grid">
+        <article class="game-result-panel">
+          <h3>Game Leaders</h3>
+          <div id="game-result-leaders" class="game-result-leaders"></div>
+        </article>
+
+        <article class="game-result-panel game-result-panel-center">
+          <h3>Probabilities &amp; Game Flow</h3>
+          <div class="game-result-chart-grid">
+            <section class="game-result-chart-card">
+              <div class="game-result-chart-head">
+                <h4>Win Probability</h4>
+                <p id="game-result-winprob-meta" class="game-result-chart-meta">-</p>
+              </div>
+              <div id="game-result-winprob-chart" class="game-result-chart-wrap"></div>
+            </section>
+
+            <section class="game-result-chart-card">
+              <div class="game-result-chart-head">
+                <h4>Game Flow</h4>
+                <p class="game-result-chart-meta">누적 득점 추이</p>
+              </div>
+              <div id="game-result-flow-chart" class="game-result-chart-wrap"></div>
+            </section>
+          </div>
+        </article>
+
+        <article class="game-result-panel">
+          <h3>Matchups</h3>
+          <div id="game-result-matchups" class="game-result-matchups"></div>
+        </article>
+      </div>
+    </section>
+
     <section id="schedule-screen" class="panel" aria-hidden="true">
       <div class="screen-header-row">
         <div>

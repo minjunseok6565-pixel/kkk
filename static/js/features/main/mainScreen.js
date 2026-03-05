@@ -6,6 +6,7 @@ import { formatIsoDate, formatWinPct } from "../../core/format.js";
 import { num } from "../../core/guards.js";
 import { TEAM_FULL_NAMES, applyTeamLogo, getTeamBranding, renderTeamLogoMark, getScheduleVenueText } from "../../core/constants/teams.js";
 import { resetNextGameCard, renderHomePriorities, renderHomeActivityFeed, renderHomeRiskCalendar } from "./homeWidgets.js";
+import { showGameResultScreenByGameId } from "../gameResult/gameResultScreen.js";
 
 function showTeamSelection() { activateScreen(els.teamScreen); }
 
@@ -104,7 +105,7 @@ async function progressNextGameFromHome() {
     return;
   }
 
-  setLoading(true, "다음 경기 진행 중...");
+  setLoading(true, "경기 시뮬레이션 중...");
   try {
     const dashboard = await fetchMainDashboardRaw();
     const currentDate = String(dashboard?.current_date || "").slice(0, 10);
@@ -125,7 +126,7 @@ async function progressNextGameFromHome() {
       if (!confirmed) return;
     }
 
-    await fetchJson("/api/game/progress-next-user-game-day", {
+    const progressResult = await fetchJson("/api/game/progress-next-user-game-day", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -133,6 +134,13 @@ async function progressNextGameFromHome() {
         mode: "auto_if_needed",
       }),
     });
+
+    const playedGameId = progressResult?.game_day?.user_game?.game_id;
+    if (playedGameId) {
+      await showGameResultScreenByGameId(playedGameId);
+      await refreshMainDashboard();
+      return;
+    }
 
     await refreshMainDashboard();
     alert("경기 진행이 완료되었습니다.");

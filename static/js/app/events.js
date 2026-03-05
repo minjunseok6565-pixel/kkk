@@ -41,6 +41,7 @@ function bindEvents() {
   els.nextGameQuickBtn.addEventListener("click", () => autoAdvanceToNextGameDayFromHome().catch((e) => alert(e.message)));
   els.scheduleBtn.addEventListener("click", () => showScheduleScreen().catch((e) => alert(e.message)));
   els.scheduleBackBtn.addEventListener("click", () => showMainScreen());
+  els.gameResultBackBtn?.addEventListener("click", () => showMainScreen());
   els.trainingMenuBtn.addEventListener("click", () => showTrainingScreen().catch((e) => alert(e.message)));
   els.tacticsBackBtn.addEventListener("click", () => showMainScreen());
   els.tacticsOffenseBtn.addEventListener("click", () => toggleTacticsOptions("offense"));
