@@ -42,6 +42,9 @@ __all__ = [
     "set_db_path",
     "set_last_gm_tick_date",
     "get_league_context_snapshot",
+    "get_league_schedule_snapshot",
+    "get_game_results_snapshot",
+    "get_player_stats_snapshot",
     "initialize_master_schedule_if_needed",
     "ensure_schedule_for_active_season",
     "start_new_season",
@@ -1168,6 +1171,79 @@ def get_league_context_snapshot() -> dict:
             "current_date": league["current_date"],
             "season_start": league["season_start"],
         }
+
+    return _read_state(_impl)
+
+
+def get_league_schedule_snapshot() -> dict:
+    """Return only the schedule-oriented league context used by high-traffic APIs.
+
+    Notes:
+    - Avoids full-state deepcopy (`export_full_state_snapshot`) by reading only
+      the required branches under a read lock.
+    - Returned value is plain dict/list data (no read-only wrappers).
+    """
+
+    def _impl(v: Mapping[str, Any]) -> dict:
+        league = v.get("league")
+        if not isinstance(league, Mapping):
+            return {
+                "active_season_id": v.get("active_season_id"),
+                "current_date": None,
+                "master_schedule": {
+                    "games": [],
+                    "by_id": {},
+                },
+            }
+
+        ms = league.get("master_schedule") if isinstance(league, Mapping) else None
+        ms = ms if isinstance(ms, Mapping) else {}
+        return {
+            "active_season_id": v.get("active_season_id"),
+            "current_date": league.get("current_date"),
+            "master_schedule": {
+                "games": _to_plain(ms.get("games") or []),
+                "by_id": _to_plain(ms.get("by_id") or {}),
+            },
+        }
+
+    return _read_state(_impl)
+
+
+def get_game_results_snapshot(*, phase: str = "regular") -> dict:
+    """Return game_results branch for a specific phase without full snapshot export."""
+
+    target = str(phase or "regular").strip().lower()
+
+    def _impl(v: Mapping[str, Any]) -> dict:
+        if target == "regular":
+            return _to_plain(v.get("game_results") or {})
+        phase_results = v.get("phase_results")
+        if not isinstance(phase_results, Mapping):
+            return {}
+        phase_box = phase_results.get(target)
+        if not isinstance(phase_box, Mapping):
+            return {}
+        return _to_plain(phase_box.get("game_results") or {})
+
+    return _read_state(_impl)
+
+
+def get_player_stats_snapshot(*, phase: str = "regular") -> dict:
+    """Return player_stats branch for a specific phase without full snapshot export."""
+
+    target = str(phase or "regular").strip().lower()
+
+    def _impl(v: Mapping[str, Any]) -> dict:
+        if target == "regular":
+            return _to_plain(v.get("player_stats") or {})
+        phase_results = v.get("phase_results")
+        if not isinstance(phase_results, Mapping):
+            return {}
+        phase_box = phase_results.get(target)
+        if not isinstance(phase_box, Mapping):
+            return {}
+        return _to_plain(phase_box.get("player_stats") or {})
 
     return _read_state(_impl)
 
