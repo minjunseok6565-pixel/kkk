@@ -771,6 +771,41 @@ def get_team_detail(team_id: str) -> Dict[str, Any]:
     }
 
 
+def get_team_summary_light(team_id: str) -> Dict[str, Any]:
+    """Return lightweight team summary for Home/dashboard reads.
+
+    This accessor intentionally avoids roster/player-level DB work done by
+    ``get_team_detail`` and computes only summary fields used in Home.
+    """
+    tid = str(team_id).upper()
+
+    team_ids = set(_list_active_team_ids())
+    if tid not in team_ids:
+        raise ValueError(f"Team '{tid}' not found")
+
+    records = _compute_team_records()
+    rec = records.get(tid, {})
+    wins = int(rec.get("wins", 0) or 0)
+    losses = int(rec.get("losses", 0) or 0)
+    gp = wins + losses
+    win_pct = wins / gp if gp else 0.0
+
+    meta = ui_teams_get().get(tid, {})
+    static_info = TEAM_TO_CONF_DIV.get(tid, {}) or {}
+    conf = meta.get("conference") or static_info.get("conference")
+    div = meta.get("division") or static_info.get("division")
+
+    return {
+        "team_id": tid,
+        "conference": conf,
+        "division": div,
+        "wins": wins,
+        "losses": losses,
+        "win_pct": win_pct,
+        "payroll": _compute_team_payroll(tid),
+        "cap_space": _compute_cap_space(tid),
+    }
+
 
 
 
