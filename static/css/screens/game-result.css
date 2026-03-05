@@ -332,6 +332,19 @@
   color: #0f172a;
 }
 
+.game-result-team-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.game-result-inline-team-logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  flex: 0 0 22px;
+}
+
 .game-result-boxscore-table-wrap {
   overflow-x: auto;
 }
@@ -360,6 +373,25 @@
   border-bottom: 1px solid rgba(148, 163, 184, 0.26);
   padding: 8px;
   text-align: center;
+}
+
+.game-result-teamstats-table {
+  background: #ffffff;
+}
+
+.game-result-teamstats-table thead th {
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-weight: 800;
+}
+
+.game-result-teamstats-table tbody th,
+.game-result-teamstats-table tbody td {
+  color: #0f172a;
+}
+
+.game-result-teamstats-table tbody tr:nth-child(even) {
+  background: #f8fafc;
 }
 
 .game-result-boxscore-table tbody th,
