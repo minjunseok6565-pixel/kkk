@@ -69,7 +69,18 @@ function toPeriodLabel(period) {
   return `OT${pNum - 4}`;
 }
 
-function svgLineChart({ points, width = 520, height = 180, yMin, yMax, homeColor, awayColor, yLabelFmt }) {
+function svgLineChart({
+  points,
+  width = 520,
+  height = 180,
+  yMin,
+  yMax,
+  homeColor,
+  awayColor,
+  yLabelFmt,
+  homeDashed = false,
+  awayDashed = false,
+}) {
   if (!Array.isArray(points) || !points.length) return `<p class="home-empty">그래프 데이터가 없습니다.</p>`;
   const pad = { t: 12, r: 16, b: 24, l: 36 };
   const w = width - pad.l - pad.r;
@@ -95,10 +106,194 @@ function svgLineChart({ points, width = 520, height = 180, yMin, yMax, homeColor
       <text x="${pad.l - 6}" y="${height - pad.b + 4}" text-anchor="end" class="axis-text">${yLabelFmt(yMin)}</text>
       <text x="${pad.l}" y="${height - 6}" class="axis-text">${toClockLabel(minX)}</text>
       <text x="${width - pad.r}" y="${height - 6}" text-anchor="end" class="axis-text">${toClockLabel(maxX)}</text>
-      <path d="${awayLine}" fill="none" stroke="${awayColor}" stroke-width="2.6" stroke-linecap="round" />
-      <path d="${homeLine}" fill="none" stroke="${homeColor}" stroke-width="2.6" stroke-linecap="round" />
+      <path d="${awayLine}" fill="none" stroke="${awayColor}" stroke-width="2.6" stroke-linecap="round" ${awayDashed ? 'stroke-dasharray="6 5"' : ""} />
+      <path d="${homeLine}" fill="none" stroke="${homeColor}" stroke-width="2.6" stroke-linecap="round" ${homeDashed ? 'stroke-dasharray="6 5"' : ""} />
     </svg>
   `;
+}
+
+function getTeamBrandColor(teamId, fallback) {
+  const id = String(teamId || "").toUpperCase();
+  const palette = {
+    ATL: "#e03a3e", BOS: "#007a33", BKN: "#111827", CHA: "#1d4ed8", CHI: "#ce1141",
+    CLE: "#6f263d", DAL: "#00538c", DEN: "#0e2240", DET: "#1d42ba", GSW: "#1d4ed8",
+    HOU: "#ce1141", IND: "#f59e0b", LAC: "#c8102e", LAL: "#552583", MEM: "#5d76a9",
+    MIA: "#98002e", MIL: "#00471b", MIN: "#0c4a6e", NOP: "#0c2340", NYK: "#2563eb",
+    OKC: "#007ac1", ORL: "#1d4ed8", PHI: "#006bb6", PHX: "#1d1160", POR: "#e03a3e",
+    SAC: "#5a2d81", SAS: "#111827", TOR: "#ce1141", UTA: "#0f766e", WAS: "#0c4a6e",
+  };
+  return palette[id] || fallback;
+}
+
+function chartTeamLegend({ teamId, teamName, teamColor, lineStyle }) {
+  const styleClass = lineStyle === "dashed" ? "is-dashed" : "is-solid";
+  return `
+    <div class="game-result-team-legend-item">
+      <img class="game-result-team-legend-logo" src="/static/team_logos/${escapeHtml(teamId)}.png" alt="${escapeHtml(teamName || teamId)} 로고" loading="lazy" />
+      <div class="game-result-team-legend-meta">
+        <strong>${escapeHtml(teamId || "---")}</strong>
+        <span><i class="game-result-line-chip ${styleClass}" style="--line-chip-color: ${teamColor};"></i>${lineStyle === "dashed" ? "점선" : "실선"}</span>
+      </div>
+    </div>
+  `;
+}
+
+function buildLineSegments(points, xFn, yFn, threshold = 50) {
+  const segments = [];
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    const prevAbove = Number(prev.value) >= threshold;
+    const currAbove = Number(curr.value) >= threshold;
+    if (prevAbove === currAbove) {
+      segments.push({
+        x1: xFn(prev.t),
+        y1: yFn(prev.value),
+        x2: xFn(curr.t),
+        y2: yFn(curr.value),
+        style: prevAbove ? "dashed" : "solid",
+      });
+      continue;
+    }
+    const ratio = (threshold - Number(prev.value)) / Math.max(1e-6, Number(curr.value) - Number(prev.value));
+    const crossT = Number(prev.t) + (Number(curr.t) - Number(prev.t)) * ratio;
+    const crossX = xFn(crossT);
+    const crossY = yFn(threshold);
+    segments.push({ x1: xFn(prev.t), y1: yFn(prev.value), x2: crossX, y2: crossY, style: prevAbove ? "dashed" : "solid" });
+    segments.push({ x1: crossX, y1: crossY, x2: xFn(curr.t), y2: yFn(curr.value), style: currAbove ? "dashed" : "solid" });
+  }
+  return segments;
+}
+
+function renderWinProbabilityChart({ points, homeId, awayId, homeName, awayName, winnerId, loserId }) {
+  if (!Array.isArray(points) || !points.length) return `<p class="home-empty">그래프 데이터가 없습니다.</p>`;
+  const width = 620;
+  const height = 228;
+  const pad = { t: 20, r: 24, b: 34, l: 42 };
+  const w = width - pad.l - pad.r;
+  const h = height - pad.t - pad.b;
+  const maxT = Math.max(...points.map((p) => Number(p.t || 0)), 2880);
+  const minT = 0;
+  const x = (v) => pad.l + ((Number(v) - minT) / Math.max(1, maxT - minT)) * w;
+  const y = (v) => pad.t + (1 - (Number(v) / 100)) * h;
+  const winnerColor = getTeamBrandColor(winnerId, "#111827");
+  const loserColor = getTeamBrandColor(loserId, "#64748b");
+  const transformed = points.map((p) => ({
+    t: Number(p.t || 0),
+    value: Math.max(0, Math.min(100, Number((String(winnerId) === String(homeId) ? p.home : p.away) || 0) * 100)),
+    homePct: Math.max(0, Math.min(100, Number(p.home || 0) * 100)),
+    awayPct: Math.max(0, Math.min(100, Number(p.away || 0) * 100)),
+  }));
+  const segments = buildLineSegments(transformed, x, y, 50);
+  const quarterBoundaries = [0, 720, 1440, 2160, 2880].filter((t) => t <= maxT);
+  const quarterCenters = [360, 1080, 1800, 2520].filter((t) => t <= maxT);
+
+  return `
+    <div class="game-result-chart-header-row">
+      ${chartTeamLegend({ teamId: awayId, teamName: awayName, teamColor: String(awayId) === String(winnerId) ? winnerColor : loserColor, lineStyle: String(awayId) === String(winnerId) ? "dashed" : "solid" })}
+      ${chartTeamLegend({ teamId: homeId, teamName: homeName, teamColor: String(homeId) === String(winnerId) ? winnerColor : loserColor, lineStyle: String(homeId) === String(winnerId) ? "dashed" : "solid" })}
+    </div>
+    <div class="game-result-chart-interactive" data-chart-type="winprob" data-points='${escapeHtml(JSON.stringify(transformed))}' data-winner-id="${escapeHtml(winnerId)}" data-loser-id="${escapeHtml(loserId)}" data-home-id="${escapeHtml(homeId)}" data-away-id="${escapeHtml(awayId)}">
+      <svg class="game-result-chart game-result-chart-winprob" viewBox="0 0 ${width} ${height}" role="img" aria-label="승률 그래프">
+        <line x1="${pad.l}" y1="${pad.t}" x2="${pad.l}" y2="${height - pad.b}" class="axis" />
+        <line x1="${pad.l}" y1="${height - pad.b}" x2="${width - pad.r}" y2="${height - pad.b}" class="axis" />
+        ${quarterBoundaries.map((t) => `<line x1="${x(t)}" y1="${pad.t}" x2="${x(t)}" y2="${height - pad.b}" class="grid" />`).join("")}
+        <line x1="${pad.l}" y1="${y(100)}" x2="${width - pad.r}" y2="${y(100)}" class="grid" />
+        <line x1="${pad.l}" y1="${y(50)}" x2="${width - pad.r}" y2="${y(50)}" class="grid is-mid" />
+        <line x1="${pad.l}" y1="${y(0)}" x2="${width - pad.r}" y2="${y(0)}" class="grid" />
+        <text x="${pad.l - 8}" y="${y(100) + 4}" text-anchor="end" class="axis-text">100%</text>
+        <text x="${pad.l - 8}" y="${y(50) + 4}" text-anchor="end" class="axis-text">50%</text>
+        <text x="${pad.l - 8}" y="${y(0) + 4}" text-anchor="end" class="axis-text">0%</text>
+        ${quarterCenters.map((t, idx) => `<text x="${x(t)}" y="${height - 8}" text-anchor="middle" class="axis-text">${idx + 1}Q</text>`).join("")}
+        ${segments.map((seg) => `<line x1="${seg.x1}" y1="${seg.y1}" x2="${seg.x2}" y2="${seg.y2}" stroke="${seg.style === "dashed" ? winnerColor : loserColor}" stroke-width="3" stroke-linecap="round" ${seg.style === "dashed" ? "stroke-dasharray=\"6 5\"" : ""} />`).join("")}
+        <line class="chart-hover-line" x1="${pad.l}" y1="${pad.t}" x2="${pad.l}" y2="${height - pad.b}" />
+        <circle class="chart-hover-dot" cx="${pad.l}" cy="${y(50)}" r="4" />
+      </svg>
+      <div class="game-result-chart-tooltip" role="status" aria-live="polite"></div>
+    </div>
+  `;
+}
+
+function renderGameFlowChart({ points, homeId, awayId, homeName, awayName, winnerId }) {
+  const flowPoints = Array.isArray(points) ? points : [];
+  if (!flowPoints.length) return `<p class="home-empty">그래프 데이터가 없습니다.</p>`;
+  const maxScore = Math.max(...flowPoints.flatMap((p) => [Number(p.home_score || 0), Number(p.away_score || 0)]), 100);
+  const chartSvg = svgLineChart({
+    points: flowPoints,
+    yMin: 0,
+    yMax: maxScore,
+    homeColor: getTeamBrandColor(homeId, "#1d4ed8"),
+    awayColor: getTeamBrandColor(awayId, "#ef4444"),
+    yLabelFmt: (v) => `${Math.round(v)}`,
+    homeDashed: String(homeId) === String(winnerId),
+    awayDashed: String(awayId) === String(winnerId),
+  });
+
+  return `
+    <div class="game-result-chart-header-row">
+      ${chartTeamLegend({ teamId: awayId, teamName: awayName, teamColor: getTeamBrandColor(awayId, "#ef4444"), lineStyle: String(awayId) === String(winnerId) ? "dashed" : "solid" })}
+      ${chartTeamLegend({ teamId: homeId, teamName: homeName, teamColor: getTeamBrandColor(homeId, "#1d4ed8"), lineStyle: String(homeId) === String(winnerId) ? "dashed" : "solid" })}
+    </div>
+    ${chartSvg}
+  `;
+}
+
+function bindWinProbabilityHover(container) {
+  if (!container) return;
+  const points = JSON.parse(container.dataset.points || "[]");
+  if (!points.length) return;
+  const svg = container.querySelector("svg");
+  const hoverLine = container.querySelector(".chart-hover-line");
+  const hoverDot = container.querySelector(".chart-hover-dot");
+  const tooltip = container.querySelector(".game-result-chart-tooltip");
+  if (!svg || !hoverLine || !hoverDot || !tooltip) return;
+
+  const vb = svg.viewBox.baseVal;
+  const pad = { t: 20, r: 24, b: 34, l: 42 };
+  const maxT = Math.max(...points.map((p) => Number(p.t || 0)), 2880);
+  const w = vb.width - pad.l - pad.r;
+  const h = vb.height - pad.t - pad.b;
+  const x = (v) => pad.l + ((Number(v) / Math.max(1, maxT)) * w);
+  const y = (v) => pad.t + (1 - (Number(v) / 100)) * h;
+
+  const setAtIndex = (idx) => {
+    const p = points[Math.max(0, Math.min(points.length - 1, idx))];
+    const px = x(p.t);
+    hoverLine.setAttribute("x1", String(px));
+    hoverLine.setAttribute("x2", String(px));
+    hoverDot.setAttribute("cx", String(px));
+    hoverDot.setAttribute("cy", String(y(p.value)));
+    tooltip.innerHTML = `
+      <p><strong>${escapeHtml(container.dataset.awayId)}</strong> ${p.awayPct.toFixed(1)}%</p>
+      <p><strong>${escapeHtml(container.dataset.homeId)}</strong> ${p.homePct.toFixed(1)}%</p>
+    `;
+  };
+
+  const onMove = (event) => {
+    const rect = svg.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)));
+    const targetT = ratio * maxT;
+    let nearest = 0;
+    let nearestDist = Math.abs(points[0].t - targetT);
+    for (let i = 1; i < points.length; i += 1) {
+      const d = Math.abs(points[i].t - targetT);
+      if (d < nearestDist) {
+        nearest = i;
+        nearestDist = d;
+      }
+    }
+    setAtIndex(nearest);
+  };
+
+  svg.addEventListener("mousemove", onMove);
+  svg.addEventListener("mouseenter", () => {
+    container.classList.add("is-hovering");
+    setAtIndex(points.length - 1);
+  });
+  svg.addEventListener("mouseleave", () => {
+    container.classList.remove("is-hovering");
+  });
+  setAtIndex(points.length - 1);
 }
 
 function renderLinescore(lines = {}, homeTeamId = "", awayTeamId = "") {
@@ -676,6 +871,10 @@ function renderGameResult(result) {
 
   const homeId = String(header.home_team_id || "").toUpperCase();
   const awayId = String(header.away_team_id || "").toUpperCase();
+  const homeScore = Number(header.home_score || 0);
+  const awayScore = Number(header.away_score || 0);
+  const winnerId = homeScore >= awayScore ? homeId : awayId;
+  const loserId = winnerId === homeId ? awayId : homeId;
 
   els.gameResultTitle.textContent = `${header.date || "-"} 경기 결과`;
   els.gameResultSubtitle.textContent = `${TEAM_FULL_NAMES[awayId] || awayId} at ${TEAM_FULL_NAMES[homeId] || homeId}`;
@@ -714,28 +913,26 @@ function renderGameResult(result) {
   const pbp = rerenderPbpSection(result, { resetLimit: true });
 
   const winSeries = result?.gamecast?.win_probability?.series || [];
-  els.gameResultWinprobMeta.textContent = winSeries.length ? "시간대별 승률 추정" : "데이터 없음";
-  els.gameResultWinprobChart.innerHTML = svgLineChart({
+  els.gameResultWinprobMeta.textContent = winSeries.length ? "쿼터 단위 승률 추정" : "데이터 없음";
+  els.gameResultWinprobChart.innerHTML = renderWinProbabilityChart({
     points: winSeries,
-    yMin: 0,
-    yMax: 1,
-    homeColor: "#1d4ed8",
-    awayColor: "#ef4444",
-    yLabelFmt: (v) => `${Math.round(v * 100)}%`,
+    homeId,
+    awayId,
+    homeName: header.home_team_name,
+    awayName: header.away_team_name,
+    winnerId,
+    loserId,
   });
+  bindWinProbabilityHover(els.gameResultWinprobChart.querySelector('[data-chart-type="winprob"]'));
 
   const flowSeries = result?.gamecast?.game_flow?.series || [];
-  const maxScore = Math.max(
-    ...flowSeries.flatMap((p) => [Number(p.home_score || 0), Number(p.away_score || 0)]),
-    100,
-  );
-  els.gameResultFlowChart.innerHTML = svgLineChart({
+  els.gameResultFlowChart.innerHTML = renderGameFlowChart({
     points: flowSeries,
-    yMin: 0,
-    yMax: maxScore,
-    homeColor: "#1d4ed8",
-    awayColor: "#ef4444",
-    yLabelFmt: (v) => `${Math.round(v)}`,
+    homeId,
+    awayId,
+    homeName: header.home_team_name,
+    awayName: header.away_team_name,
+    winnerId,
   });
 
   bindGameResultTabs();
