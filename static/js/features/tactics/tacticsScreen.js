@@ -84,10 +84,28 @@ function hasUnsavedTacticsChanges() {
   return !!state.tacticsDirty;
 }
 
+function getStarterDefenseRoleDuplicates() {
+  const counts = new Map();
+  (state.tacticsDraft?.starters || []).forEach((row) => {
+    const key = String(row?.defenseRole || "").trim();
+    if (!key) return;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return [...counts.entries()].filter(([, count]) => count > 1).map(([role]) => role);
+}
+
 async function saveTacticsDraft({ showSuccessMessage = true } = {}) {
   if (!state.selectedTeamId || !state.tacticsDraft) return true;
   const teamId = String(state.tacticsDraftTeamId || state.selectedTeamId || "").trim();
   if (!teamId) return true;
+
+  const starterDupRoles = getStarterDefenseRoleDuplicates();
+  if (starterDupRoles.length) {
+    if (els.tacticsTotalMessage) {
+      els.tacticsTotalMessage.textContent = `전술 저장 실패: 선발 수비에 중복 역할(${starterDupRoles.map((role) => tacticDisplayLabel(role)).join(", ")})이 있습니다.`;
+    }
+    return false;
+  }
 
   state.tacticsSaving = true;
   updateTacticsSaveButton();
@@ -154,12 +172,6 @@ function buildLineupRowHtml(group, idx, row, defenseRoles, insights) {
   `;
 }
 
-function validateDefenseRoleUnique(changedEl, nextValue) {
-  const all = [...document.querySelectorAll('.tactics-lineup-row select[data-field="defenseRole"]')];
-  const dup = all.find((el) => el !== changedEl && el.value === nextValue);
-  return !dup;
-}
-
 function bindLineupEvents() {
   document.querySelectorAll(".tactics-lineup-row").forEach((rowEl) => {
     const group = rowEl.dataset.group;
@@ -170,14 +182,6 @@ function bindLineupEvents() {
         const target = group === "starters" ? state.tacticsDraft.starters[idx] : state.tacticsDraft.rotation[idx];
         if (!target || !field) return;
         if (field === "defenseRole") {
-          if (!validateDefenseRoleUnique(control, control.value)) {
-            const msg = "수비 역할은 중복 선택할 수 없습니다.";
-            if (els.tacticsTotalMessage) els.tacticsTotalMessage.textContent = msg;
-            rowEl.classList.add("is-edited");
-            setTimeout(() => rowEl.classList.remove("is-edited"), 800);
-            renderTacticsScreen();
-            return;
-          }
           target.defenseRole = control.value;
         } else if (field === "minutes") {
           target.minutes = Math.max(0, Math.min(48, Number(control.value || 0)));
@@ -298,7 +302,6 @@ function toggleTacticsOptions(kind) {
 export {
   renderSchemeOptions,
   buildLineupRowHtml,
-  validateDefenseRoleUnique,
   bindLineupEvents,
   renderTacticsRosterList,
   renderTacticsInsights,
