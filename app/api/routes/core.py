@@ -196,6 +196,256 @@ def _build_win_probability_series(
     return out
 
 
+
+
+def _player_name_lookup(players: List[Dict[str, Any]]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for p in players:
+        if not isinstance(p, dict):
+            continue
+        pid = str(p.get("PlayerID") or "").strip()
+        name = str(p.get("Name") or p.get("player_name") or "").strip()
+        if pid and name:
+            out[pid] = name
+    return out
+
+
+def _clock_sort_key_desc(clock: Any) -> int:
+    sec = _clock_mmss_to_sec(clock)
+    return int(sec) if sec is not None else -1
+
+
+def _normalize_pbp_event_key(ev: Dict[str, Any]) -> str:
+    et = str(ev.get("event_type") or "").upper()
+    outcome = str(ev.get("outcome") or "").upper()
+    points = _to_int_or_none(ev.get("points"))
+
+    if et == "SCORE":
+        if points == 1 or "FT" in outcome:
+            return "free_throw_made"
+        if points == 3 or "_3" in outcome:
+            return "made_3pt"
+        return "made_2pt"
+    if et == "MISS":
+        if "FT" in outcome:
+            return "free_throw_miss"
+        return "missed_fg"
+    if et == "REB":
+        return "rebound"
+    if et == "TURNOVER":
+        return "turnover"
+    if et in {"FOUL_NO_SHOTS", "FOUL_FT", "OFFENSIVE_FOUL"}:
+        return "foul"
+    if et == "TIMEOUT":
+        return "timeout"
+    if et == "SUBSTITUTION":
+        return "substitution"
+    if et == "PERIOD_START":
+        return "period_start"
+    if et == "PERIOD_END":
+        return "period_end"
+    return "play"
+
+
+def _pbp_title_and_tags(event_key: str) -> tuple[str, List[str]]:
+    if event_key == "made_2pt":
+        return "Made 2PT", ["scoring"]
+    if event_key == "made_3pt":
+        return "Made 3PT", ["scoring"]
+    if event_key == "free_throw_made":
+        return "+1 Point", ["scoring", "free_throw"]
+    if event_key in {"missed_fg", "free_throw_miss"}:
+        return "Missed FG" if event_key == "missed_fg" else "Missed FT", ["miss"]
+    if event_key == "rebound":
+        return "Rebound", ["rebound"]
+    if event_key == "turnover":
+        return "Turnover", ["turnover"]
+    if event_key == "foul":
+        return "Foul", ["foul"]
+    if event_key == "timeout":
+        return "Timeout", ["timeout"]
+    if event_key == "substitution":
+        return "Substitution", ["substitution"]
+    if event_key == "period_start":
+        return "Start of Period", ["period"]
+    if event_key == "period_end":
+        return "End of Period", ["period"]
+    return "Play", ["misc"]
+
+
+def _player_name_from_event(ev: Dict[str, Any], player_name_by_id: Dict[str, str]) -> str:
+    for key in ("player_name", "name"):
+        if ev.get(key):
+            return str(ev.get(key))
+    for key in ("pid", "player_id", "shooter_pid", "fouler_pid", "stealer_pid", "blocker_pid"):
+        pid = str(ev.get(key) or "").strip()
+        if pid and pid in player_name_by_id:
+            return player_name_by_id[pid]
+    return ""
+
+
+def _build_pbp_description(event_key: str, ev: Dict[str, Any], player_name_by_id: Dict[str, str]) -> str:
+    name = _player_name_from_event(ev, player_name_by_id)
+    outcome = str(ev.get("outcome") or "").strip()
+    if event_key in {"made_2pt", "made_3pt", "free_throw_made"}:
+        if name:
+            return f"{name} makes {outcome or 'shot'}" if outcome else f"{name} scores"
+        return "Scoring play"
+    if event_key in {"missed_fg", "free_throw_miss"}:
+        if name:
+            return f"{name} misses {outcome or 'shot'}" if outcome else f"{name} misses"
+        return "Missed shot"
+    if event_key == "rebound":
+        if name:
+            return f"{name} {str(ev.get('outcome') or '').lower() or 'rebound'}"
+        return "Rebound"
+    if event_key == "turnover":
+        stealer_pid = str(ev.get("stealer_pid") or "").strip()
+        stealer = player_name_by_id.get(stealer_pid, "")
+        if name and stealer:
+            return f"{name} turnover, {stealer} steals"
+        if name:
+            return f"{name} turnover"
+        return "Turnover"
+    if event_key == "foul":
+        if name:
+            return f"{name} foul"
+        return "Foul called"
+    if event_key == "timeout":
+        team_id = str(ev.get("team_id") or "")
+        return f"{team_id} timeout" if team_id else "Timeout"
+    if event_key == "substitution":
+        in_pid = str(ev.get("pid_in") or ev.get("player_in_pid") or "").strip()
+        out_pid = str(ev.get("pid_out") or ev.get("player_out_pid") or "").strip()
+        in_name = player_name_by_id.get(in_pid, in_pid)
+        out_name = player_name_by_id.get(out_pid, out_pid)
+        if in_name and out_name:
+            return f"Substitution: {in_name} in for {out_name}"
+        return "Substitution"
+    if event_key == "period_start":
+        return "Quarter begins"
+    if event_key == "period_end":
+        return "Quarter ends"
+    return outcome or "이벤트 상세 정보를 준비 중입니다."
+
+
+def _build_play_by_play_viewmodel(
+    replay_events: List[Dict[str, Any]],
+    *,
+    home_id: str,
+    away_id: str,
+    player_name_by_id: Dict[str, str],
+) -> Dict[str, Any]:
+    total_replay_events = len([e for e in replay_events if isinstance(e, dict)])
+    if total_replay_events == 0:
+        return {
+            "available": False,
+            "source": "replay_events",
+            "items": [],
+            "meta": {
+                "total_replay_events": 0,
+                "exposed_pbp_items": 0,
+                "filtered_out": 0,
+                "collapsed_groups": 0,
+            },
+        }
+
+    include_types = {
+        "SCORE", "MISS", "REB", "TURNOVER", "FOUL_NO_SHOTS", "FOUL_FT", "OFFENSIVE_FOUL",
+        "TIMEOUT", "SUBSTITUTION", "PERIOD_START", "PERIOD_END",
+    }
+
+    rows: List[Dict[str, Any]] = []
+    for idx, ev in enumerate(replay_events):
+        if not isinstance(ev, dict):
+            continue
+        et = str(ev.get("event_type") or "").upper()
+        if et not in include_types:
+            continue
+
+        period = _to_int_or_none(ev.get("quarter")) or 1
+        clock = str(ev.get("clock_sec") or "--:--")
+        seq = _to_int_or_none(ev.get("seq"))
+        if seq is None:
+            seq = idx + 1
+        team_id = str(ev.get("team_id") or "").upper()
+        event_key = _normalize_pbp_event_key(ev)
+        title, tags = _pbp_title_and_tags(event_key)
+        description = _build_pbp_description(event_key, ev, player_name_by_id)
+
+        home_score = _to_int_or_none(ev.get("score_home"))
+        away_score = _to_int_or_none(ev.get("score_away"))
+
+        rows.append(
+            {
+                "seq": int(seq),
+                "period": int(period),
+                "clock": clock,
+                "team_id": team_id,
+                "event_key": event_key,
+                "title": title,
+                "description": description,
+                "score": {
+                    "home": home_score,
+                    "away": away_score,
+                },
+                "score_change": 0,
+                "tags": tags,
+                "badges": [],
+            }
+        )
+
+    rows.sort(key=lambda x: (int(x.get("period") or 0), -_clock_sort_key_desc(x.get("clock")), int(x.get("seq") or 0)))
+
+    prev_home: Optional[int] = None
+    prev_away: Optional[int] = None
+    prev_diff: Optional[int] = None
+    for item in rows:
+        hs = _to_int_or_none((item.get("score") or {}).get("home"))
+        as_ = _to_int_or_none((item.get("score") or {}).get("away"))
+        tid = str(item.get("team_id") or "")
+
+        delta = 0
+        if hs is not None and as_ is not None and prev_home is not None and prev_away is not None:
+            if tid == home_id:
+                delta = max(0, hs - prev_home)
+            elif tid == away_id:
+                delta = max(0, as_ - prev_away)
+            else:
+                delta = max(0, (hs - prev_home), (as_ - prev_away))
+
+            diff = hs - as_
+            if diff == 0 and (hs != prev_home or as_ != prev_away):
+                item["badges"].append("tie")
+            if prev_diff is not None and (prev_diff < 0 < diff or prev_diff > 0 > diff):
+                item["badges"].append("lead_change")
+            period = _to_int_or_none(item.get("period")) or 1
+            left = _clock_mmss_to_sec(item.get("clock"))
+            if left is not None and ((period == 4 and left <= 120) or (period >= 5 and left <= 120)):
+                item["badges"].append("clutch")
+            prev_diff = diff
+        elif hs is not None and as_ is not None:
+            prev_diff = hs - as_
+
+        item["score_change"] = int(delta)
+        if hs is not None:
+            prev_home = hs
+        if as_ is not None:
+            prev_away = as_
+
+    return {
+        "available": bool(rows),
+        "source": "replay_events",
+        "items": rows,
+        "meta": {
+            "total_replay_events": int(total_replay_events),
+            "exposed_pbp_items": int(len(rows)),
+            "filtered_out": int(max(0, total_replay_events - len(rows))),
+            "collapsed_groups": 0,
+        },
+    }
+
+
 def _record_before_game(games: List[Dict[str, Any]], *, game_id: str) -> tuple[int, int]:
     wins = 0
     losses = 0
@@ -1848,6 +2098,10 @@ async def api_game_result(game_id: str, user_team_id: str):
     away_players = (away_box.get("players") if isinstance(away_box, dict) else []) or []
     home_players = home_players if isinstance(home_players, list) else []
     away_players = away_players if isinstance(away_players, list) else []
+    player_name_by_id = {
+        **_player_name_lookup(home_players),
+        **_player_name_lookup(away_players),
+    }
 
     def _to_num(v: Any) -> float:
         try:
@@ -1968,6 +2222,13 @@ async def api_game_result(game_id: str, user_team_id: str):
         pre_game_strength_gap=float(pre_game_strength_gap),
     )
 
+    play_by_play = _build_play_by_play_viewmodel(
+        [e for e in replay_events if isinstance(e, dict)],
+        home_id=home_id,
+        away_id=away_id,
+        player_name_by_id=player_name_by_id,
+    )
+
     matchup_games = [
         g
         for g in user_games
@@ -2032,8 +2293,8 @@ async def api_game_result(game_id: str, user_team_id: str):
             },
         },
         "tabs": {
-            "default": "gamecast",
-            "enabled": ["gamecast", "boxscore", "teamstats"],
+            "default": "playbyplay" if bool((play_by_play or {}).get("available")) else "gamecast",
+            "enabled": ["gamecast", "playbyplay", "boxscore", "teamstats"],
             "disabled": [],
         },
         "boxscore": boxscore,
@@ -2059,6 +2320,7 @@ async def api_game_result(game_id: str, user_team_id: str):
                 "fallback_used": not bool(replay_events),
             },
         },
+        "play_by_play": play_by_play,
         "matchups": {
             "season_record": {
                 "user_team_wins": int(season_wins),
