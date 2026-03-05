@@ -3,6 +3,8 @@ const state = {
   selectedTeamId: null,
   selectedTeamName: "",
   currentDate: "",
+  viewCache: {},
+  inflightRequests: new Map(),
   lastGameResult: null,
   gameResultPbp: {
     period: "ALL",
