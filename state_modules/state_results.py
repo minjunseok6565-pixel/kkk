@@ -107,6 +107,21 @@ def _validate_game_result_v2(game_result: Dict[str, Any]) -> None:
         if breakdowns is not None and not isinstance(breakdowns, dict):
             raise ValueError(f"GameResultV2 invalid: teams.{tid}.breakdowns must be a dict if present")
 
+    linescore = game_result.get("linescore")
+    if linescore is not None:
+        if not isinstance(linescore, list):
+            raise ValueError("GameResultV2 invalid: linescore must be a list if present")
+        for i, row in enumerate(linescore):
+            if not isinstance(row, dict):
+                raise ValueError(f"GameResultV2 invalid: linescore[{i}] must be a dict")
+            for k in ("period", "home", "away"):
+                if k not in row:
+                    raise ValueError(f"GameResultV2 invalid: linescore[{i}].{k} is required")
+                try:
+                    int(row.get(k))
+                except (TypeError, ValueError):
+                    raise ValueError(f"GameResultV2 invalid: linescore[{i}].{k} must be int-like")
+
 
 def validate_v2_game_result(game_result: Dict[str, Any]) -> None:
     """Public validator: raises ValueError if the v2 contract is violated."""
@@ -168,4 +183,3 @@ def _accumulate_team_game_result(
         _merge_counter_dict_sum(breakdowns, breakdowns_src)
     if isinstance(extra_breakdowns, dict):
         _merge_counter_dict_sum(breakdowns, extra_breakdowns)
-
