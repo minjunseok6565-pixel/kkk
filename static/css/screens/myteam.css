@@ -242,10 +242,12 @@
 }
 
 #player-detail-screen .detail-card-hero {
-  background: linear-gradient(140deg, #ffffff, #f5f9ff);
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(191, 219, 254, 0.35), rgba(255, 255, 255, 0)),
+    linear-gradient(145deg, #ffffff 0%, #f7faff 52%, #eef4ff 100%);
   color: #0f172a;
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.1);
 }
 
 #player-detail-screen .detail-card-hero h3,
@@ -268,9 +270,9 @@
 }
 
 #player-detail-screen .detail-card {
-  background: linear-gradient(180deg, #ffffff, #f8fbff);
-  border-color: rgba(148, 163, 184, 0.34);
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+  background: linear-gradient(180deg, #ffffff, #f8fbff 55%, #f1f6ff 100%);
+  border-color: rgba(148, 163, 184, 0.3);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
 }
 
 #player-detail-screen .detail-card h4 {
@@ -306,10 +308,10 @@
 }
 
 #player-detail-screen .hero-stat {
-  border: 1px solid rgba(148, 163, 184, 0.34);
+  border: 1px solid rgba(148, 163, 184, 0.3);
   border-radius: 12px;
   padding: 10px;
-  background: #fff;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
 }
 
 #player-detail-screen .hero-stat p {
@@ -368,8 +370,8 @@
   justify-content: space-between;
   padding: 7px 10px;
   border-radius: 10px;
-  background: rgba(241, 245, 249, 0.9);
-  border: 1px solid rgba(148, 163, 184, 0.26);
+  background: linear-gradient(180deg, #ffffff, #f5f9ff);
+  border: 1px solid rgba(148, 163, 184, 0.24);
 }
 
 #player-detail-screen .detail-head-main h3 {

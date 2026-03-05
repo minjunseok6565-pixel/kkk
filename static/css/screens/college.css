@@ -116,7 +116,7 @@
   border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 12px;
   padding: 12px;
-  background: #fff;
+  background: linear-gradient(165deg, #ffffff 0%, #f8fbff 62%, #eef4ff 100%);
   cursor: pointer;
   text-align: left;
   transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
@@ -126,7 +126,7 @@
 #college-screen .college-bigboard-card:focus-visible {
   transform: translateY(-2px);
   border-color: rgba(29, 78, 216, 0.48);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 14px 26px rgba(15, 23, 42, 0.12);
 }
 
 #college-screen .college-bigboard-card-title {
@@ -143,7 +143,7 @@
 
 #college-bigboard-detail-screen .college-bigboard-detail-card {
   border: 1px solid rgba(148, 163, 184, 0.32);
-  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  background: linear-gradient(180deg, #ffffff, #f8fbff 62%, #eef4ff);
   box-shadow: 0 18px 34px rgba(15, 23, 42, 0.08);
 }
 
@@ -423,15 +423,18 @@ body:has(#college-bigboard-detail-screen.active) .app-shell {
 #college-screen .college-section-eyebrow {
   margin: 0 0 6px;
   font-size: .72rem;
-  color: #8fb7ff;
+  color: #7c8fb5;
   letter-spacing: .12em;
   text-transform: uppercase;
 }
 
 #college-screen .scouting-overview-card {
   margin-bottom: 14px;
-  background: radial-gradient(140% 140% at 0% 0%, rgba(30, 58, 138, 0.34), rgba(15, 23, 42, 0.88));
-  border-color: rgba(96, 165, 250, 0.3);
+  background:
+    radial-gradient(130% 130% at 0% 0%, rgba(191, 219, 254, 0.45), rgba(255, 255, 255, 0)),
+    linear-gradient(145deg, #ffffff 0%, #f6f9ff 50%, #edf3ff 100%);
+  border-color: rgba(148, 163, 184, 0.34);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.08);
 }
 
 #college-screen .college-scouting-kpi-row {
@@ -442,20 +445,20 @@ body:has(#college-bigboard-detail-screen.active) .app-shell {
 }
 
 #college-screen .college-scout-kpi-pill {
-  border: 1px solid rgba(148, 163, 184, 0.34);
+  border: 1px solid rgba(148, 163, 184, 0.3);
   border-radius: 11px;
   padding: 10px 12px;
-  background: linear-gradient(145deg, rgba(15, 23, 42, 0.82), rgba(30, 41, 59, 0.6));
+  background: linear-gradient(180deg, #ffffff, #f3f7ff);
 }
 
 #college-screen .college-scout-kpi-pill span {
-  color: rgba(203, 213, 225, 0.86);
+  color: #64748b;
   font-size: .78rem;
   display: block;
 }
 
 #college-screen .college-scout-kpi-pill strong {
-  color: #f8fbff;
+  color: #0f172a;
   font-size: 1.04rem;
 }
 
@@ -469,8 +472,8 @@ body:has(#college-bigboard-detail-screen.active) .app-shell {
 #college-screen .college-scout-roster-card,
 #college-screen .college-scout-inbox-card,
 #college-screen .college-scout-guide-card {
-  background: linear-gradient(160deg, rgba(15, 23, 42, 0.88), rgba(15, 23, 42, 0.7));
-  border-color: rgba(148, 163, 184, 0.28);
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  border-color: rgba(148, 163, 184, 0.34);
 }
 
 #college-screen .college-scout-side-column {
@@ -485,16 +488,17 @@ body:has(#college-bigboard-detail-screen.active) .app-shell {
 }
 
 #college-screen .college-scout-card {
-  border: 1px solid rgba(148, 163, 184, 0.28);
+  border: 1px solid rgba(148, 163, 184, 0.32);
   border-radius: 13px;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.76), rgba(2, 6, 23, 0.9));
+  background: linear-gradient(165deg, #ffffff 0%, #f8fbff 60%, #eff5ff 100%);
   transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+  min-height: 332px;
 }
 
 #college-screen .college-scout-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(96, 165, 250, 0.56);
-  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.4);
+  border-color: rgba(59, 130, 246, 0.48);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.12);
 }
 
 #college-screen .college-scout-card.is-ready {
@@ -535,14 +539,14 @@ body:has(#college-bigboard-detail-screen.active) .app-shell {
 #college-screen .college-scout-card h4 {
   margin: 0;
   font-size: 1rem;
-  color: #f8fafc;
+  color: #0f172a;
 }
 
 #college-screen .college-scout-assignment-box {
-  border: 1px solid rgba(148, 163, 184, 0.28);
+  border: 1px solid rgba(148, 163, 184, 0.32);
   border-radius: 10px;
   padding: 8px 10px;
-  background: rgba(15, 23, 42, 0.55);
+  background: rgba(255, 255, 255, 0.84);
   margin-bottom: 10px;
   display: grid;
   gap: 2px;
@@ -550,18 +554,19 @@ body:has(#college-bigboard-detail-screen.active) .app-shell {
 
 #college-screen .college-scout-assignment-box span,
 #college-screen .college-scout-assignment-box small {
-  color: #94a3b8;
+  color: #64748b;
   font-size: .76rem;
 }
 
 #college-screen .college-scout-assignment-box strong {
-  color: #f8fafc;
+  color: #0f172a;
   font-size: .95rem;
 }
 
 #college-screen .college-scout-actions {
-  margin-top: 12px;
-  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 12px;
+  flex-wrap: nowrap;
 }
 
 #college-screen .college-scout-actions .btn {
@@ -570,9 +575,9 @@ body:has(#college-bigboard-detail-screen.active) .app-shell {
 }
 
 #college-screen .college-scout-unread-badge {
-  border: 1px solid rgba(16, 185, 129, 0.46);
-  color: #6ee7b7;
-  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(59, 130, 246, 0.32);
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.12);
   border-radius: 999px;
   padding: 5px 10px;
   font-size: .74rem;
@@ -587,11 +592,11 @@ body:has(#college-bigboard-detail-screen.active) .app-shell {
 #college-screen .college-inbox-item {
   width: 100%;
   text-align: left;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 10px;
   padding: 10px 11px;
-  background: rgba(15, 23, 42, 0.62);
-  color: #e2e8f0;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  color: #1f2937;
   transition: border-color .16s ease, transform .16s ease;
 }
 
@@ -616,7 +621,7 @@ body:has(#college-bigboard-detail-screen.active) .app-shell {
 }
 
 #college-screen .college-inbox-item small {
-  color: #94a3b8;
+  color: #64748b;
 }
 
 #college-screen .college-scout-guide-list {
@@ -628,21 +633,21 @@ body:has(#college-bigboard-detail-screen.active) .app-shell {
 }
 
 #college-screen .college-scout-guide-list li {
-  color: #cbd5e1;
+  color: #334155;
   font-size: .88rem;
   line-height: 1.5;
 }
 
 #college-screen .college-scout-guide-list strong {
-  color: #93c5fd;
+  color: #1d4ed8;
 }
 
 #college-screen #college-scouting-feedback {
   border: 1px solid rgba(148, 163, 184, 0.36);
   border-radius: 10px;
   padding: 10px 12px;
-  background: rgba(15, 23, 42, 0.6);
-  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.85);
+  color: #334155;
   margin-bottom: 0;
 }
 
@@ -663,5 +668,9 @@ body:has(#college-bigboard-detail-screen.active) .app-shell {
 
   #college-screen .college-scout-search-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  #college-screen .college-scout-actions {
+    flex-wrap: wrap;
   }
 }
