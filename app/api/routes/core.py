@@ -1868,6 +1868,35 @@ async def api_game_result(game_id: str, user_team_id: str):
     replay_events = replay_events if isinstance(replay_events, list) else []
     linescore = game_result.get("linescore") if isinstance(game_result, dict) else []
     linescore = linescore if isinstance(linescore, list) else []
+    away_by_period: Dict[str, int] = {}
+    home_by_period: Dict[str, int] = {}
+    for row in linescore:
+        if not isinstance(row, dict):
+            continue
+        p = _to_int_or_none(row.get("period"))
+        if p is None or p <= 0:
+            continue
+        h = _to_int_or_none(row.get("home"))
+        a = _to_int_or_none(row.get("away"))
+        if h is not None:
+            home_by_period[str(p)] = int(h)
+        if a is not None:
+            away_by_period[str(p)] = int(a)
+
+    boxscore_quarters: List[Dict[str, Any]] = []
+    if home_by_period or away_by_period:
+        boxscore_quarters = [
+            {
+                "team_id": away_id,
+                "by_period": away_by_period,
+                "total": int(away_score),
+            },
+            {
+                "team_id": home_id,
+                "by_period": home_by_period,
+                "total": int(home_score),
+            },
+        ]
     game_flow_series = _build_game_flow_series(
         [e for e in replay_events if isinstance(e, dict)],
         home_final=int(home_score),
@@ -1946,8 +1975,8 @@ async def api_game_result(game_id: str, user_team_id: str):
             "user_team_record_after_game": user_record_after,
             "opponent_record_after_game": opp_record_after,
             "boxscore_lines": {
-                "quarters": linescore,
-                "note": None if linescore else "Quarter split unavailable in current GameResultV2 source",
+                "quarters": boxscore_quarters,
+                "note": None if boxscore_quarters else "Quarter split unavailable in current GameResultV2 source",
             },
         },
         "tabs": {
