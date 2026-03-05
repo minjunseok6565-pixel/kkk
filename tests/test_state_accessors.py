@@ -70,3 +70,51 @@ def test_get_player_stats_snapshot_supports_phase_selection() -> None:
     assert regular["p1"]["totals"]["PTS"] == 20
     assert playoffs["p9"]["games"] == 2
     assert unknown == {}
+
+
+def test_standings_cache_accessors_roundtrip() -> None:
+    _seed_state_for_accessor_tests()
+
+    state.clear_standings_cache()
+    state.set_standings_cache_built_from(season_id="2025-26", regular_final_count=12)
+    state.mark_standings_cache_game_applied("G0001")
+    state.upsert_standings_cache_record(
+        "BOS",
+        {
+            "wins": 10,
+            "losses": 2,
+            "pf": 1300,
+            "pa": 1200,
+            "home_wins": 6,
+            "home_losses": 1,
+            "away_wins": 4,
+            "away_losses": 1,
+            "div_wins": 3,
+            "div_losses": 1,
+            "conf_wins": 8,
+            "conf_losses": 2,
+            "recent10": [1, 1, 1, 0, 1, 1, 1, 1, 0, 1],
+            "streak_type": "W",
+            "streak_len": 2,
+        },
+    )
+
+    cache = state.get_standings_cache_snapshot()
+    assert cache["version"] == 1
+    assert cache["built_from"]["season_id"] == "2025-26"
+    assert cache["built_from"]["regular_final_count"] == 12
+    assert cache["applied_game_ids"]["G0001"] is True
+    assert cache["records_by_team"]["BOS"]["wins"] == 10
+
+
+def test_set_standings_cache_fills_missing_shape() -> None:
+    _seed_state_for_accessor_tests()
+
+    state.set_standings_cache({"records_by_team": {}})
+    cache = state.get_standings_cache_snapshot()
+
+    assert cache["version"] == 1
+    assert cache["built_from"]["season_id"] is None
+    assert cache["built_from"]["regular_final_count"] == 0
+    assert cache["applied_game_ids"] == {}
+    assert cache["records_by_team"] == {}
