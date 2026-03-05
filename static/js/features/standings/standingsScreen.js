@@ -1,9 +1,12 @@
 import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
-import { fetchJson, setLoading } from "../../core/api.js";
+import { fetchCachedJson, getCachedValue, setLoading } from "../../core/api.js";
 import { formatSignedDiff } from "../../core/format.js";
 import { TEAM_FULL_NAMES, renderTeamLogoMark } from "../../core/constants/teams.js";
+
+const STANDINGS_CACHE_TTL_MS = 12000;
+let standingsRequestSeq = 0;
 
 function renderStandingsRows(tbody, rows) {
   tbody.innerHTML = "";
@@ -34,15 +37,34 @@ function renderStandingsRows(tbody, rows) {
 }
 
 async function showStandingsScreen() {
-  setLoading(true, "순위 데이터를 불러오는 중입니다...");
+  const cacheKey = "standings:table";
+  const requestSeq = standingsRequestSeq + 1;
+  standingsRequestSeq = requestSeq;
+  const cached = getCachedValue(cacheKey);
+  if (!cached) {
+    setLoading(true, "순위 데이터를 불러오는 중입니다...");
+  }
+
   try {
-    const payload = await fetchJson("/api/standings/table");
+    const payload = await fetchCachedJson({
+      key: cacheKey,
+      url: "/api/standings/table",
+      ttlMs: STANDINGS_CACHE_TTL_MS,
+      staleWhileRevalidate: true,
+      onRevalidated: (freshPayload) => {
+        if (!els.standingsScreen?.classList?.contains("active")) return;
+        state.standingsData = freshPayload;
+        renderStandingsRows(els.standingsEastBody, freshPayload?.east || []);
+        renderStandingsRows(els.standingsWestBody, freshPayload?.west || []);
+      },
+    });
+    if (requestSeq !== standingsRequestSeq) return;
     state.standingsData = payload;
     renderStandingsRows(els.standingsEastBody, payload?.east || []);
     renderStandingsRows(els.standingsWestBody, payload?.west || []);
     activateScreen(els.standingsScreen);
   } finally {
-    setLoading(false);
+    if (requestSeq === standingsRequestSeq) setLoading(false);
   }
 }
 

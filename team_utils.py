@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections import defaultdict
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -308,6 +307,15 @@ def _compute_team_payroll(team_id: str) -> float:
 
 def _compute_cap_space(team_id: str) -> float:
     payroll = _compute_team_payroll(team_id)
+    return _compute_cap_space_from_payroll(payroll)
+
+
+def _compute_cap_space_from_payroll(payroll: float) -> float:
+    """Compute cap space from precomputed payroll.
+
+    Keep this helper separate so callers that already computed payroll
+    (e.g. lightweight summaries) can avoid duplicate DB roster scans.
+    """
     # Assumes cap model (salary_cap/aprons) is already populated during server startup/hydration.
     league_context = get_league_context_snapshot()
     trade_rules = league_context.get("trade_rules", {})
@@ -316,7 +324,7 @@ def _compute_cap_space(team_id: str) -> float:
     except (TypeError, ValueError):
         _warn_limited("SALARY_CAP_COERCE_FAILED", f"raw={trade_rules.get('salary_cap')!r}", limit=3)
         salary_cap = 0.0
-    return salary_cap - payroll
+    return salary_cap - float(payroll or 0.0)
 
 
 def _get_master_schedule_games() -> List[Dict[str, Any]]:
@@ -478,71 +486,32 @@ def get_conference_standings_table() -> Dict[str, List[Dict[str, Any]]]:
 
 def get_conference_standings_home_light() -> Dict[str, List[Dict[str, Any]]]:
     """Return lightweight standings rows needed by Home dashboard."""
-    games = _get_master_schedule_games()
-    if not games:
-        raise RuntimeError(
-            "Master schedule is not initialized. Expected state.startup_init_state() to run before calling team_utils.get_conference_standings_home_light()."
-        )
-
     team_ids = _list_active_team_ids()
-    records: Dict[str, Dict[str, int]] = {tid: {"wins": 0, "losses": 0} for tid in team_ids}
-    team_results: Dict[str, List[tuple[str, int]]] = defaultdict(list)
-
-    for g in games:
-        if g.get("status") != "final":
-            continue
-        if str(g.get("phase") or "regular") != "regular":
-            continue
-
-        home_id = str(g.get("home_team_id") or "")
-        away_id = str(g.get("away_team_id") or "")
-        home_score = g.get("home_score")
-        away_score = g.get("away_score")
-        if home_id not in records or away_id not in records:
-            continue
-        if home_score is None or away_score is None:
-            continue
-
-        hs = int(home_score)
-        a_s = int(away_score)
-        game_date = str(g.get("date") or "")[:10]
-        if hs > a_s:
-            records[home_id]["wins"] += 1
-            records[away_id]["losses"] += 1
-            team_results[home_id].append((game_date, 1))
-            team_results[away_id].append((game_date, 0))
-        elif a_s > hs:
-            records[away_id]["wins"] += 1
-            records[home_id]["losses"] += 1
-            team_results[away_id].append((game_date, 1))
-            team_results[home_id].append((game_date, 0))
+    cache = _get_or_rebuild_standings_cache(team_ids=team_ids)
+    records_by_team = cache.get("records_by_team") if isinstance(cache, dict) else {}
+    records_by_team = records_by_team if isinstance(records_by_team, dict) else {}
 
     standings = {"east": [], "west": []}
-    for tid, rec in records.items():
+    for tid in team_ids:
+        rec = records_by_team.get(tid) if isinstance(records_by_team.get(tid), dict) else {}
         info = TEAM_TO_CONF_DIV.get(tid, {}) or {}
         conf = str(info.get("conference") or "").lower()
         if conf not in {"east", "west"}:
             continue
 
-        wins = int(rec.get("wins", 0) or 0)
-        losses = int(rec.get("losses", 0) or 0)
+        wins = int(rec.get("wins") or 0)
+        losses = int(rec.get("losses") or 0)
         gp = wins + losses
         win_pct = wins / gp if gp else 0.0
 
-        results_sorted = sorted(team_results.get(tid, []), key=lambda x: x[0])
-        recent = results_sorted[-10:]
-        last10_w = sum(r for _, r in recent)
+        recent = rec.get("recent10") if isinstance(rec.get("recent10"), list) else []
+        recent = [int(v) for v in recent][-10:]
+        last10_w = sum(v for v in recent if v == 1)
         l10 = f"{last10_w}-{len(recent) - last10_w}"
 
-        strk = "-"
-        if results_sorted:
-            last_result = results_sorted[-1][1]
-            streak_len = 0
-            for _, r in reversed(results_sorted):
-                if r != last_result:
-                    break
-                streak_len += 1
-            strk = f"{'W' if last_result == 1 else 'L'}{streak_len}"
+        streak_type = str(rec.get("streak_type") or "-")
+        streak_len = int(rec.get("streak_len") or 0)
+        strk = f"{streak_type}{streak_len}" if streak_type in {"W", "L"} and streak_len > 0 else "-"
 
         standings[conf].append({
             "team_id": tid,
@@ -758,6 +727,8 @@ def get_team_summary_light(team_id: str) -> Dict[str, Any]:
     conf = meta.get("conference") or static_info.get("conference")
     div = meta.get("division") or static_info.get("division")
 
+    payroll = _compute_team_payroll(tid)
+
     return {
         "team_id": tid,
         "conference": conf,
@@ -765,10 +736,9 @@ def get_team_summary_light(team_id: str) -> Dict[str, Any]:
         "wins": wins,
         "losses": losses,
         "win_pct": win_pct,
-        "payroll": _compute_team_payroll(tid),
-        "cap_space": _compute_cap_space(tid),
+        "payroll": payroll,
+        "cap_space": _compute_cap_space_from_payroll(payroll),
     }
-
 
 
 
