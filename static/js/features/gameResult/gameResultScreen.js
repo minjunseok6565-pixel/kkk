@@ -2,7 +2,7 @@ import { els } from "../../app/dom.js";
 import { state } from "../../app/state.js";
 import { activateScreen } from "../../app/router.js";
 import { fetchJson, setLoading } from "../../core/api.js";
-import { TEAM_FULL_NAMES, applyTeamLogo } from "../../core/constants/teams.js";
+import { TEAM_FULL_NAMES, applyTeamLogo, renderTeamLogoMark } from "../../core/constants/teams.js";
 
 const TAB_KEYS = ["gamecast", "playbyplay", "boxscore", "teamstats"];
 const PBP_INITIAL_RENDER_LIMIT = 80;
@@ -165,6 +165,7 @@ function renderMatchups(matchups = {}) {
 
 function renderBoxscoreTable(team = {}) {
   const teamName = team?.team_name || team?.team_id || "TEAM";
+  const teamId = String(team?.team_id || "").toUpperCase();
   const players = Array.isArray(team?.players) ? [...team.players] : [];
   players.sort((a, b) => toNumber(b?.MIN) - toNumber(a?.MIN));
 
@@ -193,7 +194,7 @@ function renderBoxscoreTable(team = {}) {
 
   return `
     <section class="game-result-boxscore-team">
-      <h4>${teamName}</h4>
+      <h4 class="game-result-team-heading">${renderTeamLogoMark(teamId, "game-result-inline-team-logo")}<span>${teamName}</span></h4>
       <div class="game-result-boxscore-table-wrap">
         <table class="game-result-boxscore-table">
           <thead>
@@ -237,13 +238,21 @@ function renderBoxscore(result = {}) {
 function renderTeamstats(result = {}) {
   const away = result?.boxscore?.away || {};
   const home = result?.boxscore?.home || {};
+  const awayTeamId = String(away?.team_id || "").toUpperCase();
+  const homeTeamId = String(home?.team_id || "").toUpperCase();
   const awayTotals = result?.teamstats?.away || deriveTeamTotals(away.players || []);
   const homeTotals = result?.teamstats?.home || deriveTeamTotals(home.players || []);
 
   const row = (label, awayVal, homeVal) => `<tr><th>${label}</th><td>${awayVal}</td><td>${homeVal}</td></tr>`;
   return `
     <table class="game-result-teamstats-table">
-      <thead><tr><th>STAT</th><th>${away.team_name || away.team_id || "AWAY"}</th><th>${home.team_name || home.team_id || "HOME"}</th></tr></thead>
+      <thead>
+        <tr>
+          <th>STAT</th>
+          <th><span class="game-result-team-heading">${renderTeamLogoMark(awayTeamId, "game-result-inline-team-logo")}<span>${away.team_name || away.team_id || "AWAY"}</span></span></th>
+          <th><span class="game-result-team-heading">${renderTeamLogoMark(homeTeamId, "game-result-inline-team-logo")}<span>${home.team_name || home.team_id || "HOME"}</span></span></th>
+        </tr>
+      </thead>
       <tbody>
         ${row("PTS", toStatInt(awayTotals.PTS), toStatInt(homeTotals.PTS))}
         ${row("FG", ratioLabel(awayTotals.FGM, awayTotals.FGA), ratioLabel(homeTotals.FGM, homeTotals.FGA))}
