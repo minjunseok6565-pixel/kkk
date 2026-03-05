@@ -188,6 +188,89 @@
 
 .game-result-chart-wrap { min-height: 184px; }
 
+.game-result-chart-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.game-result-team-legend-item {
+  display: grid;
+  grid-template-columns: 40px auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.game-result-team-legend-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+
+.game-result-team-legend-meta {
+  display: grid;
+  gap: 2px;
+}
+
+.game-result-team-legend-meta strong {
+  color: #0f172a;
+  font-size: .93rem;
+}
+
+.game-result-team-legend-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #475569;
+  font-size: .79rem;
+}
+
+.game-result-line-chip {
+  display: inline-block;
+  width: 24px;
+  height: 0;
+  border-top: 2px solid var(--line-chip-color, #334155);
+}
+
+.game-result-line-chip.is-dashed {
+  border-top-style: dashed;
+}
+
+.game-result-chart-interactive {
+  position: relative;
+}
+
+.game-result-chart-tooltip {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: .76rem;
+  line-height: 1.35;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity .16s ease, transform .16s ease;
+}
+
+.game-result-chart-tooltip p {
+  margin: 0;
+}
+
+.game-result-chart-tooltip strong {
+  color: #e2e8f0;
+}
+
+.game-result-chart-interactive.is-hovering .game-result-chart-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .game-result-chart {
   width: 100%;
   height: 184px;
@@ -196,7 +279,19 @@
 
 .game-result-chart .axis { stroke: #94a3b8; stroke-width: 1; }
 .game-result-chart .grid { stroke: rgba(148, 163, 184, 0.4); stroke-width: 1; stroke-dasharray: 4 3; }
+.game-result-chart .grid.is-mid { stroke: #94a3b8; stroke-width: 1.2; stroke-dasharray: 4 2; }
 .game-result-chart .axis-text { fill: #64748b; font-size: 11px; }
+.game-result-chart-winprob .chart-hover-line {
+  stroke: rgba(15, 23, 42, 0.55);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.game-result-chart-winprob .chart-hover-dot {
+  fill: #0f172a;
+  stroke: #f8fafc;
+  stroke-width: 1.4;
+}
 
 .game-result-matchup-record {
   margin-bottom: 8px;
