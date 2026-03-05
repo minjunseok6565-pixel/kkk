@@ -161,7 +161,6 @@ function renderRosterRows(rows) {
       <td>
         <div class="myteam-name-cell">
           <strong>${row.name || "-"}</strong>
-          <span>${row.player_id || "-"}</span>
         </div>
       </td>
       <td>${row.pos || "-"}</td>
