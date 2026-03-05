@@ -169,11 +169,12 @@
       </article>
 
       <div class="game-result-tabs" role="tablist" aria-label="경기 결과 탭">
-        <button type="button" class="game-result-tab is-active" aria-selected="true">Gamecast</button>
-        <button type="button" class="game-result-tab is-disabled" aria-disabled="true">Boxscore <span>준비중</span></button>
-        <button type="button" class="game-result-tab is-disabled" aria-disabled="true">Teamstats <span>준비중</span></button>
+        <button type="button" id="game-result-tab-gamecast" class="game-result-tab is-active" aria-selected="true" data-tab="gamecast">Gamecast</button>
+        <button type="button" id="game-result-tab-boxscore" class="game-result-tab" aria-selected="false" data-tab="boxscore">Boxscore</button>
+        <button type="button" id="game-result-tab-teamstats" class="game-result-tab" aria-selected="false" data-tab="teamstats">Teamstats</button>
       </div>
 
+      <div id="game-result-view-gamecast" class="game-result-view is-active">
       <div class="game-result-grid">
         <article class="game-result-panel">
           <h3>Game Leaders</h3>
@@ -204,6 +205,21 @@
         <article class="game-result-panel">
           <h3>Matchups</h3>
           <div id="game-result-matchups" class="game-result-matchups"></div>
+        </article>
+      </div>
+      </div>
+
+      <div id="game-result-view-boxscore" class="game-result-view" aria-hidden="true">
+        <article class="game-result-panel">
+          <h3>Boxscore</h3>
+          <div id="game-result-boxscore" class="game-result-boxscore"></div>
+        </article>
+      </div>
+
+      <div id="game-result-view-teamstats" class="game-result-view" aria-hidden="true">
+        <article class="game-result-panel">
+          <h3>Teamstats</h3>
+          <div id="game-result-teamstats" class="game-result-teamstats"></div>
         </article>
       </div>
     </section>
