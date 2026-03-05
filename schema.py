@@ -253,6 +253,12 @@ class V2Game(TypedDict):
     possessions_per_team: int
 
 
+class V2LineScoreRow(TypedDict):
+    period: int
+    home: int
+    away: int
+
+
 class V2TeamResult(TypedDict, total=False):
     team_id: str
     totals: Dict[str, Any]
@@ -283,6 +289,7 @@ class GameResultV2(TypedDict, total=False):
     final: Dict[str, int]          # {team_id: points}
     teams: Dict[str, V2TeamResult] # {team_id: V2TeamResult}
     game_state: V2GameState
+    linescore: List[V2LineScoreRow]
     meta: V2Meta
     debug: Dict[str, Any]
     raw: Dict[str, Any]

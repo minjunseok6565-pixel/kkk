@@ -1866,6 +1866,8 @@ async def api_game_result(game_id: str, user_team_id: str):
 
     replay_events = game_result.get("replay_events") if isinstance(game_result, dict) else []
     replay_events = replay_events if isinstance(replay_events, list) else []
+    linescore = game_result.get("linescore") if isinstance(game_result, dict) else []
+    linescore = linescore if isinstance(linescore, list) else []
     game_flow_series = _build_game_flow_series(
         [e for e in replay_events if isinstance(e, dict)],
         home_final=int(home_score),
@@ -1944,8 +1946,8 @@ async def api_game_result(game_id: str, user_team_id: str):
             "user_team_record_after_game": user_record_after,
             "opponent_record_after_game": opp_record_after,
             "boxscore_lines": {
-                "quarters": None,
-                "note": "Quarter split unavailable in current GameResultV2 source",
+                "quarters": linescore,
+                "note": None if linescore else "Quarter split unavailable in current GameResultV2 source",
             },
         },
         "tabs": {

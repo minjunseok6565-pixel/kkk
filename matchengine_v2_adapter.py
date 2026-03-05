@@ -229,6 +229,53 @@ def _normalize_replay_events_from_raw(
     return out
 
 
+def _build_linescore_from_replay_events(replay_events: List[Dict[str, Any]]) -> List[Dict[str, int]]:
+    """Build period-by-period line score from replay score snapshots.
+
+    replay_events keeps cumulative score (score_home/score_away) snapshots. We collapse each
+    period to its last seen cumulative score, then convert cumulative -> per-period deltas.
+    """
+    if not replay_events:
+        return []
+
+    by_period: Dict[int, tuple[int, int, int]] = {}
+    for ev in replay_events:
+        if not isinstance(ev, dict):
+            continue
+        try:
+            period = int(ev.get("quarter"))
+            seq = int(ev.get("seq") or 0)
+            hs = int(ev.get("score_home"))
+            as_ = int(ev.get("score_away"))
+        except (TypeError, ValueError):
+            continue
+        if period <= 0:
+            continue
+
+        prev = by_period.get(period)
+        if prev is None or seq >= prev[0]:
+            by_period[period] = (seq, hs, as_)
+
+    if not by_period:
+        return []
+
+    out: List[Dict[str, int]] = []
+    prev_h = 0
+    prev_a = 0
+    for period in sorted(by_period.keys()):
+        _seq, cum_h, cum_a = by_period[period]
+        out.append(
+            {
+                "period": int(period),
+                "home": int(max(0, cum_h - prev_h)),
+                "away": int(max(0, cum_a - prev_a)),
+            }
+        )
+        prev_h, prev_a = cum_h, cum_a
+
+    return out
+
+
 def _int_like(value: Any, *, path: str) -> int:
     if value is None:
         raise ValueError(f"raw matchengine_v3 result invalid: '{path}' is None (expected int-like)")
@@ -716,6 +763,9 @@ def adapt_matchengine_result_to_v2(
 
     if include_replay_events and replay_events:
         out["replay_events"] = replay_events
+        linescore = _build_linescore_from_replay_events(replay_events)
+        if linescore:
+            out["linescore"] = linescore
 
     # Include raw only if caller asks for it.
     # Note: state.py stores the entire game_result dict into state['game_results'].
