@@ -31,6 +31,61 @@ from sim.roster_adapter import build_team_state_from_db
 logger = logging.getLogger(__name__)
 
 
+def _normalize_team_id(team_id: str) -> str:
+    return schema.normalize_team_id(str(team_id)).upper()
+
+
+def _get_master_schedule_snapshot() -> tuple[Dict[str, List[str]], Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
+    league_full = export_full_state_snapshot().get("league", {})
+    master_schedule = league_full.get("master_schedule", {})
+    by_date: Dict[str, List[str]] = master_schedule.get("by_date") or {}
+    games: List[Dict[str, Any]] = master_schedule.get("games") or []
+    by_id_raw = master_schedule.get("by_id")
+
+    if not by_date or not games:
+        raise RuntimeError(
+            "Master schedule is not initialized. Expected state.startup_init_state() to run before simulation calls."
+        )
+
+    if isinstance(by_id_raw, dict) and len(by_id_raw) == len(games):
+        by_id: Dict[str, Dict[str, Any]] = by_id_raw
+    else:
+        by_id = {g.get("game_id"): g for g in games if isinstance(g, dict) and g.get("game_id")}
+
+    return by_date, by_id, games
+
+
+def _find_next_user_game_entry(*, user_team_id: str, from_date: str) -> Optional[Dict[str, Any]]:
+    tid = _normalize_team_id(user_team_id)
+    by_date, by_id, _ = _get_master_schedule_snapshot()
+    try:
+        base_day = date.fromisoformat(str(from_date)[:10])
+    except Exception as exc:
+        raise ValueError(f"invalid from_date: {from_date}") from exc
+
+    candidate_dates = sorted(d for d in by_date.keys() if isinstance(d, str) and len(d) >= 10)
+    for day_str in candidate_dates:
+        try:
+            d = date.fromisoformat(day_str[:10])
+        except Exception:
+            continue
+        if d < base_day:
+            continue
+        for gid in by_date.get(day_str, []):
+            entry = by_id.get(gid)
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("status") or "").lower() == "final":
+                continue
+            home_id = str(entry.get("home_team_id") or "").upper()
+            away_id = str(entry.get("away_team_id") or "").upper()
+            if home_id == tid or away_id == tid:
+                e = dict(entry)
+                e["date"] = day_str
+                return e
+    return None
+
+
 @contextmanager
 def _repo_ctx() -> LeagueRepo:
     db_path = get_db_path()
@@ -591,3 +646,135 @@ def simulate_single_game(
         away_tactics=away_tactics,
         tick_cache=None,
     )
+
+
+def auto_advance_to_next_user_game_day(user_team_id: str) -> Dict[str, Any]:
+    user_tid = _normalize_team_id(user_team_id)
+    current_date = get_current_date_as_date()
+    current_date_str = current_date.isoformat()
+
+    next_entry = _find_next_user_game_entry(user_team_id=user_tid, from_date=current_date_str)
+    if next_entry is None:
+        raise ValueError(f"NO_NEXT_USER_GAME: user_team_id={user_tid}")
+
+    target_date = str(next_entry.get("date") or "")[:10]
+    if not target_date:
+        raise ValueError("NO_NEXT_USER_GAME_DATE")
+
+    simulated: List[Dict[str, Any]] = []
+    if current_date_str < target_date:
+        day_before = (date.fromisoformat(target_date) - timedelta(days=1)).isoformat()
+        if day_before >= current_date_str:
+            simulated = advance_league_until(day_before, user_team_id=user_tid)
+
+    set_current_date(target_date)
+
+    by_date, by_id, _games = _get_master_schedule_snapshot()
+    user_pending = False
+    other_pending_count = 0
+    for gid in by_date.get(target_date, []):
+        entry = by_id.get(gid)
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("status") or "").lower() == "final":
+            continue
+        home_id = str(entry.get("home_team_id") or "").upper()
+        away_id = str(entry.get("away_team_id") or "").upper()
+        if home_id == user_tid or away_id == user_tid:
+            user_pending = True
+        else:
+            other_pending_count += 1
+
+    return {
+        "ok": True,
+        "user_team_id": user_tid,
+        "current_date_before": current_date_str,
+        "next_user_game_date": target_date,
+        "current_date_after": target_date,
+        "auto_advance": {
+            "from_exclusive": current_date_str,
+            "to_inclusive": (date.fromisoformat(target_date) - timedelta(days=1)).isoformat() if current_date_str < target_date else current_date_str,
+            "simulated_count": len(simulated),
+            "simulated_game_ids": [str(g.get("game_id")) for g in simulated if isinstance(g, dict) and g.get("game_id")],
+        },
+        "game_day_status": {
+            "date": target_date,
+            "user_game_pending": bool(user_pending),
+            "other_games_pending_count": int(other_pending_count),
+        },
+    }
+
+
+def progress_next_user_game_day(user_team_id: str, *, mode: str = "auto_if_needed") -> Dict[str, Any]:
+    user_tid = _normalize_team_id(user_team_id)
+    mode_norm = str(mode or "auto_if_needed")
+    if mode_norm not in {"auto_if_needed", "strict_today_only"}:
+        raise ValueError(f"INVALID_MODE: {mode_norm}")
+
+    current_date = get_current_date_as_date()
+    current_date_str = current_date.isoformat()
+
+    next_entry = _find_next_user_game_entry(user_team_id=user_tid, from_date=current_date_str)
+    if next_entry is None:
+        raise ValueError(f"NO_NEXT_USER_GAME: user_team_id={user_tid}")
+
+    target_date = str(next_entry.get("date") or "")[:10]
+    if not target_date:
+        raise ValueError("NO_NEXT_USER_GAME_DATE")
+
+    if current_date_str < target_date and mode_norm == "strict_today_only":
+        raise ValueError(f"USER_GAME_NOT_TODAY: current_date={current_date_str}, next_user_game_date={target_date}")
+
+    pre_simulated: List[Dict[str, Any]] = []
+    response_mode = "played_today"
+    if current_date_str < target_date:
+        day_before = (date.fromisoformat(target_date) - timedelta(days=1)).isoformat()
+        if day_before >= current_date_str:
+            pre_simulated = advance_league_until(day_before, user_team_id=user_tid)
+        response_mode = "auto_advanced_then_played"
+
+    # User game on target day
+    next_entry = _find_next_user_game_entry(user_team_id=user_tid, from_date=target_date)
+    if next_entry is None or str(next_entry.get("date") or "")[:10] != target_date:
+        raise ValueError(f"USER_GAME_ALREADY_FINAL: date={target_date}, user_team_id={user_tid}")
+
+    home_id = str(next_entry.get("home_team_id") or "")
+    away_id = str(next_entry.get("away_team_id") or "")
+    user_game_result = simulate_single_game(home_team_id=home_id, away_team_id=away_id, game_date=target_date)
+
+    # Same-day other games: force advance loop to include target day.
+    set_current_date((date.fromisoformat(target_date) - timedelta(days=1)).isoformat())
+    other_simulated = advance_league_until(target_date, user_team_id=user_tid)
+
+    total_simulated = list(pre_simulated)
+    total_simulated.append(user_game_result)
+    total_simulated.extend(other_simulated)
+
+    return {
+        "ok": True,
+        "mode": response_mode,
+        "user_team_id": user_tid,
+        "current_date_before": current_date_str,
+        "target_user_game_date": target_date,
+        "current_date_after": get_current_date_as_date().isoformat(),
+        "auto_advance": {
+            "from_exclusive": current_date_str,
+            "to_inclusive": (date.fromisoformat(target_date) - timedelta(days=1)).isoformat() if current_date_str < target_date else current_date_str,
+            "simulated_count": len(pre_simulated),
+            "simulated_game_ids": [str(g.get("game_id")) for g in pre_simulated if isinstance(g, dict) and g.get("game_id")],
+        },
+        "game_day": {
+            "date": target_date,
+            "user_game": {
+                "game_id": user_game_result.get("game_id"),
+                "home_team_id": user_game_result.get("home_team_id"),
+                "away_team_id": user_game_result.get("away_team_id"),
+                "status": "final",
+            },
+            "other_games_simulated_count": len(other_simulated),
+            "other_game_ids": [str(g.get("game_id")) for g in other_simulated if isinstance(g, dict) and g.get("game_id")],
+        },
+        "totals": {
+            "simulated_count": len(total_simulated),
+        },
+    }

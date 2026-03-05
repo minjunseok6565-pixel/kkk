@@ -3,8 +3,8 @@
 Source of truth: FastAPI route decorators in `app/api/routes/*.py` (wired via `app/api/router.py` and mounted by `app/main.py`).
 
 - Total GET: 38
-- Total POST: 62
-- Total endpoints: 100
+- Total POST: 64
+- Total endpoints: 102
 
 ## GET
 
@@ -69,6 +69,8 @@ Source of truth: FastAPI route decorators in `app/api/routes/*.py` (wired via `a
 - `/api/contracts/two-way/negotiation/start` (`api_two_way_negotiation_start`) - `app/api/routes/contracts.py:332`
 - `/api/game/load` (`api_game_load`) - `app/api/routes/game_saves.py:76`
 - `/api/game/new` (`api_game_new`) - `app/api/routes/game_saves.py:26`
+- `/api/game/auto-advance-to-next-user-game-day` (`api_auto_advance_to_next_user_game_day`) - `app/api/routes/sim.py`
+- `/api/game/progress-next-user-game-day` (`api_progress_next_user_game_day`) - `app/api/routes/sim.py`
 - `/api/game/save` (`api_game_save`) - `app/api/routes/game_saves.py:44`
 - `/api/game/set-user-team` (`api_game_set_user_team`) - `app/api/routes/game_saves.py:94`
 - `/api/main-llm` (`chat_main_legacy`) - `app/api/routes/news.py:126`

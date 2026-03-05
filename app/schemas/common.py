@@ -31,6 +31,19 @@ class AdvanceLeagueRequest(BaseModel):
     apiKey: Optional[str] = None  # Optional: used for month-end scouting LLM generation
 
 
+class ProgressNextUserGameDayRequest(BaseModel):
+    user_team_id: str
+    mode: str = "auto_if_needed"  # auto_if_needed | strict_today_only
+    apiKey: Optional[str] = None
+    idempotency_key: Optional[str] = None
+
+
+class AutoAdvanceToNextUserGameDayRequest(BaseModel):
+    user_team_id: str
+    apiKey: Optional[str] = None
+    idempotency_key: Optional[str] = None
+
+
 class PostseasonSetupRequest(BaseModel):
     my_team_id: str
     use_random_field: bool = False

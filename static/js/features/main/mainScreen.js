@@ -9,6 +9,15 @@ import { resetNextGameCard, renderHomePriorities, renderHomeActivityFeed, render
 
 function showTeamSelection() { activateScreen(els.teamScreen); }
 
+function isSameIsoDate(a, b) {
+  return String(a || "").slice(0, 10) === String(b || "").slice(0, 10);
+}
+
+async function fetchMainDashboardRaw() {
+  if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
+  return fetchJson(`/api/home/dashboard/${encodeURIComponent(state.selectedTeamId)}`);
+}
+
 function showMainScreen() {
   activateScreen(els.mainScreen);
   const teamName = state.selectedTeamName || state.selectedTeamId || "선택 팀";
@@ -31,6 +40,10 @@ async function fetchInGameDate() {
 
 async function refreshMainDashboard() {
   if (!state.selectedTeamId) return;
+
+  if (els.nextGameQuickBtn) {
+    els.nextGameQuickBtn.textContent = "경기가 있는 날짜까지 자동진행";
+  }
 
   try {
     const dashboard = await fetchJson(`/api/home/dashboard/${encodeURIComponent(state.selectedTeamId)}`);
@@ -82,6 +95,83 @@ async function refreshMainDashboard() {
     resetNextGameCard();
     els.mainCurrentDate.textContent = "YYYY-MM-DD";
     els.nextGameDatetime.textContent = `다음 경기 정보를 불러오지 못했습니다: ${e.message}`;
+  }
+}
+
+async function progressNextGameFromHome() {
+  if (!state.selectedTeamId) {
+    alert("먼저 팀을 선택해주세요.");
+    return;
+  }
+
+  setLoading(true, "다음 경기 진행 중...");
+  try {
+    const dashboard = await fetchMainDashboardRaw();
+    const currentDate = String(dashboard?.current_date || "").slice(0, 10);
+    const nextGameDate = String(dashboard?.next_game?.game?.date || "").slice(0, 10);
+
+    if (!nextGameDate) {
+      alert("예정된 다음 경기가 없습니다.");
+      return;
+    }
+
+    if (!isSameIsoDate(currentDate, nextGameDate)) {
+      const confirmed = await showConfirmModal({
+        title: "자동 진행 확인",
+        body: "경기 날짜까지 리그 일정은 자동 진행됩니다.",
+        okLabel: "확인",
+        cancelLabel: "취소",
+      });
+      if (!confirmed) return;
+    }
+
+    await fetchJson("/api/game/progress-next-user-game-day", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_team_id: state.selectedTeamId,
+        mode: "auto_if_needed",
+      }),
+    });
+
+    await refreshMainDashboard();
+    alert("경기 진행이 완료되었습니다.");
+  } catch (e) {
+    alert(`경기 진행 실패: ${e.message}`);
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function autoAdvanceToNextGameDayFromHome() {
+  if (!state.selectedTeamId) {
+    alert("먼저 팀을 선택해주세요.");
+    return;
+  }
+
+  const confirmed = await showConfirmModal({
+    title: "자동 진행 확인",
+    body: "경기 날짜까지 리그 일정은 자동 진행됩니다.",
+    okLabel: "확인",
+    cancelLabel: "취소",
+  });
+  if (!confirmed) return;
+
+  setLoading(true, "경기가 있는 날짜까지 자동 진행 중...");
+  try {
+    await fetchJson("/api/game/auto-advance-to-next-user-game-day", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_team_id: state.selectedTeamId,
+      }),
+    });
+    await refreshMainDashboard();
+    alert("경기가 있는 날짜까지 자동 진행이 완료되었습니다.");
+  } catch (e) {
+    alert(`자동 진행 실패: ${e.message}`);
+  } finally {
+    setLoading(false);
   }
 }
 
@@ -242,4 +332,17 @@ async function confirmTeamSelection(teamId, fullName) {
   showMainScreen();
 }
 
-export { showTeamSelection, showMainScreen, randomTipoffTime, fetchInGameDate, refreshMainDashboard, loadSavesStatus, renderTeams, createNewGame, continueGame, confirmTeamSelection };
+export {
+  showTeamSelection,
+  showMainScreen,
+  randomTipoffTime,
+  fetchInGameDate,
+  refreshMainDashboard,
+  progressNextGameFromHome,
+  autoAdvanceToNextGameDayFromHome,
+  loadSavesStatus,
+  renderTeams,
+  createNewGame,
+  continueGame,
+  confirmTeamSelection,
+};

@@ -2,7 +2,13 @@ import { els } from "./dom.js";
 import { state } from "./state.js";
 import { activateScreen } from "./router.js";
 import { fetchJson, showConfirmModal } from "../core/api.js";
-import { showMainScreen, createNewGame, continueGame } from "../features/main/mainScreen.js";
+import {
+  showMainScreen,
+  createNewGame,
+  continueGame,
+  progressNextGameFromHome,
+  autoAdvanceToNextGameDayFromHome,
+} from "../features/main/mainScreen.js";
 import { showMyTeamScreen, rerenderMyTeamBoard } from "../features/myteam/myTeamScreen.js";
 import { showTacticsScreen, toggleTacticsOptions } from "../features/tactics/tacticsScreen.js";
 import { showScheduleScreen } from "../features/schedule/scheduleScreen.js";
@@ -31,6 +37,8 @@ function bindEvents() {
   els.myTeamBtn.addEventListener("click", () => showMyTeamScreen().catch((e) => alert(e.message)));
   els.tacticsMenuBtn.addEventListener("click", () => showTacticsScreen().catch((e) => alert(e.message)));
   els.nextGameTacticsBtn.addEventListener("click", () => showTacticsScreen().catch((e) => alert(e.message)));
+  els.nextGamePlayBtn.addEventListener("click", () => progressNextGameFromHome().catch((e) => alert(e.message)));
+  els.nextGameQuickBtn.addEventListener("click", () => autoAdvanceToNextGameDayFromHome().catch((e) => alert(e.message)));
   els.scheduleBtn.addEventListener("click", () => showScheduleScreen().catch((e) => alert(e.message)));
   els.scheduleBackBtn.addEventListener("click", () => showMainScreen());
   els.trainingMenuBtn.addEventListener("click", () => showTrainingScreen().catch((e) => alert(e.message)));
