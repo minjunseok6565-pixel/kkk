@@ -295,6 +295,36 @@ class GameResultV2(TypedDict, total=False):
     raw: Dict[str, Any]
 
 
+class StandingsCacheBuiltFrom(TypedDict):
+    season_id: Optional[str]
+    regular_final_count: int
+
+
+class StandingsTeamRecord(TypedDict):
+    wins: int
+    losses: int
+    pf: int
+    pa: int
+    home_wins: int
+    home_losses: int
+    away_wins: int
+    away_losses: int
+    div_wins: int
+    div_losses: int
+    conf_wins: int
+    conf_losses: int
+    recent10: List[int]
+    streak_type: str
+    streak_len: int
+
+
+class StandingsCache(TypedDict):
+    version: int
+    built_from: StandingsCacheBuiltFrom
+    applied_game_ids: Dict[str, bool]
+    records_by_team: Dict[str, StandingsTeamRecord]
+
+
 # ============================================================================
 # 4) Normalization / Validation Utilities (must be used everywhere)
 # ============================================================================

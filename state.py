@@ -45,6 +45,12 @@ __all__ = [
     "get_league_schedule_snapshot",
     "get_game_results_snapshot",
     "get_player_stats_snapshot",
+    "get_standings_cache_snapshot",
+    "set_standings_cache",
+    "upsert_standings_cache_record",
+    "set_standings_cache_built_from",
+    "mark_standings_cache_game_applied",
+    "clear_standings_cache",
     "initialize_master_schedule_if_needed",
     "ensure_schedule_for_active_season",
     "start_new_season",
@@ -1246,6 +1252,131 @@ def get_player_stats_snapshot(*, phase: str = "regular") -> dict:
         return _to_plain(phase_box.get("player_stats") or {})
 
     return _read_state(_impl)
+
+
+def get_standings_cache_snapshot() -> dict:
+    """Return standings cache branch without exporting full state snapshot."""
+
+    def _impl(v: Mapping[str, Any]) -> dict:
+        return _to_plain(v.get("standings_cache") or {})
+
+    return _read_state(_impl)
+
+
+def _empty_standings_cache() -> dict:
+    return {
+        "version": 1,
+        "built_from": {"season_id": None, "regular_final_count": 0},
+        "applied_game_ids": {},
+        "records_by_team": {},
+    }
+
+
+def _ensure_standings_cache_shape(state: dict) -> dict:
+    cache = state.get("standings_cache")
+    if not isinstance(cache, dict):
+        cache = _empty_standings_cache()
+        state["standings_cache"] = cache
+        return cache
+
+    if not isinstance(cache.get("version"), int):
+        cache["version"] = 1
+
+    built_from = cache.get("built_from")
+    if not isinstance(built_from, dict):
+        built_from = {"season_id": None, "regular_final_count": 0}
+        cache["built_from"] = built_from
+    season_id = built_from.get("season_id")
+    if season_id is not None and not isinstance(season_id, str):
+        built_from["season_id"] = str(season_id)
+    built_from.setdefault("season_id", None)
+    try:
+        built_from["regular_final_count"] = int(built_from.get("regular_final_count") or 0)
+    except (TypeError, ValueError):
+        built_from["regular_final_count"] = 0
+
+    if not isinstance(cache.get("applied_game_ids"), dict):
+        cache["applied_game_ids"] = {}
+    if not isinstance(cache.get("records_by_team"), dict):
+        cache["records_by_team"] = {}
+    return cache
+
+
+def set_standings_cache(cache: dict) -> None:
+    """Replace standings cache branch with a provided cache payload."""
+
+    if not isinstance(cache, dict):
+        raise ValueError("cache must be a dict")
+
+    def _impl(state: dict) -> None:
+        state["standings_cache"] = _empty_standings_cache()
+        state["standings_cache"].update(deepcopy(cache))
+        _ensure_standings_cache_shape(state)
+
+    _mutate_state("set_standings_cache", _impl)
+
+
+def upsert_standings_cache_record(team_id: str, record: dict) -> None:
+    """Upsert one team record in standings cache."""
+
+    tid = str(team_id or "").upper()
+    if not tid:
+        raise ValueError("team_id is required")
+    if not isinstance(record, dict):
+        raise ValueError("record must be a dict")
+
+    def _impl(state: dict) -> None:
+        cache = _ensure_standings_cache_shape(state)
+        records_by_team = cache.get("records_by_team")
+        if not isinstance(records_by_team, dict):
+            records_by_team = {}
+            cache["records_by_team"] = records_by_team
+        records_by_team[tid] = deepcopy(record)
+
+    _mutate_state("upsert_standings_cache_record", _impl)
+
+
+def set_standings_cache_built_from(*, season_id: Optional[str], regular_final_count: int) -> None:
+    """Set standings cache source metadata."""
+
+    def _impl(state: dict) -> None:
+        cache = _ensure_standings_cache_shape(state)
+        cache["built_from"] = {
+            "season_id": (None if season_id is None else str(season_id)),
+            "regular_final_count": int(regular_final_count),
+        }
+
+    _mutate_state("set_standings_cache_built_from", _impl)
+
+
+def mark_standings_cache_game_applied(game_id: str, *, applied: bool = True) -> None:
+    """Mark a game as applied (or unapplied) in standings cache metadata."""
+
+    gid = str(game_id or "").strip()
+    if not gid:
+        raise ValueError("game_id is required")
+
+    def _impl(state: dict) -> None:
+        cache = _ensure_standings_cache_shape(state)
+        applied_game_ids = cache.get("applied_game_ids")
+        if not isinstance(applied_game_ids, dict):
+            applied_game_ids = {}
+            cache["applied_game_ids"] = applied_game_ids
+        if applied:
+            applied_game_ids[gid] = True
+        else:
+            applied_game_ids.pop(gid, None)
+
+    _mutate_state("mark_standings_cache_game_applied", _impl)
+
+
+def clear_standings_cache() -> None:
+    """Reset standings cache branch to an empty baseline shape."""
+
+    def _impl(state: dict) -> None:
+        state["standings_cache"] = _empty_standings_cache()
+
+    _mutate_state("clear_standings_cache", _impl)
 
 
 def initialize_master_schedule_if_needed(force: bool = False) -> None:
