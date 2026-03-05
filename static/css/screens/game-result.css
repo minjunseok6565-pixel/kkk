@@ -82,6 +82,7 @@
 }
 
 .game-result-tab {
+  cursor: pointer;
   border: 1px solid rgba(59, 130, 246, 0.42);
   background: #ffffff;
   color: #1d4ed8;
@@ -95,14 +96,12 @@
   border-color: #1d4ed8;
 }
 
-.game-result-tab.is-disabled {
-  color: #64748b;
-  border-color: rgba(148, 163, 184, 0.3);
+.game-result-view {
+  display: none;
 }
 
-.game-result-tab span {
-  font-size: .75rem;
-  margin-left: 6px;
+.game-result-view.is-active {
+  display: block;
 }
 
 .game-result-grid {
@@ -227,6 +226,51 @@
 
 .game-result-matchups li strong { color: #0f172a; }
 .game-result-matchups li span { color: #475569; font-size: .88rem; }
+
+.game-result-boxscore {
+  display: grid;
+  gap: 14px;
+}
+
+.game-result-boxscore-team h4 {
+  margin-bottom: 8px;
+  color: #0f172a;
+}
+
+.game-result-boxscore-table-wrap {
+  overflow-x: auto;
+}
+
+.game-result-boxscore-table,
+.game-result-teamstats-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.game-result-boxscore-table th,
+.game-result-boxscore-table td,
+.game-result-teamstats-table th,
+.game-result-teamstats-table td {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.26);
+  padding: 8px;
+  text-align: center;
+}
+
+.game-result-boxscore-table tbody th,
+.game-result-teamstats-table tbody th {
+  text-align: left;
+}
+
+.team-total-row {
+  background: rgba(241, 245, 249, 0.9);
+  font-weight: 700;
+}
+
+.team-pct-row {
+  color: #475569;
+  font-size: .9rem;
+  background: rgba(248, 250, 252, 0.95);
+}
 
 @media (max-width: 1080px) {
   .game-result-header-card,

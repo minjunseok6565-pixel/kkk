@@ -1849,6 +1849,58 @@ async def api_game_result(game_id: str, user_team_id: str):
     home_players = home_players if isinstance(home_players, list) else []
     away_players = away_players if isinstance(away_players, list) else []
 
+    def _to_num(v: Any) -> float:
+        try:
+            return float(v)
+        except Exception:
+            return 0.0
+
+    def _build_team_box_totals(players: List[Dict[str, Any]]) -> Dict[str, Any]:
+        totals = {
+            "PTS": 0,
+            "FGM": 0,
+            "FGA": 0,
+            "3PM": 0,
+            "3PA": 0,
+            "FTM": 0,
+            "FTA": 0,
+            "ORB": 0,
+            "DRB": 0,
+            "REB": 0,
+            "AST": 0,
+            "TOV": 0,
+            "STL": 0,
+            "BLK": 0,
+            "PF": 0,
+        }
+        for p in players:
+            if not isinstance(p, dict):
+                continue
+            for k in totals.keys():
+                totals[k] += int(round(_to_num(p.get(k))))
+
+        totals["FG_PCT"] = round((totals["FGM"] / totals["FGA"] * 100.0), 1) if totals["FGA"] else 0.0
+        totals["3P_PCT"] = round((totals["3PM"] / totals["3PA"] * 100.0), 1) if totals["3PA"] else 0.0
+        totals["FT_PCT"] = round((totals["FTM"] / totals["FTA"] * 100.0), 1) if totals["FTA"] else 0.0
+        return totals
+
+    boxscore = {
+        "away": {
+            "team_id": away_id,
+            "team_name": TEAM_FULL_NAMES.get(away_id, away_id),
+            "players": away_players,
+        },
+        "home": {
+            "team_id": home_id,
+            "team_name": TEAM_FULL_NAMES.get(home_id, home_id),
+            "players": home_players,
+        },
+    }
+    teamstats = {
+        "away": _build_team_box_totals(away_players),
+        "home": _build_team_box_totals(home_players),
+    }
+
     leaders = {
         "points": {
             "home": _pick_leader(home_players, ["PTS"]),
@@ -1952,9 +2004,11 @@ async def api_game_result(game_id: str, user_team_id: str):
         },
         "tabs": {
             "default": "gamecast",
-            "enabled": ["gamecast"],
-            "disabled": ["boxscore", "teamstats"],
+            "enabled": ["gamecast", "boxscore", "teamstats"],
+            "disabled": [],
         },
+        "boxscore": boxscore,
+        "teamstats": teamstats,
         "leaders": leaders,
         "gamecast": {
             "win_probability": {
