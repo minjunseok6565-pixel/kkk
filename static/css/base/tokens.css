@@ -11,6 +11,54 @@
   --card-bg-soft: rgba(28, 33, 44, 0.84);
   --card-border: rgba(255, 255, 255, 0.11);
   --card-shadow: 0 16px 38px rgba(0, 0, 0, 0.42);
+
+  /* Game Result - high-end light theme tokens */
+  --gr-bg-canvas: #f3f7fc;
+  --gr-bg-canvas-2: #edf3fb;
+  --gr-surface-1: #ffffff;
+  --gr-surface-2: #f8fbff;
+  --gr-surface-3: #eef4ff;
+
+  --gr-text-1: #0f172a;
+  --gr-text-2: #334155;
+  --gr-text-3: #64748b;
+  --gr-text-inverse: #ffffff;
+
+  --gr-border-1: #dbe6f2;
+  --gr-border-2: #e6edf8;
+  --gr-divider: #dfe8f5;
+
+  --gr-accent: #2563eb;
+  --gr-accent-hover: #1d4ed8;
+  --gr-accent-soft: #e8f0ff;
+
+  --gr-success: #15803d;
+  --gr-success-soft: #dcfce7;
+  --gr-warn: #c2410c;
+  --gr-warn-soft: #ffedd5;
+  --gr-danger: #b91c1c;
+  --gr-danger-soft: #fee2e2;
+
+  --gr-shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.06);
+  --gr-shadow-md: 0 10px 24px rgba(15, 23, 42, 0.08);
+  --gr-shadow-lg: 0 18px 40px rgba(15, 23, 42, 0.1);
+
+  --gr-radius-sm: 10px;
+  --gr-radius-md: 14px;
+  --gr-radius-lg: 20px;
+  --gr-radius-pill: 999px;
+
+  --gr-space-1: 4px;
+  --gr-space-2: 8px;
+  --gr-space-3: 12px;
+  --gr-space-4: 16px;
+  --gr-space-5: 20px;
+  --gr-space-6: 24px;
+  --gr-space-8: 32px;
+
+  --gr-motion-fast: 120ms;
+  --gr-motion-base: 180ms;
+  --gr-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 #college-screen {
