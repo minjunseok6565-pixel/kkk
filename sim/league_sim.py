@@ -23,6 +23,7 @@ from state import (
     get_db_path,
     get_league_context_snapshot,
     get_current_date_as_date,
+    get_team_tactics_snapshot,
     ingest_game_result,
     set_current_date,
 )
@@ -705,6 +706,22 @@ def auto_advance_to_next_user_game_day(user_team_id: str) -> Dict[str, Any]:
     }
 
 
+
+
+def _load_saved_team_tactics(team_id: str) -> Optional[Dict[str, Any]]:
+    """Load persisted team tactics payload from state storage.
+
+    Returns None when no valid tactics payload is stored for the team.
+    """
+    tid = _normalize_team_id(team_id)
+    record = get_team_tactics_snapshot(tid)
+    if not isinstance(record, dict):
+        return None
+    tactics = record.get("tactics")
+    if not isinstance(tactics, dict) or not tactics:
+        return None
+    return dict(tactics)
+
 def progress_next_user_game_day(user_team_id: str, *, mode: str = "auto_if_needed") -> Dict[str, Any]:
     user_tid = _normalize_team_id(user_team_id)
     mode_norm = str(mode or "auto_if_needed")
@@ -740,7 +757,14 @@ def progress_next_user_game_day(user_team_id: str, *, mode: str = "auto_if_neede
 
     home_id = str(next_entry.get("home_team_id") or "")
     away_id = str(next_entry.get("away_team_id") or "")
-    user_game_result = simulate_single_game(home_team_id=home_id, away_team_id=away_id, game_date=target_date)
+    saved_user_tactics = _load_saved_team_tactics(user_tid)
+    user_game_result = simulate_single_game(
+        home_team_id=home_id,
+        away_team_id=away_id,
+        game_date=target_date,
+        home_tactics=saved_user_tactics if str(home_id).upper() == user_tid else None,
+        away_tactics=saved_user_tactics if str(away_id).upper() == user_tid else None,
+    )
 
     # Same-day other games: force advance loop to include target day.
     set_current_date((date.fromisoformat(target_date) - timedelta(days=1)).isoformat())

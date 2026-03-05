@@ -94,6 +94,8 @@ __all__ = [
     "ui_players_set",
     "ui_teams_get",
     "ui_teams_set",
+    "get_team_tactics_snapshot",
+    "set_team_tactics",
     "reset_state_for_dev",
 ]
 
@@ -1029,6 +1031,51 @@ def ui_teams_set(value: dict) -> None:
         ui_cache["teams"] = deepcopy(value)
 
     _mutate_state("ui_teams_set", _impl)
+
+
+
+
+def get_team_tactics_snapshot(team_id: str) -> dict:
+    tid = str(team_id or "").strip().upper()
+    if not tid:
+        return {}
+
+    def _impl(v: Mapping[str, Any]) -> dict:
+        blob = v.get("team_tactics") or {}
+        if not isinstance(blob, Mapping):
+            return {}
+        val = blob.get(tid) or {}
+        if not isinstance(val, Mapping):
+            return {}
+        return _to_plain(val)
+
+    return _read_state(_impl)
+
+
+def set_team_tactics(team_id: str, value: Mapping[str, Any]) -> dict:
+    tid = str(team_id or "").strip().upper()
+    if not tid:
+        raise ValueError("set_team_tactics: team_id is required")
+    if not isinstance(value, Mapping):
+        raise ValueError("set_team_tactics: value must be mapping")
+
+    def _impl(state: dict) -> dict:
+        store = state.get("team_tactics")
+        if not isinstance(store, dict):
+            raise ValueError("set_team_tactics: team_tactics missing or invalid")
+        turn_raw = state.get("turn")
+        try:
+            turn_i = int(turn_raw)
+        except Exception:
+            turn_i = 0
+        record = {
+            "tactics": deepcopy(dict(value)),
+            "updated_at_turn": turn_i,
+        }
+        store[tid] = record
+        return deepcopy(record)
+
+    return _mutate_state("set_team_tactics", _impl)
 
 
 def reset_state_for_dev() -> None:

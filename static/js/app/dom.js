@@ -74,6 +74,7 @@ const els = {
   trainingMenuBtn: document.getElementById("training-menu-btn"),
   tacticsScreen: document.getElementById("tactics-screen"),
   tacticsBackBtn: document.getElementById("tactics-back-btn"),
+  tacticsSaveBtn: document.getElementById("tactics-save-btn"),
   tacticsOffenseBtn: document.getElementById("tactics-offense-btn"),
   tacticsDefenseBtn: document.getElementById("tactics-defense-btn"),
   tacticsOffenseOptions: document.getElementById("tactics-offense-options"),
