@@ -21,6 +21,7 @@ ALLOWED_TOP_LEVEL_KEYS = {
     "cached_views",
     "league",
     "ui_cache",
+    "team_tactics",
     "standings_cache",
     "trade_agreements",
     "negotiations",
@@ -192,6 +193,7 @@ def create_default_game_state() -> Dict[str, Any]:
             "teams": {},  # UI용 팀 성향 / 메타(권위 없음)
             "players": {},  # UI용 선수 메타(권위 없음)
         },
+        "team_tactics": {},  # team_id -> {tactics: {...}, updated_at_turn: int}
         "standings_cache": {
             "version": 1,
             "built_from": {
@@ -297,6 +299,7 @@ def validate_game_state(state: dict) -> None:
     postseason = _require_container(state, "postseason", dict, "dict")
     league = _require_container(state, "league", dict, "dict")
     ui_cache = _require_container(state, "ui_cache", dict, "dict")
+    _require_container(state, "team_tactics", dict, "dict")
     standings_cache = _require_container(state, "standings_cache", dict, "dict")
     _require_container(state, "trade_agreements", dict, "dict")
     _require_container(state, "negotiations", dict, "dict")

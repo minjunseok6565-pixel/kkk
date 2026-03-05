@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import core, sim, training, college, scouting, postseason, offseason, contracts, trades, news, game_saves
+from app.api.routes import core, sim, training, college, scouting, postseason, offseason, contracts, trades, news, game_saves, tactics
 
 api_router = APIRouter()
 api_router.include_router(core.router)
@@ -14,3 +14,5 @@ api_router.include_router(contracts.router)
 api_router.include_router(trades.router)
 api_router.include_router(news.router)
 api_router.include_router(game_saves.router)
+
+api_router.include_router(tactics.router)

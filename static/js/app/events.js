@@ -10,7 +10,7 @@ import {
   autoAdvanceToNextGameDayFromHome,
 } from "../features/main/mainScreen.js";
 import { showMyTeamScreen, rerenderMyTeamBoard } from "../features/myteam/myTeamScreen.js";
-import { showTacticsScreen, toggleTacticsOptions } from "../features/tactics/tacticsScreen.js";
+import { showTacticsScreen, toggleTacticsOptions, saveTacticsDraft, hasUnsavedTacticsChanges } from "../features/tactics/tacticsScreen.js";
 import { showScheduleScreen } from "../features/schedule/scheduleScreen.js";
 import { showTrainingScreen } from "../features/training/trainingScreen.js";
 import { showStandingsScreen } from "../features/standings/standingsScreen.js";
@@ -43,7 +43,26 @@ function bindEvents() {
   els.scheduleBackBtn.addEventListener("click", () => showMainScreen());
   els.gameResultBackBtn?.addEventListener("click", () => showMainScreen());
   els.trainingMenuBtn.addEventListener("click", () => showTrainingScreen().catch((e) => alert(e.message)));
-  els.tacticsBackBtn.addEventListener("click", () => showMainScreen());
+  els.tacticsBackBtn.addEventListener("click", async () => {
+    try {
+      if (hasUnsavedTacticsChanges()) {
+        const shouldSave = await showConfirmModal({
+          title: "저장되지 않은 전술 변경 사항",
+          body: "저장하지 않은 전술 변경 사항이 있습니다. 저장 후 나가시겠습니까?",
+          okLabel: "예",
+          cancelLabel: "아니오",
+        });
+        if (shouldSave) {
+          const saved = await saveTacticsDraft({ showSuccessMessage: false });
+          if (!saved) return;
+        }
+      }
+      showMainScreen();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+  els.tacticsSaveBtn?.addEventListener("click", () => saveTacticsDraft({ showSuccessMessage: true }).catch((e) => alert(e.message)));
   els.tacticsOffenseBtn.addEventListener("click", () => toggleTacticsOptions("offense"));
   els.tacticsDefenseBtn.addEventListener("click", () => toggleTacticsOptions("defense"));
   els.standingsMenuBtn.addEventListener("click", () => showStandingsScreen().catch((e) => alert(e.message)));
