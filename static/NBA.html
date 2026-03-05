@@ -169,12 +169,13 @@
       </article>
 
       <div class="game-result-tabs" role="tablist" aria-label="경기 결과 탭">
-        <button type="button" id="game-result-tab-gamecast" class="game-result-tab is-active" aria-selected="true" data-tab="gamecast">Gamecast</button>
-        <button type="button" id="game-result-tab-boxscore" class="game-result-tab" aria-selected="false" data-tab="boxscore">Boxscore</button>
-        <button type="button" id="game-result-tab-teamstats" class="game-result-tab" aria-selected="false" data-tab="teamstats">Teamstats</button>
+        <button type="button" id="game-result-tab-gamecast" class="game-result-tab is-active" aria-selected="true" aria-controls="game-result-view-gamecast" data-tab="gamecast">Gamecast</button>
+        <button type="button" id="game-result-tab-playbyplay" class="game-result-tab" aria-selected="false" aria-controls="game-result-view-playbyplay" data-tab="playbyplay">Play by Play</button>
+        <button type="button" id="game-result-tab-boxscore" class="game-result-tab" aria-selected="false" aria-controls="game-result-view-boxscore" data-tab="boxscore">Boxscore</button>
+        <button type="button" id="game-result-tab-teamstats" class="game-result-tab" aria-selected="false" aria-controls="game-result-view-teamstats" data-tab="teamstats">Teamstats</button>
       </div>
 
-      <div id="game-result-view-gamecast" class="game-result-view is-active">
+      <div id="game-result-view-gamecast" class="game-result-view is-active" role="tabpanel" aria-labelledby="game-result-tab-gamecast">
       <div class="game-result-grid">
         <article class="game-result-panel">
           <h3>Game Leaders</h3>
@@ -209,14 +210,56 @@
       </div>
       </div>
 
-      <div id="game-result-view-boxscore" class="game-result-view" aria-hidden="true">
+      <div id="game-result-view-playbyplay" class="game-result-view" role="tabpanel" aria-labelledby="game-result-tab-playbyplay" aria-hidden="true">
+        <article class="game-result-panel">
+          <h3>Play by Play</h3>
+
+          <div id="game-result-pbp-toolbar" class="game-result-pbp-toolbar">
+            <div class="game-result-pbp-filter-group" role="group" aria-label="Period filter">
+              <button type="button" id="game-result-pbp-filter-period-all" class="game-result-pbp-chip is-active" data-filter-type="period" data-filter-value="ALL">ALL</button>
+              <button type="button" id="game-result-pbp-filter-period-q1" class="game-result-pbp-chip" data-filter-type="period" data-filter-value="Q1">Q1</button>
+              <button type="button" id="game-result-pbp-filter-period-q2" class="game-result-pbp-chip" data-filter-type="period" data-filter-value="Q2">Q2</button>
+              <button type="button" id="game-result-pbp-filter-period-q3" class="game-result-pbp-chip" data-filter-type="period" data-filter-value="Q3">Q3</button>
+              <button type="button" id="game-result-pbp-filter-period-q4" class="game-result-pbp-chip" data-filter-type="period" data-filter-value="Q4">Q4</button>
+              <button type="button" id="game-result-pbp-filter-period-ot" class="game-result-pbp-chip" data-filter-type="period" data-filter-value="OT">OT</button>
+            </div>
+
+            <div class="game-result-pbp-filter-group" role="group" aria-label="Team filter">
+              <button type="button" id="game-result-pbp-filter-team-all" class="game-result-pbp-chip is-active" data-filter-type="team" data-filter-value="ALL">ALL TEAMS</button>
+              <button type="button" id="game-result-pbp-filter-team-home" class="game-result-pbp-chip" data-filter-type="team" data-filter-value="HOME">HOME</button>
+              <button type="button" id="game-result-pbp-filter-team-away" class="game-result-pbp-chip" data-filter-type="team" data-filter-value="AWAY">AWAY</button>
+            </div>
+
+            <div class="game-result-pbp-filter-group" role="group" aria-label="Tag filter">
+              <button type="button" class="game-result-pbp-chip" data-filter-type="tag" data-filter-value="scoring">SCORING</button>
+              <button type="button" class="game-result-pbp-chip" data-filter-type="tag" data-filter-value="foul">FOUL</button>
+              <button type="button" class="game-result-pbp-chip" data-filter-type="tag" data-filter-value="turnover">TURNOVER</button>
+              <button type="button" class="game-result-pbp-chip" data-filter-type="tag" data-filter-value="rebound">REBOUND</button>
+              <button type="button" class="game-result-pbp-chip" data-filter-type="tag" data-filter-value="timeout">TIMEOUT</button>
+              <button type="button" class="game-result-pbp-chip" data-filter-type="tag" data-filter-value="substitution">SUB</button>
+            </div>
+
+            <div class="game-result-pbp-filter-group" role="group" aria-label="Only key events">
+              <button type="button" id="game-result-pbp-only-key-toggle" class="game-result-pbp-chip" data-filter-type="only-key" data-filter-value="1">핵심 이벤트만</button>
+            </div>
+          </div>
+
+          <div id="game-result-pbp-summary" class="game-result-pbp-summary" role="status" aria-live="polite">PBP 로그가 준비되면 여기에 표시됩니다.</div>
+          <ul id="game-result-pbp-list" class="game-result-pbp-list">
+            <li class="game-result-pbp-empty">Play by Play 로그는 다음 단계에서 연결됩니다.</li>
+          </ul>
+          <button type="button" id="game-result-pbp-load-more" class="game-result-pbp-load-more" hidden>더 보기</button>
+        </article>
+      </div>
+
+      <div id="game-result-view-boxscore" class="game-result-view" role="tabpanel" aria-labelledby="game-result-tab-boxscore" aria-hidden="true">
         <article class="game-result-panel">
           <h3>Boxscore</h3>
           <div id="game-result-boxscore" class="game-result-boxscore"></div>
         </article>
       </div>
 
-      <div id="game-result-view-teamstats" class="game-result-view" aria-hidden="true">
+      <div id="game-result-view-teamstats" class="game-result-view" role="tabpanel" aria-labelledby="game-result-tab-teamstats" aria-hidden="true">
         <article class="game-result-panel">
           <h3>Teamstats</h3>
           <div id="game-result-teamstats" class="game-result-teamstats"></div>
