@@ -65,7 +65,7 @@
           <button type="button" id="training-menu-btn" class="top-league-tab">훈련</button>
           <button type="button" id="standings-menu-btn" class="top-league-tab">순위</button>
           <button type="button" id="college-menu-btn" class="top-league-tab">대학</button>
-          <button type="button" class="top-league-tab">시장</button>
+          <button type="button" id="market-menu-btn" class="top-league-tab">시장</button>
           <button type="button" id="medical-menu-btn" class="top-league-tab">메디컬 센터</button>
         </nav>
       </header>
@@ -134,6 +134,58 @@
           <div class="home-panel-head"><h3>2주 일정/리스크 캘린더</h3></div>
           <div id="home-risk-calendar" class="home-risk-calendar"></div>
         </section>
+      </section>
+    </section>
+
+    <section id="market-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row">
+        <div>
+          <p class="eyebrow">MARKET</p>
+          <h2 id="market-title">시장</h2>
+          <p class="subtitle">자유계약 선수와 트레이드 블록 정보를 확인하세요.</p>
+        </div>
+        <button id="market-back-btn" class="btn btn-secondary" type="button">메인으로</button>
+      </div>
+
+      <div class="market-subtab-row" role="tablist" aria-label="시장 하위 탭">
+        <button id="market-subtab-fa" type="button" class="btn btn-secondary is-active" data-market-tab="fa" aria-selected="true">FA</button>
+        <button id="market-subtab-trade-block" type="button" class="btn btn-secondary" data-market-tab="trade-block" aria-selected="false">트레이드 블록</button>
+      </div>
+
+      <section id="market-panel-fa" class="market-panel active" aria-hidden="false">
+        <section class="market-fa-overview" aria-label="FA 개요">
+          <p id="market-fa-summary" class="subtitle">FA 명단을 불러오는 중입니다.</p>
+        </section>
+
+        <div class="roster-shell">
+          <div class="roster-table-wrap">
+            <table class="roster-table market-fa-table">
+              <thead>
+                <tr>
+                  <th>선수명</th>
+                  <th>포지션</th>
+                  <th>OVR</th>
+                  <th>나이</th>
+                  <th>키</th>
+                  <th>몸무게</th>
+                  <th>샐러리</th>
+                  <th>PTS</th>
+                  <th>AST</th>
+                  <th>REB</th>
+                  <th>3PM</th>
+                </tr>
+              </thead>
+              <tbody id="market-fa-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="market-panel-trade-block" class="market-panel" aria-hidden="true">
+        <article class="player-detail-panel">
+          <h3>트레이드 블록 준비중</h3>
+          <p>향후 트레이드 블록 선수 리스트와 제안 플로우가 이 영역에 추가됩니다.</p>
+        </article>
       </section>
     </section>
 

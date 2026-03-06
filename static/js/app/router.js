@@ -5,6 +5,7 @@ function activateScreen(target) {
     els.startScreen,
     els.teamScreen,
     els.mainScreen,
+    els.marketScreen,
     els.gameResultScreen,
     els.scheduleScreen,
     els.myTeamScreen,
