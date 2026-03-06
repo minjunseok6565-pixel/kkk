@@ -11,8 +11,45 @@ const CACHE_TTL_MS = {
   college: 180_000,
 };
 
+const TRAINING_RANGE_DAYS = 28;
+
 function normalizeTeamId(teamId) {
   return String(teamId || "").trim().toUpperCase();
+}
+
+function normalizeIsoDate(value) {
+  const out = String(value || "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(out) ? out : "";
+}
+
+function addDaysIsoDate(isoDate, days) {
+  const normalized = normalizeIsoDate(isoDate);
+  if (!normalized) return "";
+  const base = new Date(`${normalized}T00:00:00Z`);
+  if (Number.isNaN(base.getTime())) return "";
+  base.setUTCDate(base.getUTCDate() + Number(days || 0));
+  const y = base.getUTCFullYear();
+  const m = String(base.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(base.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function resolveTrainingRange(context = {}) {
+  const fromFromContext = normalizeIsoDate(context.trainingRange?.from);
+  const toFromContext = normalizeIsoDate(context.trainingRange?.to);
+  if (fromFromContext && toFromContext) {
+    return { from: fromFromContext, to: toFromContext, source: "context.trainingRange" };
+  }
+
+  const currentDate = normalizeIsoDate(context.currentDate);
+  if (currentDate) {
+    const fallbackTo = addDaysIsoDate(currentDate, TRAINING_RANGE_DAYS - 1);
+    if (fallbackTo) {
+      return { from: currentDate, to: fallbackTo, source: "context.currentDate" };
+    }
+  }
+
+  return { from: "", to: "", source: "none" };
 }
 
 function buildCacheKeys(teamId, range = {}) {
@@ -124,22 +161,124 @@ function invalidateByEvent(eventType, context = {}) {
 function getPrefetchPlanAfterGame(context = {}) {
   const tid = normalizeTeamId(context.teamId);
   if (!tid) return [];
-  const keys = buildCacheKeys(tid, context.trainingRange || {});
+  const trainingRange = resolveTrainingRange(context);
+  const keys = buildCacheKeys(tid, trainingRange);
   return [
     {
       key: keys.schedule,
       url: `/api/team-schedule/${encodeURIComponent(tid)}`,
       ttlMs: CACHE_TTL_MS.schedule,
+      priorityTier: 1,
+      critical: true,
     },
     {
       key: keys.standings,
       url: "/api/standings/table",
       ttlMs: CACHE_TTL_MS.standings,
+      priorityTier: 1,
+      critical: true,
     },
     {
       key: keys.teamDetail,
       url: `/api/team-detail/${encodeURIComponent(tid)}`,
       ttlMs: CACHE_TTL_MS.teamDetail,
+      priorityTier: 2,
+      critical: true,
+    },
+    {
+      key: keys.tactics,
+      url: `/api/tactics/${encodeURIComponent(tid)}`,
+      ttlMs: CACHE_TTL_MS.tactics,
+      priorityTier: 2,
+      critical: true,
+    },
+    {
+      key: keys.trainingSchedule,
+      url: `/api/team-schedule/${encodeURIComponent(tid)}?view=light`,
+      ttlMs: CACHE_TTL_MS.training,
+      priorityTier: 3,
+      critical: false,
+      timeoutMs: 1200,
+    },
+    {
+      key: keys.trainingTeamDetail,
+      url: `/api/team-detail/${encodeURIComponent(tid)}?view=light`,
+      ttlMs: CACHE_TTL_MS.training,
+      priorityTier: 3,
+      critical: false,
+      timeoutMs: 1200,
+    },
+    {
+      key: keys.trainingFamiliarityOffense,
+      url: `/api/readiness/team/${encodeURIComponent(tid)}/familiarity?scheme_type=offense`,
+      ttlMs: CACHE_TTL_MS.training,
+      priorityTier: 3,
+      critical: false,
+      timeoutMs: 1200,
+    },
+    {
+      key: keys.trainingFamiliarityDefense,
+      url: `/api/readiness/team/${encodeURIComponent(tid)}/familiarity?scheme_type=defense`,
+      ttlMs: CACHE_TTL_MS.training,
+      priorityTier: 3,
+      critical: false,
+      timeoutMs: 1200,
+    },
+    ...(keys.trainingSessionsResolve ? [{
+      key: keys.trainingSessionsResolve,
+      url: `/api/practice/team/${encodeURIComponent(tid)}/sessions/resolve?date_from=${encodeURIComponent(trainingRange.from)}&date_to=${encodeURIComponent(trainingRange.to)}&only_missing=true&include_games=false`,
+      ttlMs: CACHE_TTL_MS.training,
+      priorityTier: 3,
+      critical: false,
+      timeoutMs: 1400,
+    }] : []),
+    {
+      key: keys.medicalOverview,
+      url: `/api/medical/team/${encodeURIComponent(tid)}/overview`,
+      ttlMs: CACHE_TTL_MS.medical,
+      priorityTier: 4,
+      critical: false,
+      timeoutMs: 1500,
+    },
+    {
+      key: keys.medicalAlerts,
+      url: `/api/medical/team/${encodeURIComponent(tid)}/alerts`,
+      ttlMs: CACHE_TTL_MS.medical,
+      priorityTier: 4,
+      critical: false,
+      timeoutMs: 1500,
+    },
+    {
+      key: keys.medicalRiskCalendar,
+      url: `/api/medical/team/${encodeURIComponent(tid)}/risk-calendar?days=14`,
+      ttlMs: CACHE_TTL_MS.medical,
+      priorityTier: 4,
+      critical: false,
+      timeoutMs: 1500,
+    },
+    {
+      key: keys.collegeMeta,
+      url: "/api/college/meta",
+      ttlMs: CACHE_TTL_MS.college,
+      priorityTier: 5,
+      critical: false,
+      timeoutMs: 1800,
+    },
+    {
+      key: keys.collegeTeams,
+      url: "/api/college/teams",
+      ttlMs: CACHE_TTL_MS.college,
+      priorityTier: 5,
+      critical: false,
+      timeoutMs: 1800,
+    },
+    {
+      key: keys.collegeExperts,
+      url: "/api/offseason/draft/experts",
+      ttlMs: CACHE_TTL_MS.college,
+      priorityTier: 5,
+      critical: false,
+      timeoutMs: 1800,
     },
   ];
 }
@@ -229,6 +368,7 @@ export {
   CACHE_EVENT_TYPES,
   CACHE_TTL_MS,
   normalizeTeamId,
+  resolveTrainingRange,
   buildCacheKeys,
   getEventMatrix,
   invalidateByEvent,

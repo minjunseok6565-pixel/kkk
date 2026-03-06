@@ -7,7 +7,7 @@ import { escapeHtml } from "../../core/guards.js";
 const COLLEGE_SCOUTING_TTL_MS = CACHE_TTL_MS.college;
 
 function getCollegeScoutingCachePrefix(teamId) {
-  return `college:scouting:team=${String(teamId || "")}`;
+  return `college:scouting:team=${String(teamId || "").toUpperCase()}`;
 }
 
 function invalidateCollegeScoutingCache(teamId = state.selectedTeamId) {
@@ -131,19 +131,19 @@ function renderScoutingReportInbox() {
 }
 
 async function loadCollegeScouting({ force = false } = {}) {
-  const teamId = String(state.selectedTeamId || "");
+  const teamId = String(state.selectedTeamId || "").toUpperCase();
   if (!teamId) return;
   const [scoutsPayload, reportsPayload] = await Promise.all([
     fetchCachedJson({
       key: getCollegeScoutingScoutsCacheKey(teamId),
-      url: `/api/scouting/scouts/${encodeURIComponent(teamId)}`,
+      url: `/api/scouting/scouts?team_id=${encodeURIComponent(teamId)}`,
       ttlMs: COLLEGE_SCOUTING_TTL_MS,
       staleWhileRevalidate: true,
       force,
     }),
     fetchCachedJson({
       key: getCollegeScoutingReportsCacheKey(teamId),
-      url: `/api/scouting/reports?team_id=${encodeURIComponent(teamId)}&limit=50`,
+      url: `/api/scouting/reports?team_id=${encodeURIComponent(teamId)}&status=all`,
       ttlMs: COLLEGE_SCOUTING_TTL_MS,
       staleWhileRevalidate: true,
       force,
