@@ -58,6 +58,28 @@ def test_build_trade_block_row_sets_numeric_defaults() -> None:
     assert row["listing"]["listed_by"] == "USER"
 
 
+def test_build_trade_block_row_handles_none_player_stats_payload() -> None:
+    listing = {
+        "player_id": "P1",
+        "team_id": "GSW",
+        "status": "active",
+        "visibility": "public",
+    }
+
+    row = trades._build_trade_block_row(
+        listing,
+        player_snapshots={"P1": {"name": "Player One", "overall": 81}},
+        workflow_state={"player_stats": {"P1": None}},
+    )
+
+    assert row["player_id"] == "P1"
+    assert row["name"] == "Player One"
+    assert row["pts"] == 0
+    assert row["ast"] == 0
+    assert row["reb"] == 0
+    assert row["three_pm"] == 0
+
+
 def test_apply_trade_block_visibility_filter() -> None:
     rows = [
         {"player_id": "P1", "visibility": "PUBLIC"},
