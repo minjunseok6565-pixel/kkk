@@ -210,15 +210,218 @@
 
 ---
 
-## 6) 구현 단계 (권장 순서)
+## 6) 구현 단계 (권장 순서 + 수정 파일 명시)
 
-1. **UI 골격**: HTML 탭/패널/모달 + dom.js/state.js 필드 추가
-2. **Inbox 탭 동작**: load, group render, open/reject 액션
-3. **딜 에디터 최소 기능**: 선수 자산만으로 commit round-trip
-4. **자산 확장**: pick/swap/fixed_asset + pick protection 편집기
-5. **협상 고도화**: counter 표시/반영, idempotent 응답 처리
-6. **실거래 반영**: accepted 시 submit-committed 연동
-7. **에러/토스트/로딩 UX 정리**
+아래 순서를 그대로 따르면, 본 문서에서 수정 대상으로 언급한 파일(`static/NBA.html`, `static/js/app/dom.js`, `static/js/app/state.js`)은 물론 실제 동작 구현에 필요한 화면/이벤트/API 파일까지 한 번에 완료할 수 있다.
+
+### 6.1 1단계 — 마크업 뼈대 추가
+
+**수정 파일**
+
+- `static/NBA.html`
+
+**작업 내용**
+
+1. market subtab 영역에 `제안/협상` 버튼 추가
+2. market 콘텐츠 영역에 `market-panel-trade-inbox` 패널 추가
+3. 공통 딜 에디터 컨테이너(`market-trade-deal-modal`) 추가
+   - 헤더(세션/상대팀/만료일)
+   - 좌/중/우 3단 레이아웃(자산풀/legs/협상상태)
+   - 하단 액션(`제출`, `취소`, `거절`)
+
+**완료 기준(DoD)**
+
+- DOM id가 이후 JS에서 참조 가능한 고정 id로 정의되어 있음
+- 기존 `FA`, `트레이드 블록` 탭의 동작/레이아웃이 깨지지 않음
+
+### 6.2 2단계 — DOM 레퍼런스 및 상태 스키마 확장
+
+**수정 파일**
+
+- `static/js/app/dom.js`
+- `static/js/app/state.js`
+
+**작업 내용**
+
+1. `dom.js`
+   - `marketSubtabTradeInbox`, `marketPanelTradeInbox`
+   - inbox group/list/empty/loading 영역
+   - deal editor modal 및 내부 주요 영역 refs
+2. `state.js`
+   - `marketTradeInboxRows`, `marketTradeInboxGrouped`, `marketTradeInboxLoading`
+   - `marketTradeActiveSession`, `marketTradeDealDraft`, `marketTradeAssetPool`, `marketTradeUi`
+   - 초기화 함수/리셋 함수(탭 전환/모달 닫기 시)까지 함께 정의
+
+**완료 기준(DoD)**
+
+- `dom.js`에서 신규 id 조회 시 null 예외를 안전하게 처리
+- `state.js`의 초기 상태만으로 inbox/딜에디터 렌더 함수가 빈 화면이라도 오류 없이 실행됨
+
+### 6.3 3단계 — 시장 탭 라우팅 연결(제안/협상 탭 진입)
+
+**수정 파일**
+
+- `static/js/features/market/marketScreen.js`
+- (필요 시) `static/js/app/events.js`
+
+**작업 내용**
+
+1. subtab 전환 로직에 `제안/협상` 분기 추가
+2. `제안/협상` 탭 진입 시 inbox 로드 트리거 연결
+3. 탭 재진입 캐시 정책(강제 새로고침 vs TTL 캐시) 결정 후 반영
+
+**완료 기준(DoD)**
+
+- `제안/협상` 탭 클릭 시 올바른 panel만 활성화됨
+- 최초 진입/재진입 시 로딩 상태와 빈 상태가 정상 표시됨
+
+### 6.4 4단계 — Inbox API 연동 및 그룹 렌더
+
+**수정 파일**
+
+- `static/js/features/market/marketScreen.js`
+- `static/js/core/api.js` (필요 시 협상 API wrapper 추가)
+
+**작업 내용**
+
+1. `GET /api/trade/negotiation/inbox` 호출 함수 추가
+2. 결과를 `other_team_id` 기준으로 그룹화 + `updated_at desc` 정렬
+3. 각 row에 액션 버튼 바인딩
+   - `협상` → open
+   - `거절` → reject
+
+**완료 기준(DoD)**
+
+- 응답 데이터 0건/1건/다건에서 모두 렌더 형태가 안정적
+- 같은 상대팀의 제안은 한 그룹 아래 묶여 노출됨
+
+### 6.5 5단계 — 협상 열기/거절 액션 연결
+
+**수정 파일**
+
+- `static/js/features/market/marketScreen.js`
+- `static/js/core/api.js`
+
+**작업 내용**
+
+1. `POST /api/trade/negotiation/open`
+   - base draft 우선순위(`draft_deal` > `last_offer` > 빈 deal) 구현
+2. `POST /api/trade/negotiation/reject`
+   - 성공 시 row 즉시 제거(optimistic), 실패 시 롤백
+
+**완료 기준(DoD)**
+
+- open 성공 시 딜 에디터가 session 컨텍스트로 정상 오픈
+- reject 성공/실패 케이스에서 UI 상태가 꼬이지 않음
+
+### 6.6 6단계 — 트레이드 블록에서 협상 시작 연동
+
+**수정 파일**
+
+- `static/js/features/market/marketScreen.js`
+- `static/NBA.html` (트레이드 블록 row 버튼 id/class 정비가 필요할 경우)
+
+**작업 내용**
+
+1. 트레이드 블록 row의 `제안` 버튼 핸들러 연결
+2. `POST /api/trade/negotiation/start` 호출
+3. 시작 직후 딜 에디터 진입 + 선택 선수 prefill(옵션)
+
+**완료 기준(DoD)**
+
+- 어떤 선수 row에서 시작해도 `user_team_id/other_team_id`가 올바르게 세팅됨
+- start 성공 직후 바로 제안 편집이 가능함
+
+### 6.7 7단계 — 공통 딜 에디터 최소 기능(선수 자산 먼저)
+
+**수정 파일**
+
+- `static/js/features/market/marketScreen.js`
+- `static/js/core/format.js` (표시용 포맷터가 필요할 경우)
+
+**작업 내용**
+
+1. 선수 자산 선택/해제 → 팀별 legs 반영
+2. 중복 자산 방지 + 최소 1개 자산 검증
+3. `POST /api/trade/negotiation/commit` round-trip 연결
+
+**완료 기준(DoD)**
+
+- 선수만 포함한 딜 제출이 성공/실패 모두 처리됨
+- 에러 응답이 사용자 메시지로 변환되어 표시됨
+
+### 6.8 8단계 — 자산 확장(pick/swap/fixed_asset + protection)
+
+**수정 파일**
+
+- `static/js/features/market/marketScreen.js`
+- `static/js/core/api.js` (state summary 접근 보조 함수 필요 시)
+
+**작업 내용**
+
+1. `/api/state/summary` 기반 자산 풀 파싱
+   - `draft_picks`, `swap_rights`, `fixed_assets` owner_team 필터
+2. 자산 직렬화 규칙 반영
+   - `pick.protection` 편집기 포함
+3. 보호조건 포맷 사전 검증 추가
+
+**완료 기준(DoD)**
+
+- `player/pick/swap/fixed_asset` 4종이 모두 legs에 들어가 commit 가능
+- protection 입력 오류 시 서버 호출 전 프론트에서 즉시 피드백
+
+### 6.9 9단계 — accepted 후 실제 트레이드 반영 파이프라인
+
+**수정 파일**
+
+- `static/js/features/market/marketScreen.js`
+- `static/js/core/api.js`
+
+**작업 내용**
+
+1. commit 응답에서 `accepted`, `deal_id` 분기 처리
+2. `accepted=true`이면 `POST /api/trade/submit-committed` 연동
+3. 성공 후 시장/로스터 관련 캐시 무효화 + 재조회
+
+**완료 기준(DoD)**
+
+- accepted 케이스에서 실제 로스터/자산 변화가 화면에 반영됨
+- accepted=false 카운터/거절 응답에서도 세션이 유지되고 재제안 가능
+
+### 6.10 10단계 — UX 마감(로딩/토스트/오류코드 매핑)
+
+**수정 파일**
+
+- `static/js/features/market/marketScreen.js`
+- `static/css/screens/market.css` (필요 시 딜 에디터/inbox 스타일)
+
+**작업 내용**
+
+1. pending 상태(버튼 disable, 스피너, 중복 제출 방지) 통일
+2. 오류코드별 사용자 메시지 매핑
+   - `PICK_NOT_OWNED`, `PROTECTION_CONFLICT`, `SWAP_INVALID` 등
+3. 토스트/인라인 에러 표시 정책 통일
+
+**완료 기준(DoD)**
+
+- 네트워크 지연/실패/비즈니스 오류에서 사용자에게 다음 행동이 명확히 보임
+- 동일 요청 연타 시 idempotent하게 UI가 유지됨
+
+### 6.11 단계 종료 시 파일별 체크아웃 리스트
+
+각 단계가 끝날 때 아래 파일들의 누락 여부를 반드시 확인한다.
+
+- 필수(본 문서에서 명시된 핵심 파일)
+  - `static/NBA.html`
+  - `static/js/app/dom.js`
+  - `static/js/app/state.js`
+- 기능 구현 필수(실제 동작)
+  - `static/js/features/market/marketScreen.js`
+  - `static/js/core/api.js`
+- 필요 시 보조
+  - `static/css/screens/market.css`
+  - `static/js/app/events.js`
+  - `static/js/core/format.js`
 
 ---
 
