@@ -51,6 +51,79 @@ async function fetchJson(url, options = {}) {
   return data;
 }
 
+async function fetchTradeNegotiationInbox({ teamId, status = "ACTIVE", phase = "OPEN" } = {}) {
+  const normalizedTeamId = String(teamId || "").trim();
+  if (!normalizedTeamId) throw new Error("team_id가 필요합니다.");
+  const params = new URLSearchParams({
+    team_id: normalizedTeamId,
+    status: String(status || "ACTIVE"),
+    phase: String(phase || "OPEN"),
+  });
+  return fetchJson(`/api/trade/negotiation/inbox?${params.toString()}`);
+}
+
+async function openTradeNegotiationSession({ sessionId, teamId } = {}) {
+  if (!sessionId) throw new Error("session_id가 필요합니다.");
+  if (!teamId) throw new Error("team_id가 필요합니다.");
+  return fetchJson("/api/trade/negotiation/open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, team_id: teamId }),
+  });
+}
+
+async function rejectTradeNegotiationSession({ sessionId, teamId, reason = "USER_REJECT" } = {}) {
+  if (!sessionId) throw new Error("session_id가 필요합니다.");
+  if (!teamId) throw new Error("team_id가 필요합니다.");
+  return fetchJson("/api/trade/negotiation/reject", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, team_id: teamId, reason }),
+  });
+}
+
+async function startTradeNegotiationSession({ userTeamId, otherTeamId, defaultOfferPrivacy = "PRIVATE" } = {}) {
+  if (!userTeamId) throw new Error("user_team_id가 필요합니다.");
+  if (!otherTeamId) throw new Error("other_team_id가 필요합니다.");
+  return fetchJson("/api/trade/negotiation/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_team_id: userTeamId,
+      other_team_id: otherTeamId,
+      default_offer_privacy: defaultOfferPrivacy,
+    }),
+  });
+}
+
+async function commitTradeNegotiationSession({ sessionId, deal, offerPrivacy = "PRIVATE", exposeToMedia = false } = {}) {
+  if (!sessionId) throw new Error("session_id가 필요합니다.");
+  if (!deal || typeof deal !== "object") throw new Error("deal payload가 필요합니다.");
+  return fetchJson("/api/trade/negotiation/commit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: sessionId,
+      deal,
+      offer_privacy: offerPrivacy,
+      expose_to_media: !!exposeToMedia,
+    }),
+  });
+}
+
+async function submitCommittedTradeDeal({ dealId, force = true } = {}) {
+  if (!dealId) throw new Error("deal_id가 필요합니다.");
+  return fetchJson("/api/trade/submit-committed", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deal_id: dealId, force: !!force }),
+  });
+}
+
+async function fetchStateSummary() {
+  return fetchJson("/api/state/summary");
+}
+
 function normalizeCacheKey(key) {
   return String(key || "").trim();
 }
@@ -404,6 +477,13 @@ function showConfirmModal({ title, body, okLabel = "확인", cancelLabel = "취�
 
 export {
   fetchJson,
+  fetchTradeNegotiationInbox,
+  startTradeNegotiationSession,
+  openTradeNegotiationSession,
+  rejectTradeNegotiationSession,
+  commitTradeNegotiationSession,
+  submitCommittedTradeDeal,
+  fetchStateSummary,
   fetchCachedJson,
   getCachedValue,
   setCachedValue,
