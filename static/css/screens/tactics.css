@@ -357,3 +357,9 @@
 }
 
 #tactics-screen .tactics-roster-meta { color: #64748b; font-size: 0.78rem; }
+
+#tactics-screen .tactics-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}

@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from state_modules.state_constants import DEFAULT_TRADE_RULES, _DEFAULT_TRADE_MARKET, _DEFAULT_TRADE_MEMORY
 
-STATE_SCHEMA_VERSION = "4.2"
+STATE_SCHEMA_VERSION = "4.3"
 ALLOWED_PHASES = {"regular", "preseason", "play_in", "playoffs"}
 NON_REGULAR_PHASES = {"preseason", "play_in", "playoffs"}
 ALLOWED_TOP_LEVEL_KEYS = {
@@ -21,6 +21,8 @@ ALLOWED_TOP_LEVEL_KEYS = {
     "cached_views",
     "league",
     "ui_cache",
+    "team_tactics",
+    "standings_cache",
     "trade_agreements",
     "negotiations",
     "asset_locks",
@@ -28,6 +30,31 @@ ALLOWED_TOP_LEVEL_KEYS = {
     "trade_memory",
     "postseason",
     "_migrations",
+}
+
+ALLOWED_STANDINGS_CACHE_KEYS = {
+    "version",
+    "built_from",
+    "applied_game_ids",
+    "records_by_team",
+}
+ALLOWED_STANDINGS_BUILT_FROM_KEYS = {"season_id", "regular_final_count"}
+ALLOWED_STANDINGS_RECORD_KEYS = {
+    "wins",
+    "losses",
+    "pf",
+    "pa",
+    "home_wins",
+    "home_losses",
+    "away_wins",
+    "away_losses",
+    "div_wins",
+    "div_losses",
+    "conf_wins",
+    "conf_losses",
+    "recent10",
+    "streak_type",
+    "streak_len",
 }
 
 # UI-only read model cache. Never treat this as authoritative SSOT.
@@ -166,6 +193,16 @@ def create_default_game_state() -> Dict[str, Any]:
             "teams": {},  # UI용 팀 성향 / 메타(권위 없음)
             "players": {},  # UI용 선수 메타(권위 없음)
         },
+        "team_tactics": {},  # team_id -> {tactics: {...}, updated_at_turn: int}
+        "standings_cache": {
+            "version": 1,
+            "built_from": {
+                "season_id": None,
+                "regular_final_count": 0,
+            },
+            "applied_game_ids": {},
+            "records_by_team": {},
+        },
         "trade_agreements": {},  # deal_id -> committed deal data
         "negotiations": {},  # session_id -> negotiation sessions
         "asset_locks": {},  # asset_key -> {deal_id, expires_at}
@@ -262,6 +299,8 @@ def validate_game_state(state: dict) -> None:
     postseason = _require_container(state, "postseason", dict, "dict")
     league = _require_container(state, "league", dict, "dict")
     ui_cache = _require_container(state, "ui_cache", dict, "dict")
+    _require_container(state, "team_tactics", dict, "dict")
+    standings_cache = _require_container(state, "standings_cache", dict, "dict")
     _require_container(state, "trade_agreements", dict, "dict")
     _require_container(state, "negotiations", dict, "dict")
     _require_container(state, "asset_locks", dict, "dict")
@@ -279,6 +318,46 @@ def validate_game_state(state: dict) -> None:
         raise ValueError("GameState invalid: ui_cache.teams must be dict")
     if not isinstance(ui_cache.get("players"), dict):
         raise ValueError("GameState invalid: ui_cache.players must be dict")
+
+    _require_exact_keys(standings_cache, ALLOWED_STANDINGS_CACHE_KEYS, "standings_cache")
+    if not isinstance(standings_cache.get("version"), int):
+        raise ValueError("GameState invalid: standings_cache.version must be int")
+    built_from = _require_nested_container(standings_cache, "built_from", dict, "dict")
+    _require_exact_keys(built_from, ALLOWED_STANDINGS_BUILT_FROM_KEYS, "standings_cache.built_from")
+    built_season_id = built_from.get("season_id")
+    if built_season_id is not None and not isinstance(built_season_id, str):
+        raise ValueError("GameState invalid: standings_cache.built_from.season_id must be str or None")
+    if not isinstance(built_from.get("regular_final_count"), int):
+        raise ValueError("GameState invalid: standings_cache.built_from.regular_final_count must be int")
+    applied_game_ids = standings_cache.get("applied_game_ids")
+    if not isinstance(applied_game_ids, dict):
+        raise ValueError("GameState invalid: standings_cache.applied_game_ids must be dict")
+    for gid, applied in applied_game_ids.items():
+        if not isinstance(gid, str):
+            raise ValueError("GameState invalid: standings_cache.applied_game_ids keys must be str")
+        if not isinstance(applied, bool):
+            raise ValueError("GameState invalid: standings_cache.applied_game_ids values must be bool")
+
+    records_by_team = standings_cache.get("records_by_team")
+    if not isinstance(records_by_team, dict):
+        raise ValueError("GameState invalid: standings_cache.records_by_team must be dict")
+    for tid, rec in records_by_team.items():
+        if not isinstance(tid, str):
+            raise ValueError("GameState invalid: standings_cache.records_by_team keys must be str")
+        if not isinstance(rec, dict):
+            raise ValueError("GameState invalid: standings_cache.records_by_team values must be dict")
+        _require_exact_keys(rec, ALLOWED_STANDINGS_RECORD_KEYS, f"standings_cache.records_by_team.{tid}")
+        for key in ALLOWED_STANDINGS_RECORD_KEYS - {"recent10", "streak_type"}:
+            if not isinstance(rec.get(key), int):
+                raise ValueError(f"GameState invalid: standings_cache.records_by_team.{tid}.{key} must be int")
+        if not isinstance(rec.get("streak_type"), str):
+            raise ValueError(f"GameState invalid: standings_cache.records_by_team.{tid}.streak_type must be str")
+        recent10 = rec.get("recent10")
+        if not isinstance(recent10, list):
+            raise ValueError(f"GameState invalid: standings_cache.records_by_team.{tid}.recent10 must be list")
+        for v in recent10:
+            if not isinstance(v, int):
+                raise ValueError(f"GameState invalid: standings_cache.records_by_team.{tid}.recent10 values must be int")
 
     _require_exact_keys(phase_results, NON_REGULAR_PHASES, "phase_results")
     for phase_key in NON_REGULAR_PHASES:

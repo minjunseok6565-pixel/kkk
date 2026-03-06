@@ -1,7 +1,10 @@
 import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
-import { fetchJson } from "../../core/api.js";
+import { fetchCachedJson } from "../../core/api.js";
 import { escapeHtml } from "../../core/guards.js";
+
+const COLLEGE_LEADERS_LIMIT = 50;
+const COLLEGE_LEADERS_TTL_MS = 15000;
 
 function parseSummaryTags(summary) {
   const raw = String(summary || "");
@@ -57,9 +60,18 @@ function collegeStat(player, key) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function getCollegeLeadersCacheKey(sort) {
+  return `college:leaders:sort=${String(sort || "pts")}:limit=${COLLEGE_LEADERS_LIMIT}`;
+}
+
 async function loadCollegeLeaders() {
   const sort = state.collegeLeadersSort || "pts";
-  const payload = await fetchJson(`/api/college/players?sort=${encodeURIComponent(sort)}&order=desc&limit=100`);
+  const payload = await fetchCachedJson({
+    key: getCollegeLeadersCacheKey(sort),
+    url: `/api/college/players?sort=${encodeURIComponent(sort)}&order=desc&limit=${COLLEGE_LEADERS_LIMIT}`,
+    ttlMs: COLLEGE_LEADERS_TTL_MS,
+    staleWhileRevalidate: true,
+  });
   const allPlayers = payload?.players || [];
 
   const allPos = ["ALL", ...new Set(allPlayers.map((p) => String(p?.pos || "-").toUpperCase()))];
@@ -82,9 +94,11 @@ async function loadCollegeLeaders() {
     return posOk && teamOk;
   });
 
-  if (!state.selectedCollegeLeaderPlayerId && players[0]?.player_id) {
-    state.selectedCollegeLeaderPlayerId = players[0].player_id;
+  const hasSelectedPlayer = players.some((p) => p?.player_id && p.player_id === state.selectedCollegeLeaderPlayerId);
+  if (!hasSelectedPlayer) {
+    state.selectedCollegeLeaderPlayerId = players[0]?.player_id || null;
   }
+
   let selectedPlayer = null;
   els.collegeLeadersBody.innerHTML = players.length ? players.map((p, idx) => {
     const selected = state.selectedCollegeLeaderPlayerId === p?.player_id;

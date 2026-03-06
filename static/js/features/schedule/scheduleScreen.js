@@ -1,9 +1,12 @@
 import { els } from "../../app/dom.js";
 import { state } from "../../app/state.js";
 import { activateScreen } from "../../app/router.js";
-import { fetchJson, setLoading } from "../../core/api.js";
+import { fetchCachedJson, getCachedValue, setLoading } from "../../core/api.js";
 import { TEAM_FULL_NAMES, getScheduleVenueText, renderTeamLogoMark } from "../../core/constants/teams.js";
 import { formatLeader } from "../main/homeWidgets.js";
+
+const SCHEDULE_CACHE_TTL_MS = 12000;
+let scheduleRequestSeq = 0;
 
 function isCompletedGame(game) {
   return game?.home_score != null && game?.away_score != null;
@@ -53,25 +56,58 @@ function renderScheduleTables(games) {
     : renderEmptyScheduleRow(3, "예정된 경기가 없습니다.");
 }
 
+function scheduleCacheKey(teamId) {
+  return `schedule:${String(teamId || "").toUpperCase()}`;
+}
+
+function renderScheduleScreen(schedule, teamId) {
+  const normalizedTeamId = String(teamId || state.selectedTeamId || "").toUpperCase();
+  const teamName = state.selectedTeamName || TEAM_FULL_NAMES[normalizedTeamId] || normalizedTeamId;
+  els.scheduleTitle.textContent = `${teamName} 정규 시즌 일정`;
+  renderScheduleTables(schedule?.games || []);
+  activateScreen(els.scheduleScreen);
+}
+
 async function showScheduleScreen() {
   if (!state.selectedTeamId) {
     alert("먼저 팀을 선택해주세요.");
     return;
   }
 
-  setLoading(true, "스케줄 정보를 불러오는 중...");
+  const teamId = String(state.selectedTeamId || "").toUpperCase();
+  const url = `/api/team-schedule/${encodeURIComponent(teamId)}`;
+  const cacheKey = scheduleCacheKey(teamId);
+  const requestSeq = scheduleRequestSeq + 1;
+  scheduleRequestSeq = requestSeq;
+  const cached = getCachedValue(cacheKey);
+
+  if (!cached) {
+    setLoading(true, "스케줄 정보를 불러오는 중...");
+  }
+
   try {
-    const schedule = await fetchJson(`/api/team-schedule/${encodeURIComponent(state.selectedTeamId)}`);
-    const teamName = state.selectedTeamName || TEAM_FULL_NAMES[state.selectedTeamId] || state.selectedTeamId;
-    els.scheduleTitle.textContent = `${teamName} 정규 시즌 일정`;
-    renderScheduleTables(schedule?.games || []);
-    activateScreen(els.scheduleScreen);
+    const schedule = await fetchCachedJson({
+      key: cacheKey,
+      url,
+      ttlMs: SCHEDULE_CACHE_TTL_MS,
+      staleWhileRevalidate: true,
+      onRevalidated: (freshSchedule) => {
+        const isSameTeam = String(state.selectedTeamId || "").toUpperCase() === teamId;
+        if (!isSameTeam) return;
+        if (!els.scheduleScreen?.classList?.contains("active")) return;
+        renderScheduleScreen(freshSchedule, teamId);
+      },
+    });
+
+    if (requestSeq !== scheduleRequestSeq) return;
+    renderScheduleScreen(schedule, teamId);
   } catch (e) {
+    if (requestSeq !== scheduleRequestSeq) return;
     els.scheduleCompletedBody.innerHTML = renderEmptyScheduleRow(7, `스케줄 로딩 실패: ${e.message}`);
     els.scheduleUpcomingBody.innerHTML = renderEmptyScheduleRow(3, "-");
     activateScreen(els.scheduleScreen);
   } finally {
-    setLoading(false);
+    if (requestSeq === scheduleRequestSeq) setLoading(false);
   }
 }
 

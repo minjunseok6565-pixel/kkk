@@ -4,6 +4,8 @@ import json
 import os
 import sqlite3
 import hashlib
+import math
+import re
 from datetime import date, timedelta
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -15,7 +17,14 @@ from league_repo import LeagueRepo
 from schema import normalize_player_id, normalize_team_id
 import state
 from analytics.stats.leaders import compute_leaderboards
-from team_utils import get_conference_standings, get_conference_standings_table, get_team_cards, get_team_detail
+from team_utils import (
+    get_conference_standings,
+    get_conference_standings_home_light,
+    get_conference_standings_table,
+    get_team_cards,
+    get_team_detail,
+    get_team_summary_light,
+)
 
 router = APIRouter()
 
@@ -73,6 +82,527 @@ def _pick_leader(rows: List[Dict[str, Any]], stat_keys: List[str]) -> Optional[D
                 "value": int(value),
             }
     return best
+
+
+def _to_int_or_none(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _clock_mmss_to_sec(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    if ":" not in raw:
+        return _to_int_or_none(raw)
+    mmss = raw.split(":", 1)
+    if len(mmss) != 2:
+        return None
+    mm = _to_int_or_none(mmss[0])
+    ss = _to_int_or_none(mmss[1])
+    if mm is None or ss is None:
+        return None
+    if mm < 0 or ss < 0:
+        return None
+    return int(mm * 60 + ss)
+
+
+def _build_game_flow_series(
+    replay_events: List[Dict[str, Any]],
+    *,
+    home_final: int,
+    away_final: int,
+    overtime_periods: int,
+) -> List[Dict[str, int]]:
+    if not replay_events:
+        return []
+
+    rows: List[tuple[int, int, int, int]] = []
+    for ev in replay_events:
+        if not isinstance(ev, dict):
+            continue
+        seq = _to_int_or_none(ev.get("seq")) or 0
+        t = _to_int_or_none(ev.get("game_elapsed_sec"))
+        if t is None:
+            q = _to_int_or_none(ev.get("quarter"))
+            clock_left = _clock_mmss_to_sec(ev.get("clock_sec"))
+            if q is not None and clock_left is not None:
+                if q <= 4:
+                    t = max(0, (q - 1) * 720 + (720 - clock_left))
+                else:
+                    t = max(0, 2880 + (q - 5) * 300 + (300 - clock_left))
+        hs = _to_int_or_none(ev.get("score_home"))
+        as_ = _to_int_or_none(ev.get("score_away"))
+        if t is None or hs is None or as_ is None:
+            continue
+        rows.append((t, seq, hs, as_))
+
+    if not rows:
+        return []
+
+    rows.sort(key=lambda x: (x[0], x[1]))
+
+    collapsed: Dict[int, tuple[int, int]] = {}
+    for t, _seq, hs, as_ in rows:
+        collapsed[t] = (hs, as_)
+
+    out: List[Dict[str, int]] = []
+    if 0 not in collapsed:
+        out.append({"t": 0, "home_score": 0, "away_score": 0})
+
+    for t in sorted(collapsed.keys()):
+        hs, as_ = collapsed[t]
+        out.append({"t": int(t), "home_score": int(hs), "away_score": int(as_)})
+
+    total_sec = int(2880 + max(0, int(overtime_periods or 0)) * 300)
+    if not out or out[-1]["t"] < total_sec or out[-1]["home_score"] != home_final or out[-1]["away_score"] != away_final:
+        out.append(
+            {
+                "t": total_sec,
+                "home_score": int(home_final),
+                "away_score": int(away_final),
+            }
+        )
+    return out
+
+
+def _build_win_probability_series(
+    game_flow_series: List[Dict[str, int]],
+    *,
+    overtime_periods: int,
+    pre_game_strength_gap: float,
+) -> List[Dict[str, float]]:
+    if not game_flow_series:
+        return []
+
+    total_sec = float(2880 + max(0, int(overtime_periods or 0)) * 300)
+    if total_sec <= 0:
+        total_sec = 2880.0
+
+    out: List[Dict[str, float]] = []
+    for p in game_flow_series:
+        t = float(p.get("t") or 0)
+        home_score = int(p.get("home_score") or 0)
+        away_score = int(p.get("away_score") or 0)
+        score_diff = float(home_score - away_score)
+        progress = max(0.0, min(1.0, t / total_sec))
+        z = (0.055 * score_diff) + (1.6 * (1.0 - progress) * float(pre_game_strength_gap))
+        home_prob = 1.0 / (1.0 + math.exp(-z))
+        home_prob = max(0.0, min(1.0, home_prob))
+        away_prob = 1.0 - home_prob
+        out.append(
+            {
+                "t": int(t),
+                "home": round(home_prob, 4),
+                "away": round(away_prob, 4),
+            }
+        )
+    return out
+
+
+
+
+def _player_name_lookup(players: List[Dict[str, Any]]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for p in players:
+        if not isinstance(p, dict):
+            continue
+        pid = str(p.get("PlayerID") or "").strip()
+        name = str(p.get("Name") or p.get("player_name") or "").strip()
+        if pid and name:
+            out[pid] = name
+    return out
+
+
+def _clock_sort_key_desc(clock: Any) -> int:
+    sec = _clock_mmss_to_sec(clock)
+    return int(sec) if sec is not None else -1
+
+
+def _normalize_pbp_event_key(ev: Dict[str, Any]) -> str:
+    et = str(ev.get("event_type") or "").upper()
+    outcome = str(ev.get("outcome") or "").upper()
+    points = _to_int_or_none(ev.get("points"))
+
+    if et == "SCORE":
+        if points == 1 or "FT" in outcome:
+            return "free_throw_made"
+        if points == 3 or "_3" in outcome:
+            return "made_3pt"
+        return "made_2pt"
+    if et == "MISS":
+        if "FT" in outcome:
+            return "free_throw_miss"
+        return "missed_fg"
+    if et == "REB":
+        return "rebound"
+    if et == "TURNOVER":
+        return "turnover"
+    if et in {"FOUL_NO_SHOTS", "FOUL_FT", "OFFENSIVE_FOUL"}:
+        return "foul"
+    if et == "TIMEOUT":
+        return "timeout"
+    if et == "SUBSTITUTION":
+        return "substitution"
+    if et == "PERIOD_START":
+        return "period_start"
+    if et == "PERIOD_END":
+        return "period_end"
+    return "play"
+
+
+def _pbp_title_and_tags(event_key: str) -> tuple[str, List[str]]:
+    if event_key == "made_2pt":
+        return "Made 2PT", ["scoring"]
+    if event_key == "made_3pt":
+        return "Made 3PT", ["scoring"]
+    if event_key == "free_throw_made":
+        return "+1 Point", ["scoring", "free_throw"]
+    if event_key in {"missed_fg", "free_throw_miss"}:
+        return "Missed FG" if event_key == "missed_fg" else "Missed FT", ["miss"]
+    if event_key == "rebound":
+        return "Rebound", ["rebound"]
+    if event_key == "turnover":
+        return "Turnover", ["turnover"]
+    if event_key == "foul":
+        return "Foul", ["foul"]
+    if event_key == "timeout":
+        return "Timeout", ["timeout"]
+    if event_key == "substitution":
+        return "Substitution", ["substitution"]
+    if event_key == "period_start":
+        return "Start of Period", ["period"]
+    if event_key == "period_end":
+        return "End of Period", ["period"]
+    return "Play", ["misc"]
+
+
+def _player_name_from_event(ev: Dict[str, Any], player_name_by_id: Dict[str, str]) -> str:
+    for key in ("player_name", "name"):
+        if ev.get(key):
+            return str(ev.get(key))
+    for key in ("pid", "player_id", "shooter_pid", "fouler_pid", "stealer_pid", "blocker_pid"):
+        pid = str(ev.get(key) or "").strip()
+        if pid and pid in player_name_by_id:
+            return player_name_by_id[pid]
+    return ""
+
+
+def _humanize_rebound_outcome(outcome: str) -> str:
+    normalized = outcome.strip().upper()
+    if not normalized:
+        return "rebound"
+    if normalized in {"ORB", "OREB", "OFF_REB", "OFFENSIVE_REBOUND"}:
+        return "offensive rebound"
+    if normalized in {"DRB", "DREB", "DEF_REB", "DEFENSIVE_REBOUND"}:
+        return "defensive rebound"
+    if "OFF" in normalized and "REB" in normalized:
+        return "offensive rebound"
+    if "DEF" in normalized and "REB" in normalized:
+        return "defensive rebound"
+    return "rebound"
+
+
+def _humanize_shot_outcome(outcome: str, points: Optional[int], *, is_miss: bool = False) -> str:
+    normalized = outcome.strip().upper()
+    if not normalized:
+        if points == 3:
+            return "three-point shot"
+        if points == 1:
+            return "free throw"
+        return "shot"
+
+    if "FT" in normalized or "FREE_THROW" in normalized:
+        return "free throw"
+
+    if not normalized.startswith("SHOT_"):
+        words = re.sub(r"[_\s]+", " ", normalized).strip().lower()
+        if words:
+            return words
+        return "shot"
+
+    tokens = [tok for tok in normalized.split("_") if tok]
+    zone = ""
+    style = ""
+
+    if "3" in tokens or "3PT" in tokens:
+        zone = "three-point"
+    elif "MID" in tokens or "MIDRANGE" in tokens:
+        zone = "mid-range"
+    elif any(tok in tokens for tok in ("RIM", "PAINT", "RESTRICTED")):
+        zone = "at-the-rim"
+
+    if "CS" in tokens:
+        style = "catch-and-shoot jumper"
+    elif "PU" in tokens:
+        style = "pull-up jumper"
+    elif "OD" in tokens:
+        style = "off-the-dribble jumper"
+    elif any(tok in tokens for tok in ("STEPBACK", "SB")):
+        style = "step-back jumper"
+    elif any(tok in tokens for tok in ("FADE", "FD", "FADEAWAY")):
+        style = "fadeaway jumper"
+    elif "HOOK" in tokens:
+        style = "hook shot"
+    elif any(tok in tokens for tok in ("LAY", "LAYUP")):
+        style = "layup"
+    elif "DUNK" in tokens:
+        style = "dunk"
+    elif "TIP" in tokens:
+        style = "tip-in"
+    elif "BANK" in tokens:
+        style = "bank shot"
+
+    if zone == "three-point":
+        if style:
+            return f"three-point {style}"
+        return "three-pointer"
+    if zone == "mid-range":
+        if style:
+            return f"mid-range {style}"
+        return "mid-range jumper"
+    if zone == "at-the-rim":
+        if style:
+            return f"{style} at the rim"
+        return "attempt at the rim"
+
+    if style:
+        return style
+    if points == 3:
+        return "three-point shot"
+    if points == 2 and is_miss:
+        return "field-goal attempt"
+    return "shot"
+
+
+def _humanize_turnover_outcome(outcome: str) -> str:
+    normalized = outcome.strip().upper()
+    if not normalized:
+        return "turnover"
+
+    mapping = {
+        "BAD_PASS": "bad pass",
+        "TRAVEL": "traveling",
+        "TRAVELING": "traveling",
+        "DOUBLE_DRIBBLE": "double dribble",
+        "3SEC": "three-second violation",
+        "5SEC": "five-second violation",
+        "8SEC": "eight-second violation",
+        "SHOT_CLOCK": "shot-clock violation",
+        "OFFENSIVE_FOUL": "offensive foul",
+        "OUT_OF_BOUNDS": "out-of-bounds turnover",
+    }
+    if normalized in mapping:
+        return mapping[normalized]
+    return "turnover"
+
+
+def _humanize_foul_outcome(outcome: str, raw_event_type: str) -> str:
+    normalized = outcome.strip().upper()
+    event_type = raw_event_type.strip().upper()
+    if event_type == "OFFENSIVE_FOUL" or normalized == "OFFENSIVE_FOUL":
+        return "offensive foul"
+    if event_type == "FOUL_FT" or "SHOOTING" in normalized:
+        return "shooting foul"
+    if "TECH" in normalized:
+        return "technical foul"
+    if "FLAGRANT" in normalized:
+        return "flagrant foul"
+    return "personal foul"
+
+
+def _build_pbp_description(event_key: str, ev: Dict[str, Any], player_name_by_id: Dict[str, str]) -> str:
+    name = _player_name_from_event(ev, player_name_by_id)
+    outcome = str(ev.get("outcome") or "").strip()
+    points = _to_int_or_none(ev.get("points"))
+    raw_event_type = str(ev.get("event_type") or "")
+    if event_key in {"made_2pt", "made_3pt", "free_throw_made"}:
+        shot = _humanize_shot_outcome(outcome, points)
+        if name:
+            article = "an" if shot[:1].lower() in {"a", "e", "i", "o", "u"} else "a"
+            return f"{name} makes {article} {shot}."
+        return "Scoring play"
+    if event_key in {"missed_fg", "free_throw_miss"}:
+        shot = _humanize_shot_outcome(outcome, points, is_miss=True)
+        if name:
+            article = "an" if shot[:1].lower() in {"a", "e", "i", "o", "u"} else "a"
+            return f"{name} misses {article} {shot}."
+        return "Missed shot"
+    if event_key == "rebound":
+        rebound = _humanize_rebound_outcome(outcome)
+        if name:
+            article = "an" if rebound.startswith("offensive") else "a"
+            return f"{name} grabs {article} {rebound}."
+        return "Rebound"
+    if event_key == "turnover":
+        stealer_pid = str(ev.get("stealer_pid") or "").strip()
+        stealer = player_name_by_id.get(stealer_pid, "")
+        turnover_kind = _humanize_turnover_outcome(outcome)
+        if name and stealer:
+            return f"{name} commits a {turnover_kind}, and {stealer} gets the steal."
+        if name:
+            return f"{name} commits a {turnover_kind}."
+        return "Turnover"
+    if event_key == "foul":
+        foul_kind = _humanize_foul_outcome(outcome, raw_event_type)
+        if name:
+            return f"{name} commits a {foul_kind}."
+        return "Foul called"
+    if event_key == "timeout":
+        team_id = str(ev.get("team_id") or "")
+        return f"{team_id} timeout" if team_id else "Timeout"
+    if event_key == "substitution":
+        in_pid = str(ev.get("pid_in") or ev.get("player_in_pid") or "").strip()
+        out_pid = str(ev.get("pid_out") or ev.get("player_out_pid") or "").strip()
+        in_name = player_name_by_id.get(in_pid, in_pid)
+        out_name = player_name_by_id.get(out_pid, out_pid)
+        if in_name and out_name:
+            return f"Substitution: {in_name} in for {out_name}"
+        return "Substitution"
+    if event_key == "period_start":
+        return "Quarter begins"
+    if event_key == "period_end":
+        return "Quarter ends"
+    return outcome or "이벤트 상세 정보를 준비 중입니다."
+
+
+def _build_play_by_play_viewmodel(
+    replay_events: List[Dict[str, Any]],
+    *,
+    home_id: str,
+    away_id: str,
+    player_name_by_id: Dict[str, str],
+) -> Dict[str, Any]:
+    total_replay_events = len([e for e in replay_events if isinstance(e, dict)])
+    if total_replay_events == 0:
+        return {
+            "available": False,
+            "source": "replay_events",
+            "items": [],
+            "meta": {
+                "total_replay_events": 0,
+                "exposed_pbp_items": 0,
+                "filtered_out": 0,
+                "collapsed_groups": 0,
+            },
+        }
+
+    include_types = {
+        "SCORE", "MISS", "REB", "TURNOVER", "FOUL_NO_SHOTS", "FOUL_FT", "OFFENSIVE_FOUL",
+        "TIMEOUT", "SUBSTITUTION", "PERIOD_START", "PERIOD_END",
+    }
+
+    rows: List[Dict[str, Any]] = []
+    for idx, ev in enumerate(replay_events):
+        if not isinstance(ev, dict):
+            continue
+        et = str(ev.get("event_type") or "").upper()
+        if et not in include_types:
+            continue
+
+        period = _to_int_or_none(ev.get("quarter")) or 1
+        clock = str(ev.get("clock_sec") or "--:--")
+        seq = _to_int_or_none(ev.get("seq"))
+        if seq is None:
+            seq = idx + 1
+        team_id = str(ev.get("team_id") or "").upper()
+        event_key = _normalize_pbp_event_key(ev)
+        title, tags = _pbp_title_and_tags(event_key)
+        description = _build_pbp_description(event_key, ev, player_name_by_id)
+
+        home_score = _to_int_or_none(ev.get("score_home"))
+        away_score = _to_int_or_none(ev.get("score_away"))
+
+        rows.append(
+            {
+                "seq": int(seq),
+                "period": int(period),
+                "clock": clock,
+                "team_id": team_id,
+                "event_key": event_key,
+                "title": title,
+                "description": description,
+                "score": {
+                    "home": home_score,
+                    "away": away_score,
+                },
+                "score_change": 0,
+                "tags": tags,
+                "badges": [],
+            }
+        )
+
+    rows.sort(key=lambda x: (int(x.get("period") or 0), -_clock_sort_key_desc(x.get("clock")), int(x.get("seq") or 0)))
+
+    prev_home: Optional[int] = None
+    prev_away: Optional[int] = None
+    prev_diff: Optional[int] = None
+    for item in rows:
+        hs = _to_int_or_none((item.get("score") or {}).get("home"))
+        as_ = _to_int_or_none((item.get("score") or {}).get("away"))
+        tid = str(item.get("team_id") or "")
+
+        delta = 0
+        if hs is not None and as_ is not None and prev_home is not None and prev_away is not None:
+            if tid == home_id:
+                delta = max(0, hs - prev_home)
+            elif tid == away_id:
+                delta = max(0, as_ - prev_away)
+            else:
+                delta = max(0, (hs - prev_home), (as_ - prev_away))
+
+            diff = hs - as_
+            if diff == 0 and (hs != prev_home or as_ != prev_away):
+                item["badges"].append("tie")
+            if prev_diff is not None and (prev_diff < 0 < diff or prev_diff > 0 > diff):
+                item["badges"].append("lead_change")
+            period = _to_int_or_none(item.get("period")) or 1
+            left = _clock_mmss_to_sec(item.get("clock"))
+            if left is not None and ((period == 4 and left <= 120) or (period >= 5 and left <= 120)):
+                item["badges"].append("clutch")
+            prev_diff = diff
+        elif hs is not None and as_ is not None:
+            prev_diff = hs - as_
+
+        item["score_change"] = int(delta)
+        if hs is not None:
+            prev_home = hs
+        if as_ is not None:
+            prev_away = as_
+
+    return {
+        "available": bool(rows),
+        "source": "replay_events",
+        "items": rows,
+        "meta": {
+            "total_replay_events": int(total_replay_events),
+            "exposed_pbp_items": int(len(rows)),
+            "filtered_out": int(max(0, total_replay_events - len(rows))),
+            "collapsed_groups": 0,
+        },
+    }
+
+
+def _record_before_game(games: List[Dict[str, Any]], *, game_id: str) -> tuple[int, int]:
+    wins = 0
+    losses = 0
+    for g in games:
+        gid = str(g.get("game_id") or "")
+        if gid == game_id:
+            break
+        if not bool(g.get("is_completed")):
+            continue
+        result = g.get("result") if isinstance(g.get("result"), dict) else {}
+        wl = str(result.get("wl") or "")
+        if wl == "W":
+            wins += 1
+        elif wl == "L":
+            losses += 1
+    return wins, losses
 
 
 def _attr_float(attrs: Any, *keys: str) -> Optional[float]:
@@ -953,24 +1483,43 @@ async def api_medical_team_alerts(
     league_ctx = state.get_league_context_snapshot() or {}
     sy = int(season_year or (league_ctx.get("season_year") or 0))
     as_of = _parse_iso_date(as_of_date, field="as_of_date") if as_of_date else state.get_current_date_as_date()
-
-    overview_now = _medical_team_overview_payload(
+    return _build_medical_alerts_payload(
         team_id=team_id,
         season_year=sy,
         as_of=as_of,
         history_days=history_days,
         top_n=top_n,
     )
-    overview_prev = _medical_team_overview_payload(
+
+
+def _build_medical_alerts_payload(
+    *,
+    team_id: str,
+    season_year: int,
+    as_of: date,
+    history_days: int,
+    top_n: int,
+    overview_now: Optional[Dict[str, Any]] = None,
+    overview_prev: Optional[Dict[str, Any]] = None,
+    schedule: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    overview_now = overview_now or _medical_team_overview_payload(
         team_id=team_id,
-        season_year=sy,
+        season_year=season_year,
+        as_of=as_of,
+        history_days=history_days,
+        top_n=top_n,
+    )
+    overview_prev = overview_prev or _medical_team_overview_payload(
+        team_id=team_id,
+        season_year=season_year,
         as_of=(as_of - timedelta(days=7)),
         history_days=history_days,
         top_n=top_n,
     )
 
     tid = str(overview_now.get("team_id") or "")
-    schedule = await team_schedule(tid)
+    schedule = schedule or _get_team_schedule_view(tid)
     current_date = str(schedule.get("current_date") or as_of.isoformat())[:10]
     cur_dt = date.fromisoformat(current_date)
     end_dt = cur_dt + timedelta(days=7)
@@ -1048,51 +1597,85 @@ async def api_medical_team_risk_calendar(
     league_ctx = state.get_league_context_snapshot() or {}
     sy = int(season_year or (league_ctx.get("season_year") or 0))
     d0 = _parse_iso_date(date_from, field="date_from") if date_from else state.get_current_date_as_date()
+    return _build_medical_risk_calendar_payload(
+        team_id=team_id,
+        season_year=sy,
+        d0=d0,
+        days=days,
+    )
+
+
+def _build_medical_risk_calendar_payload(
+    *,
+    team_id: str,
+    season_year: int,
+    d0: date,
+    days: int,
+    schedule: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     days = max(1, min(int(days or 14), 31))
     d1 = d0 + timedelta(days=days)
 
     tid = str(normalize_team_id(team_id, strict=True))
-    schedule = await team_schedule(tid)
+    schedule = schedule or _get_team_schedule_view(tid)
 
     from practice.service import list_team_practice_sessions
+    from fatigue import repo as fatigue_repo
+    from injury import repo as injury_repo
+    from readiness import repo as readiness_repo
 
     with LeagueRepo(state.get_db_path()) as repo:
         repo.init_db()
+        roster_rows = repo.get_team_roster(tid)
+        pids = [str(r.get("player_id")) for r in (roster_rows or []) if r.get("player_id")]
         sessions = list_team_practice_sessions(
             repo=repo,
             team_id=tid,
-            season_year=sy,
+            season_year=season_year,
             date_from=d0.isoformat(),
             date_to=(d1 - timedelta(days=1)).isoformat(),
         )
+        fatigue_by_pid: Dict[str, Dict[str, Any]] = {}
+        sharp_by_pid: Dict[str, Dict[str, Any]] = {}
+        injury_by_pid: Dict[str, Dict[str, Any]] = {}
+        recent_events: List[Dict[str, Any]] = []
+        with repo.transaction() as cur:
+            if pids:
+                fatigue_by_pid = fatigue_repo.get_player_fatigue_states(cur, pids)
+                if season_year > 0:
+                    sharp_by_pid = readiness_repo.get_player_sharpness_states(cur, pids, season_year=season_year)
+                injury_by_pid = injury_repo.get_player_injury_states(cur, pids)
+                recent_events = injury_repo.get_overlapping_injury_events(
+                    cur,
+                    pids,
+                    start_date=d0.isoformat(),
+                    end_date=d1.isoformat(),
+                )
 
-    overview = _medical_team_overview_payload(
-        team_id=tid,
-        season_year=sy,
-        as_of=d0,
-        history_days=730,
-        top_n=30,
-    )
-    watch = overview.get("watchlists") or {}
-    highest_risk = watch.get("highest_risk") or []
-    unavailable = watch.get("currently_unavailable") or []
-
-    high_pids = {
-        str(r.get("player_id"))
-        for r in highest_risk
-        if str(r.get("risk_tier") or "").upper() == "HIGH" and r.get("player_id")
-    }
-
-    out_pids = {
-        str(r.get("player_id"))
-        for r in unavailable
-        if str(r.get("recovery_status") or "").upper() == "OUT" and r.get("player_id")
-    }
-    returning_pids = {
-        str(r.get("player_id"))
-        for r in unavailable
-        if str(r.get("recovery_status") or "").upper() == "RETURNING" and r.get("player_id")
-    }
+    high_pids = set()
+    out_pids = set()
+    returning_pids = set()
+    for row in roster_rows:
+        pid = str(row.get("player_id") or "")
+        if not pid:
+            continue
+        injury_state = injury_by_pid.get(pid) or {}
+        fatigue_state = fatigue_by_pid.get(pid) or {}
+        sharpness_state = sharp_by_pid.get(pid) or {}
+        prof = _build_risk_profile(
+            row=row,
+            injury_state=injury_state,
+            fatigue_state=fatigue_state,
+            sharpness_state=sharpness_state,
+            as_of_date=d0.isoformat(),
+        )
+        if str(prof.get("risk_tier") or "").upper() == "HIGH":
+            high_pids.add(pid)
+        status = str(prof.get("injury_status") or "").upper()
+        if status == "OUT":
+            out_pids.add(pid)
+        elif status == "RETURNING":
+            returning_pids.add(pid)
 
     games = []
     for g in (schedule.get("games") or []):
@@ -1120,7 +1703,6 @@ async def api_medical_team_risk_calendar(
             b2b_dates.add(game_dates_sorted[i - 1])
             b2b_dates.add(game_dates_sorted[i])
 
-    recent_events = watch.get("recent_injury_events") or []
     event_count_by_date: Dict[str, int] = {}
     for e in recent_events:
         ds = str(e.get("date") or "")[:10]
@@ -1149,7 +1731,7 @@ async def api_medical_team_risk_calendar(
 
     return {
         "team_id": tid,
-        "season_year": sy,
+        "season_year": season_year,
         "date_from": d0.isoformat(),
         "date_to": d1.isoformat(),
         "days": day_rows,
@@ -1359,35 +1941,17 @@ async def two_way_summary(team_id: str):
 # -------------------------------------------------------------------------
 # 팀별 시즌 스케줄 조회 API
 # -------------------------------------------------------------------------
-@router.get("/api/team-schedule/{team_id}")
-async def team_schedule(team_id: str):
-    """마스터 스케줄 기준으로 특정 팀의 전체 시즌 일정을 UI 친화 포맷으로 반환."""
-    team_id = team_id.upper()
-    if team_id not in ALL_TEAM_IDS:
-        raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found in league")
-
-    # (startup 보장 전제) 마스터 스케줄은 이미 초기화되어 있어야 함
-    league = state.export_full_state_snapshot().get("league", {})
-    master_schedule = league.get("master_schedule", {})
-    games = master_schedule.get("games") or []
-
-    if not games:
-        raise HTTPException(
-            status_code=500,
-            detail="Master schedule is not initialized. Expected server startup_init_state() to run.",
-        )
-        
-
+def _build_formatted_team_schedule_games(
+    *,
+    team_id: str,
+    games: List[Dict[str, Any]],
+    game_results: Mapping[str, Any] | None,
+) -> List[Dict[str, Any]]:
     team_games: List[Dict[str, Any]] = [
-        g for g in games
+        g for g in (games or [])
         if g.get("home_team_id") == team_id or g.get("away_team_id") == team_id
     ]
     team_games.sort(key=lambda g: (g.get("date"), g.get("game_id")))
-
-    workflow_state = state.export_workflow_state() or {}
-    game_results = workflow_state.get("game_results") or {}
-    current_date = str(league.get("current_date") or "")[:10]
-    season_id = str(league.get("active_season_id") or "")
 
     formatted_games: List[Dict[str, Any]] = []
     wins = 0
@@ -1432,7 +1996,7 @@ async def team_schedule(team_id: str):
                 "display": f"{wins}-{losses}",
             }
 
-            gr = game_results.get(str(game_id)) if isinstance(game_results, dict) else None
+            gr = game_results.get(str(game_id)) if isinstance(game_results, Mapping) else None
             team_box = ((gr or {}).get("teams") or {}).get(team_id) if isinstance(gr, dict) else None
             rows = team_box.get("players") if isinstance(team_box, dict) else []
             rows = rows if isinstance(rows, list) else []
@@ -1466,12 +2030,47 @@ async def team_schedule(team_id: str):
             "tipoff_time": None if is_completed else _deterministic_tipoff_time(game_id),
         })
 
+    return formatted_games
+
+
+def _get_team_schedule_view(team_id: str) -> Dict[str, Any]:
+    """Build schedule payload parts for a team using lightweight state accessors.
+
+    Returns the same core shape used by `/api/team-schedule` consumers so
+    endpoints can reuse computed schedule data without route-to-route calls.
+    """
+    team_id = str(team_id or "").upper()
+    if team_id not in ALL_TEAM_IDS:
+        raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found in league")
+
+    schedule_snapshot = state.get_league_schedule_snapshot() or {}
+    master_schedule = schedule_snapshot.get("master_schedule") if isinstance(schedule_snapshot, dict) else {}
+    master_schedule = master_schedule if isinstance(master_schedule, dict) else {}
+    games = master_schedule.get("games") or []
+
+    if not games:
+        raise HTTPException(
+            status_code=500,
+            detail="Master schedule is not initialized. Expected server startup_init_state() to run.",
+        )
+
+    game_results = state.get_game_results_snapshot(phase="regular") or {}
     return {
         "team_id": team_id,
-        "season_id": season_id,
-        "current_date": current_date,
-        "games": formatted_games,
+        "season_id": str(schedule_snapshot.get("active_season_id") or ""),
+        "current_date": str(schedule_snapshot.get("current_date") or "")[:10],
+        "games": _build_formatted_team_schedule_games(
+            team_id=team_id,
+            games=games,
+            game_results=game_results,
+        ),
     }
+
+
+@router.get("/api/team-schedule/{team_id}")
+async def team_schedule(team_id: str):
+    """마스터 스케줄 기준으로 특정 팀의 전체 시즌 일정을 UI 친화 포맷으로 반환."""
+    return _get_team_schedule_view(team_id)
 
 
 @router.get("/api/home/dashboard/{team_id}")
@@ -1483,13 +2082,44 @@ async def api_home_dashboard(team_id: str):
     - 반환값은 UI 친화 포맷이며, 누락값은 None/기본값으로 안전하게 채운다.
     """
     tid = str(normalize_team_id(team_id, strict=True))
+    league_ctx = state.get_league_context_snapshot() or {}
+    sy = int(league_ctx.get("season_year") or 0)
+    as_of = state.get_current_date_as_date()
 
-    schedule = await team_schedule(tid)
-    team_detail = get_team_detail(tid)
-    standings_table = get_conference_standings_table()
-    medical_overview = await api_medical_team_overview(tid)
-    medical_alerts = await api_medical_team_alerts(tid)
-    risk_calendar = await api_medical_team_risk_calendar(tid, days=14)
+    schedule = _get_team_schedule_view(tid)
+    team_summary = get_team_summary_light(tid)
+    standings_table = get_conference_standings_home_light()
+    medical_overview = _medical_team_overview_payload(
+        team_id=tid,
+        season_year=sy,
+        as_of=as_of,
+        history_days=180,
+        top_n=5,
+    )
+    medical_overview_prev = _medical_team_overview_payload(
+        team_id=tid,
+        season_year=sy,
+        as_of=(as_of - timedelta(days=7)),
+        history_days=180,
+        top_n=5,
+    )
+    medical_alerts = _build_medical_alerts_payload(
+        team_id=tid,
+        season_year=sy,
+        as_of=as_of,
+        history_days=180,
+        top_n=5,
+        overview_now=medical_overview,
+        overview_prev=medical_overview_prev,
+        schedule=schedule,
+    )
+    risk_calendar = _build_medical_risk_calendar_payload(
+        team_id=tid,
+        season_year=sy,
+        d0=as_of,
+        days=14,
+        schedule=schedule,
+    )
 
     current_date = str(schedule.get("current_date") or "")[:10]
     games = schedule.get("games") or []
@@ -1507,12 +2137,13 @@ async def api_home_dashboard(team_id: str):
     east_rows = standings_table.get("east") if isinstance(standings_table, dict) else []
     west_rows = standings_table.get("west") if isinstance(standings_table, dict) else []
     all_rows = [r for r in (east_rows or []) + (west_rows or []) if isinstance(r, dict)]
-    my_standing = next((r for r in all_rows if str(r.get("team_id") or "").upper() == tid), None)
+    standings_by_team = {str(r.get("team_id") or "").upper(): r for r in all_rows}
+    my_standing = standings_by_team.get(tid)
 
     opponent_standing = None
     if isinstance(next_game, dict):
         opp_id = str(next_game.get("opponent_team_id") or "").upper()
-        opponent_standing = next((r for r in all_rows if str(r.get("team_id") or "").upper() == opp_id), None)
+        opponent_standing = standings_by_team.get(opp_id)
 
     med_summary = (medical_overview.get("summary") or {}) if isinstance(medical_overview, dict) else {}
     injury_counts = med_summary.get("injury_status_counts") or {}
@@ -1540,7 +2171,7 @@ async def api_home_dashboard(team_id: str):
             {
                 "type": "INJURY_EVENT",
                 "date": str(e.get("date") or "")[:10],
-                "title": f"{e.get('player_name') or 'Unknown'} · {e.get('injury_type') or 'Injury'}",
+                "title": f"{e.get('player_name') or e.get('name') or 'Unknown'} · {e.get('injury_type') or 'Injury'}",
                 "meta": {
                     "player_id": e.get("player_id"),
                     "severity": e.get("severity"),
@@ -1603,9 +2234,9 @@ async def api_home_dashboard(team_id: str):
         "snapshot": {
             "team_name": TEAM_FULL_NAMES.get(tid, tid),
             "record": {
-                "wins": (team_detail.get("summary") or {}).get("wins"),
-                "losses": (team_detail.get("summary") or {}).get("losses"),
-                "win_pct": (team_detail.get("summary") or {}).get("win_pct"),
+                "wins": team_summary.get("wins"),
+                "losses": team_summary.get("losses"),
+                "win_pct": team_summary.get("win_pct"),
             },
             "standing": {
                 "rank": (my_standing or {}).get("rank"),
@@ -1614,8 +2245,8 @@ async def api_home_dashboard(team_id: str):
                 "streak": (my_standing or {}).get("strk"),
             },
             "finance": {
-                "payroll": (team_detail.get("summary") or {}).get("payroll"),
-                "cap_space": (team_detail.get("summary") or {}).get("cap_space"),
+                "payroll": team_summary.get("payroll"),
+                "cap_space": team_summary.get("cap_space"),
             },
             "health": {
                 "out_count": out_count,
@@ -1632,6 +2263,313 @@ async def api_home_dashboard(team_id: str):
         "activity_feed": feed_items,
         "risk_calendar": risk_calendar.get("days") if isinstance(risk_calendar, dict) else [],
         "medical_alerts": medical_alerts,
+    }
+
+
+@router.get("/api/game/result/{game_id}")
+async def api_game_result(game_id: str, user_team_id: str):
+    gid = str(game_id or "").strip()
+    if not gid:
+        raise HTTPException(status_code=404, detail="GAME_NOT_FOUND")
+
+    try:
+        tid = str(normalize_team_id(user_team_id, strict=True))
+    except Exception:
+        raise HTTPException(status_code=400, detail="INVALID_USER_TEAM")
+
+    schedule_snapshot = state.get_league_schedule_snapshot() or {}
+    master_schedule = schedule_snapshot.get("master_schedule") if isinstance(schedule_snapshot, dict) else {}
+    master_schedule = master_schedule if isinstance(master_schedule, dict) else {}
+    games = master_schedule.get("games") if isinstance(master_schedule, dict) else []
+    games = games if isinstance(games, list) else []
+    by_id = master_schedule.get("by_id") if isinstance(master_schedule, dict) else None
+    schedule_entry = by_id.get(gid) if isinstance(by_id, dict) else None
+    if not isinstance(schedule_entry, dict):
+        schedule_entry = next((g for g in games if isinstance(g, dict) and str(g.get("game_id") or "") == gid), None)
+    if not isinstance(schedule_entry, dict):
+        raise HTTPException(status_code=404, detail="GAME_NOT_FOUND")
+
+    home_id = str(schedule_entry.get("home_team_id") or "")
+    away_id = str(schedule_entry.get("away_team_id") or "")
+    if tid not in {home_id, away_id}:
+        raise HTTPException(status_code=400, detail="USER_TEAM_NOT_IN_GAME")
+
+    game_results = state.get_game_results_snapshot(phase="regular") or {}
+    game_result = game_results.get(gid) if isinstance(game_results, dict) else None
+    if not isinstance(game_result, dict):
+        raise HTTPException(status_code=409, detail="GAME_NOT_FINAL")
+
+    final = game_result.get("final") if isinstance(game_result, dict) else {}
+    final = final if isinstance(final, dict) else {}
+    home_score = _to_int_or_none(final.get(home_id))
+    away_score = _to_int_or_none(final.get(away_id))
+    if home_score is None or away_score is None:
+        raise HTTPException(status_code=409, detail="GAME_NOT_FINAL")
+
+    game_meta = game_result.get("game") if isinstance(game_result, dict) else {}
+    game_meta = game_meta if isinstance(game_meta, dict) else {}
+    overtime_periods = _to_int_or_none(game_meta.get("overtime_periods")) or 0
+    winner_team_id = home_id if home_score >= away_score else away_id
+
+    opponent_id = away_id if tid == home_id else home_id
+    user_games = _build_formatted_team_schedule_games(
+        team_id=tid,
+        games=games,
+        game_results=game_results,
+    )
+    opp_games = _build_formatted_team_schedule_games(
+        team_id=opponent_id,
+        games=games,
+        game_results=game_results,
+    )
+
+    user_row = next((g for g in user_games if isinstance(g, dict) and str(g.get("game_id") or "") == gid), None)
+    opp_row = next((g for g in opp_games if isinstance(g, dict) and str(g.get("game_id") or "") == gid), None)
+    if not isinstance(user_row, dict) or not bool(user_row.get("is_completed")):
+        raise HTTPException(status_code=409, detail="GAME_NOT_FINAL")
+
+    user_record_after = (user_row.get("record_after_game") or {}).get("display") if isinstance(user_row, dict) else None
+    opp_record_after = (opp_row.get("record_after_game") or {}).get("display") if isinstance(opp_row, dict) else None
+
+    teams_box = game_result.get("teams") if isinstance(game_result, dict) else {}
+    teams_box = teams_box if isinstance(teams_box, dict) else {}
+    home_box = teams_box.get(home_id) if isinstance(teams_box, dict) else None
+    away_box = teams_box.get(away_id) if isinstance(teams_box, dict) else None
+    home_players = (home_box.get("players") if isinstance(home_box, dict) else []) or []
+    away_players = (away_box.get("players") if isinstance(away_box, dict) else []) or []
+    home_players = home_players if isinstance(home_players, list) else []
+    away_players = away_players if isinstance(away_players, list) else []
+    player_name_by_id = {
+        **_player_name_lookup(home_players),
+        **_player_name_lookup(away_players),
+    }
+
+    def _to_num(v: Any) -> float:
+        try:
+            return float(v)
+        except Exception:
+            return 0.0
+
+    def _build_team_box_totals(players: List[Dict[str, Any]]) -> Dict[str, Any]:
+        totals = {
+            "PTS": 0,
+            "FGM": 0,
+            "FGA": 0,
+            "3PM": 0,
+            "3PA": 0,
+            "FTM": 0,
+            "FTA": 0,
+            "ORB": 0,
+            "DRB": 0,
+            "REB": 0,
+            "AST": 0,
+            "TOV": 0,
+            "STL": 0,
+            "BLK": 0,
+            "PF": 0,
+        }
+        for p in players:
+            if not isinstance(p, dict):
+                continue
+            for k in totals.keys():
+                totals[k] += int(round(_to_num(p.get(k))))
+
+        totals["FG_PCT"] = round((totals["FGM"] / totals["FGA"] * 100.0), 1) if totals["FGA"] else 0.0
+        totals["3P_PCT"] = round((totals["3PM"] / totals["3PA"] * 100.0), 1) if totals["3PA"] else 0.0
+        totals["FT_PCT"] = round((totals["FTM"] / totals["FTA"] * 100.0), 1) if totals["FTA"] else 0.0
+        return totals
+
+    boxscore = {
+        "away": {
+            "team_id": away_id,
+            "team_name": TEAM_FULL_NAMES.get(away_id, away_id),
+            "players": away_players,
+        },
+        "home": {
+            "team_id": home_id,
+            "team_name": TEAM_FULL_NAMES.get(home_id, home_id),
+            "players": home_players,
+        },
+    }
+    teamstats = {
+        "away": _build_team_box_totals(away_players),
+        "home": _build_team_box_totals(home_players),
+    }
+
+    leaders = {
+        "points": {
+            "home": _pick_leader(home_players, ["PTS"]),
+            "away": _pick_leader(away_players, ["PTS"]),
+        },
+        "rebounds": {
+            "home": _pick_leader(home_players, ["REB", "TRB"]),
+            "away": _pick_leader(away_players, ["REB", "TRB"]),
+        },
+        "assists": {
+            "home": _pick_leader(home_players, ["AST"]),
+            "away": _pick_leader(away_players, ["AST"]),
+        },
+    }
+
+    replay_events = game_result.get("replay_events") if isinstance(game_result, dict) else []
+    replay_events = replay_events if isinstance(replay_events, list) else []
+    linescore = game_result.get("linescore") if isinstance(game_result, dict) else []
+    linescore = linescore if isinstance(linescore, list) else []
+    away_by_period: Dict[str, int] = {}
+    home_by_period: Dict[str, int] = {}
+    for row in linescore:
+        if not isinstance(row, dict):
+            continue
+        p = _to_int_or_none(row.get("period"))
+        if p is None or p <= 0:
+            continue
+        h = _to_int_or_none(row.get("home"))
+        a = _to_int_or_none(row.get("away"))
+        if h is not None:
+            home_by_period[str(p)] = int(h)
+        if a is not None:
+            away_by_period[str(p)] = int(a)
+
+    boxscore_quarters: List[Dict[str, Any]] = []
+    if home_by_period or away_by_period:
+        boxscore_quarters = [
+            {
+                "team_id": away_id,
+                "by_period": away_by_period,
+                "total": int(away_score),
+            },
+            {
+                "team_id": home_id,
+                "by_period": home_by_period,
+                "total": int(home_score),
+            },
+        ]
+    game_flow_series = _build_game_flow_series(
+        [e for e in replay_events if isinstance(e, dict)],
+        home_final=int(home_score),
+        away_final=int(away_score),
+        overtime_periods=int(overtime_periods),
+    )
+
+    user_w_before, user_l_before = _record_before_game(user_games, game_id=gid)
+    opp_w_before, opp_l_before = _record_before_game(opp_games, game_id=gid)
+    user_win_pct = float(user_w_before) / float(max(1, user_w_before + user_l_before))
+    opp_win_pct = float(opp_w_before) / float(max(1, opp_w_before + opp_l_before))
+    pre_game_strength_gap = user_win_pct - opp_win_pct if tid == home_id else opp_win_pct - user_win_pct
+
+    win_probability_series = _build_win_probability_series(
+        game_flow_series,
+        overtime_periods=int(overtime_periods),
+        pre_game_strength_gap=float(pre_game_strength_gap),
+    )
+
+    play_by_play = _build_play_by_play_viewmodel(
+        [e for e in replay_events if isinstance(e, dict)],
+        home_id=home_id,
+        away_id=away_id,
+        player_name_by_id=player_name_by_id,
+    )
+
+    matchup_games = [
+        g
+        for g in user_games
+        if isinstance(g, dict) and str(g.get("opponent_team_id") or "") == opponent_id
+    ]
+    season_wins = 0
+    season_losses = 0
+    completed: List[Dict[str, Any]] = []
+    upcoming: List[Dict[str, Any]] = []
+    for g in matchup_games:
+        g_completed = bool(g.get("is_completed"))
+        g_is_home = bool(g.get("is_home"))
+        g_home_score = _to_int_or_none(g.get("home_score"))
+        g_away_score = _to_int_or_none(g.get("away_score"))
+        user_score = g_home_score if g_is_home else g_away_score
+        opp_score = g_away_score if g_is_home else g_home_score
+        if g_completed:
+            wl = str(((g.get("result") or {}).get("wl") or ""))
+            if wl == "W":
+                season_wins += 1
+            elif wl == "L":
+                season_losses += 1
+            completed.append(
+                {
+                    "game_id": g.get("game_id"),
+                    "date": str(g.get("date") or "")[:10],
+                    "user_team_home": g_is_home,
+                    "user_team_score": user_score,
+                    "opponent_score": opp_score,
+                    "result": wl if wl in {"W", "L"} else None,
+                }
+            )
+        else:
+            upcoming.append(
+                {
+                    "game_id": g.get("game_id"),
+                    "date": str(g.get("date") or "")[:10],
+                    "user_team_home": g_is_home,
+                    "tipoff_time": g.get("tipoff_time"),
+                }
+            )
+
+    return {
+        "game_id": gid,
+        "status": "final",
+        "as_of_date": state.get_current_date_as_date().isoformat(),
+        "header": {
+            "date": str(schedule_entry.get("date") or "")[:10],
+            "home_team_id": home_id,
+            "away_team_id": away_id,
+            "home_team_name": TEAM_FULL_NAMES.get(home_id, home_id),
+            "away_team_name": TEAM_FULL_NAMES.get(away_id, away_id),
+            "home_score": int(home_score),
+            "away_score": int(away_score),
+            "winner_team_id": winner_team_id,
+            "user_team_id": tid,
+            "user_team_record_after_game": user_record_after,
+            "opponent_record_after_game": opp_record_after,
+            "boxscore_lines": {
+                "quarters": boxscore_quarters,
+                "note": None if boxscore_quarters else "Quarter split unavailable in current GameResultV2 source",
+            },
+        },
+        "tabs": {
+            "default": "gamecast",
+            "enabled": ["gamecast", "playbyplay", "boxscore", "teamstats"],
+            "disabled": [],
+        },
+        "boxscore": boxscore,
+        "teamstats": teamstats,
+        "leaders": leaders,
+        "gamecast": {
+            "win_probability": {
+                "model": "heuristic_v1",
+                "series": win_probability_series,
+                "inputs": {
+                    "score_diff": True,
+                    "elapsed_seconds": True,
+                    "strength_gap_source": "pre_game_win_pct",
+                },
+                "confidence": "experimental",
+            },
+            "game_flow": {
+                "series": game_flow_series,
+                "source": "replay_events",
+            },
+            "availability": {
+                "replay_events_present": bool(replay_events),
+                "fallback_used": not bool(replay_events),
+            },
+        },
+        "play_by_play": play_by_play,
+        "matchups": {
+            "season_record": {
+                "user_team_wins": int(season_wins),
+                "user_team_losses": int(season_losses),
+            },
+            "completed": completed,
+            "upcoming": upcoming,
+        },
     }
 
 

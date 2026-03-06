@@ -1,0 +1,177 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List, Mapping
+
+from fastapi import APIRouter, HTTPException
+
+import state
+from app.schemas.tactics import TeamTacticsUpsertRequest
+
+router = APIRouter()
+
+
+def _rows_from_payload(raw: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for row in raw:
+        if isinstance(row, Mapping):
+            out.append(dict(row))
+    return out
+
+
+def _to_engine_tactics(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Normalize frontend tactics payload into engine SSOT format."""
+    raw = dict(payload or {})
+
+    # Already-engine payload: keep shape but ensure dict types.
+    if "offense_scheme" in raw or "defense_scheme" in raw or "lineup" in raw:
+        out = dict(raw)
+        if not isinstance(out.get("lineup"), dict):
+            out["lineup"] = {}
+        if not isinstance(out.get("minutes"), dict):
+            out["minutes"] = {}
+        if not isinstance(out.get("rotation_offense_role_by_pid"), dict):
+            out["rotation_offense_role_by_pid"] = {}
+        if not isinstance(out.get("defense_role_overrides"), dict):
+            out["defense_role_overrides"] = {}
+        return out
+
+    starters = _rows_from_payload(raw.get("starters"))
+    rotation = _rows_from_payload(raw.get("rotation"))
+    rows = starters + rotation
+
+    starter_pids: List[str] = []
+    bench_pids: List[str] = []
+    seen: set[str] = set()
+    for row in starters:
+        pid = str(row.get("pid") or "").strip()
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        starter_pids.append(pid)
+    for row in rotation:
+        pid = str(row.get("pid") or "").strip()
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        bench_pids.append(pid)
+
+    minutes: Dict[str, float] = {}
+    off_by_pid: Dict[str, str] = {}
+    def_by_role: Dict[str, str] = {}
+    for row in rows:
+        pid = str(row.get("pid") or "").strip()
+        if not pid:
+            continue
+        try:
+            mins = float(row.get("minutes") or 0.0)
+        except Exception:
+            mins = 0.0
+        minutes[pid] = max(0.0, min(48.0, mins))
+
+        off_role = str(row.get("offenseRole") or "").strip()
+        if off_role:
+            off_by_pid[pid] = off_role
+
+        def_role = str(row.get("defenseRole") or "").strip()
+        if def_role and def_role not in def_by_role:
+            def_by_role[def_role] = pid
+
+    rotation_size = int(raw.get("rotation_size") or len(starter_pids) + len(bench_pids) or 10)
+
+    return {
+        "offense_scheme": str(raw.get("offense_scheme") or raw.get("offenseScheme") or "Spread_HeavyPnR"),
+        "defense_scheme": str(raw.get("defense_scheme") or raw.get("defenseScheme") or "Drop"),
+        "lineup": {
+            "starters": starter_pids,
+            "bench": bench_pids,
+        },
+        "rotation_size": max(5, rotation_size),
+        "minutes": minutes,
+        "rotation_offense_role_by_pid": off_by_pid,
+        "defense_role_overrides": def_by_role,
+        "context": dict(raw.get("context") or {}),
+    }
+
+
+def _to_ui_tactics(payload: Any) -> Any:
+    if not isinstance(payload, Mapping):
+        return payload
+    raw = dict(payload)
+    if "offenseScheme" in raw or "defenseScheme" in raw:
+        return raw
+
+    starters = []
+    rotation = []
+
+    lineup = raw.get("lineup") if isinstance(raw.get("lineup"), Mapping) else {}
+    starter_pids = lineup.get("starters") if isinstance(lineup.get("starters"), list) else []
+    bench_pids = lineup.get("bench") if isinstance(lineup.get("bench"), list) else []
+
+    minutes = raw.get("minutes") if isinstance(raw.get("minutes"), Mapping) else {}
+    off_map = raw.get("rotation_offense_role_by_pid") if isinstance(raw.get("rotation_offense_role_by_pid"), Mapping) else {}
+    def_overrides = raw.get("defense_role_overrides") if isinstance(raw.get("defense_role_overrides"), Mapping) else {}
+
+    def_by_pid: Dict[str, str] = {}
+    for role_name, pid in def_overrides.items():
+        rp = str(pid or "").strip()
+        rr = str(role_name or "").strip()
+        if rp and rr and rp not in def_by_pid:
+            def_by_pid[rp] = rr
+
+    def _row_for_pid(pid: Any) -> Dict[str, Any]:
+        p = str(pid or "").strip()
+        return {
+            "pid": p,
+            "offenseRole": str(off_map.get(p) or ""),
+            "defenseRole": str(def_by_pid.get(p) or ""),
+            "minutes": float(minutes.get(p) or 0.0),
+        }
+
+    starters = [_row_for_pid(pid) for pid in starter_pids]
+    rotation = [_row_for_pid(pid) for pid in bench_pids]
+
+    return {
+        "offenseScheme": str(raw.get("offense_scheme") or "Spread_HeavyPnR"),
+        "defenseScheme": str(raw.get("defense_scheme") or "Drop"),
+        "starters": starters,
+        "rotation": rotation,
+        "baselineHash": "",
+    }
+
+
+@router.get("/api/tactics/{team_id}")
+async def api_get_team_tactics(team_id: str):
+    tid = str(team_id or "").strip().upper()
+    if not tid:
+        raise HTTPException(status_code=400, detail="team_id is required")
+
+    record = state.get_team_tactics_snapshot(tid)
+    tactics_raw = record.get("tactics") if isinstance(record, dict) else None
+    return {
+        "team_id": tid,
+        "tactics": _to_ui_tactics(tactics_raw) if tactics_raw is not None else None,
+        "updated_at_turn": (record.get("updated_at_turn") if isinstance(record, dict) else None),
+    }
+
+
+@router.put("/api/tactics/{team_id}")
+async def api_put_team_tactics(team_id: str, req: TeamTacticsUpsertRequest):
+    tid = str(team_id or "").strip().upper()
+    if not tid:
+        raise HTTPException(status_code=400, detail="team_id is required")
+
+    try:
+        normalized = _to_engine_tactics(req.tactics)
+        saved = state.set_team_tactics(tid, normalized)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    tactics_raw = saved.get("tactics") if isinstance(saved, dict) else {}
+    return {
+        "ok": True,
+        "team_id": tid,
+        "tactics": _to_ui_tactics(tactics_raw),
+        "updated_at_turn": saved.get("updated_at_turn") if isinstance(saved, dict) else None,
+    }

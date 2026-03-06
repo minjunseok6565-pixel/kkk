@@ -1,13 +1,23 @@
 import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
-import { fetchJson, setLoading, showConfirmModal } from "../../core/api.js";
+import { fetchJson, invalidateCachedValuesByPrefix, setLoading, showConfirmModal } from "../../core/api.js";
 import { formatIsoDate, formatWinPct } from "../../core/format.js";
 import { num } from "../../core/guards.js";
 import { TEAM_FULL_NAMES, applyTeamLogo, getTeamBranding, renderTeamLogoMark, getScheduleVenueText } from "../../core/constants/teams.js";
 import { resetNextGameCard, renderHomePriorities, renderHomeActivityFeed, renderHomeRiskCalendar } from "./homeWidgets.js";
+import { showGameResultScreenByGameId } from "../gameResult/gameResultScreen.js";
 
 function showTeamSelection() { activateScreen(els.teamScreen); }
+
+function isSameIsoDate(a, b) {
+  return String(a || "").slice(0, 10) === String(b || "").slice(0, 10);
+}
+
+async function fetchMainDashboardRaw() {
+  if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
+  return fetchJson(`/api/home/dashboard/${encodeURIComponent(state.selectedTeamId)}`);
+}
 
 function showMainScreen() {
   activateScreen(els.mainScreen);
@@ -23,6 +33,28 @@ function randomTipoffTime() {
   return `${hour12}:${String(minute).padStart(2, "0")} PM`;
 }
 
+function invalidatePostGameViewCaches(teamId) {
+  const tid = String(teamId || state.selectedTeamId || "").toUpperCase();
+  if (!tid) return;
+
+  invalidateCachedValuesByPrefix(`schedule:${tid}`);
+  invalidateCachedValuesByPrefix("standings:");
+  invalidateCachedValuesByPrefix(`medical:overview:${tid}`);
+  invalidateCachedValuesByPrefix(`medical:alerts:${tid}`);
+  invalidateCachedValuesByPrefix(`medical:risk-calendar:${tid}`);
+  invalidateCachedValuesByPrefix(`training:schedule:${tid}`);
+  invalidateCachedValuesByPrefix(`training:sessions:${tid}:`);
+  invalidateCachedValuesByPrefix(`training:sessions-resolve:${tid}:`);
+  invalidateCachedValuesByPrefix(`training:session:${tid}:`);
+  invalidateCachedValuesByPrefix(`training:team-detail:${tid}`);
+  invalidateCachedValuesByPrefix(`training:familiarity:${tid}:`);
+  invalidateCachedValuesByPrefix(`team-detail:${tid}`);
+}
+
+function invalidateAllTeamDetailCaches() {
+  invalidateCachedValuesByPrefix("team-detail:");
+}
+
 async function fetchInGameDate() {
   const summary = await fetchJson("/api/state/summary");
   const currentDate = summary?.workflow_state?.league?.current_date;
@@ -31,6 +63,10 @@ async function fetchInGameDate() {
 
 async function refreshMainDashboard() {
   if (!state.selectedTeamId) return;
+
+  if (els.nextGameQuickBtn) {
+    els.nextGameQuickBtn.textContent = "경기가 있는 날짜까지 자동진행";
+  }
 
   try {
     const dashboard = await fetchJson(`/api/home/dashboard/${encodeURIComponent(state.selectedTeamId)}`);
@@ -82,6 +118,93 @@ async function refreshMainDashboard() {
     resetNextGameCard();
     els.mainCurrentDate.textContent = "YYYY-MM-DD";
     els.nextGameDatetime.textContent = `다음 경기 정보를 불러오지 못했습니다: ${e.message}`;
+  }
+}
+
+async function progressNextGameFromHome() {
+  if (!state.selectedTeamId) {
+    alert("먼저 팀을 선택해주세요.");
+    return;
+  }
+
+  setLoading(true, "경기 시뮬레이션 중...");
+  try {
+    const dashboard = await fetchMainDashboardRaw();
+    const currentDate = String(dashboard?.current_date || "").slice(0, 10);
+    const nextGameDate = String(dashboard?.next_game?.game?.date || "").slice(0, 10);
+
+    if (!nextGameDate) {
+      alert("예정된 다음 경기가 없습니다.");
+      return;
+    }
+
+    if (!isSameIsoDate(currentDate, nextGameDate)) {
+      const confirmed = await showConfirmModal({
+        title: "자동 진행 확인",
+        body: "경기 날짜까지 리그 일정은 자동 진행됩니다.",
+        okLabel: "확인",
+        cancelLabel: "취소",
+      });
+      if (!confirmed) return;
+    }
+
+    const progressResult = await fetchJson("/api/game/progress-next-user-game-day", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_team_id: state.selectedTeamId,
+        mode: "auto_if_needed",
+      }),
+    });
+
+    invalidatePostGameViewCaches(state.selectedTeamId);
+
+    const playedGameId = progressResult?.game_day?.user_game?.game_id;
+    if (playedGameId) {
+      await showGameResultScreenByGameId(playedGameId);
+      await refreshMainDashboard();
+      return;
+    }
+
+    await refreshMainDashboard();
+    alert("경기 진행이 완료되었습니다.");
+  } catch (e) {
+    alert(`경기 진행 실패: ${e.message}`);
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function autoAdvanceToNextGameDayFromHome() {
+  if (!state.selectedTeamId) {
+    alert("먼저 팀을 선택해주세요.");
+    return;
+  }
+
+  const confirmed = await showConfirmModal({
+    title: "자동 진행 확인",
+    body: "경기 날짜까지 리그 일정은 자동 진행됩니다.",
+    okLabel: "확인",
+    cancelLabel: "취소",
+  });
+  if (!confirmed) return;
+
+  setLoading(true, "경기가 있는 날짜까지 자동 진행 중...");
+  try {
+    await fetchJson("/api/game/auto-advance-to-next-user-game-day", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_team_id: state.selectedTeamId,
+      }),
+    });
+    invalidatePostGameViewCaches(state.selectedTeamId);
+    await refreshMainDashboard();
+    alert("경기가 있는 날짜까지 자동 진행이 완료되었습니다.");
+  } catch (e) {
+    alert(`자동 진행 실패: ${e.message}`);
+  } finally {
+    setLoading(false);
   }
 }
 
@@ -187,6 +310,7 @@ async function createNewGame() {
     });
 
     state.lastSaveSlotId = response.slot_id;
+    invalidateAllTeamDetailCaches();
     await renderTeams();
     showTeamSelection();
   } finally {
@@ -203,6 +327,8 @@ async function continueGame() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ slot_id: state.lastSaveSlotId, strict: true })
     });
+
+    invalidateAllTeamDetailCaches();
 
     const savedTeamId = String(loaded.user_team_id || "").toUpperCase();
     if (savedTeamId) {
@@ -239,7 +365,22 @@ async function confirmTeamSelection(teamId, fullName) {
     });
   }
 
+  invalidateAllTeamDetailCaches();
+
   showMainScreen();
 }
 
-export { showTeamSelection, showMainScreen, randomTipoffTime, fetchInGameDate, refreshMainDashboard, loadSavesStatus, renderTeams, createNewGame, continueGame, confirmTeamSelection };
+export {
+  showTeamSelection,
+  showMainScreen,
+  randomTipoffTime,
+  fetchInGameDate,
+  refreshMainDashboard,
+  progressNextGameFromHome,
+  autoAdvanceToNextGameDayFromHome,
+  loadSavesStatus,
+  renderTeams,
+  createNewGame,
+  continueGame,
+  confirmTeamSelection,
+};

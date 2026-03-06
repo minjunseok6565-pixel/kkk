@@ -253,6 +253,12 @@ class V2Game(TypedDict):
     possessions_per_team: int
 
 
+class V2LineScoreRow(TypedDict):
+    period: int
+    home: int
+    away: int
+
+
 class V2TeamResult(TypedDict, total=False):
     team_id: str
     totals: Dict[str, Any]
@@ -283,9 +289,40 @@ class GameResultV2(TypedDict, total=False):
     final: Dict[str, int]          # {team_id: points}
     teams: Dict[str, V2TeamResult] # {team_id: V2TeamResult}
     game_state: V2GameState
+    linescore: List[V2LineScoreRow]
     meta: V2Meta
     debug: Dict[str, Any]
     raw: Dict[str, Any]
+
+
+class StandingsCacheBuiltFrom(TypedDict):
+    season_id: Optional[str]
+    regular_final_count: int
+
+
+class StandingsTeamRecord(TypedDict):
+    wins: int
+    losses: int
+    pf: int
+    pa: int
+    home_wins: int
+    home_losses: int
+    away_wins: int
+    away_losses: int
+    div_wins: int
+    div_losses: int
+    conf_wins: int
+    conf_losses: int
+    recent10: List[int]
+    streak_type: str
+    streak_len: int
+
+
+class StandingsCache(TypedDict):
+    version: int
+    built_from: StandingsCacheBuiltFrom
+    applied_game_ids: Dict[str, bool]
+    records_by_team: Dict[str, StandingsTeamRecord]
 
 
 # ============================================================================

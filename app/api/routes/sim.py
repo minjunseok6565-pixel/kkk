@@ -1,12 +1,78 @@
 from __future__ import annotations
 
+from typing import Any, Dict, Iterable
+
 from fastapi import APIRouter, HTTPException
 
 import state
-from sim.league_sim import advance_league_until, simulate_single_game
-from app.schemas.common import AdvanceLeagueRequest, SimGameRequest
+from config import ALL_TEAM_IDS, TEAM_TO_CONF_DIV
+from sim.league_sim import (
+    advance_league_until,
+    auto_advance_to_next_user_game_day,
+    progress_next_user_game_day,
+    simulate_single_game,
+)
+from state_modules.state_standings import apply_final_game, create_empty_standings_cache
+from app.schemas.common import (
+    AdvanceLeagueRequest,
+    AutoAdvanceToNextUserGameDayRequest,
+    ProgressNextUserGameDayRequest,
+    SimGameRequest,
+)
 
 router = APIRouter()
+
+
+def _iter_unique_game_ids(game_ids: Iterable[Any]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for gid in game_ids:
+        s = str(gid or "").strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
+def _apply_standings_cache_incremental_updates(*, game_ids: Iterable[Any]) -> Dict[str, int]:
+    """Apply incremental standings-cache updates for the provided game_ids.
+
+    Notes:
+    - Uses current master_schedule as SSOT for final scores/status.
+    - Safe to call repeatedly: duplicate applies are skipped by `applied_game_ids`.
+    """
+    target_ids = _iter_unique_game_ids(game_ids)
+    if not target_ids:
+        return {"candidates": 0, "applied": 0, "missing": 0}
+
+    schedule = state.get_league_schedule_snapshot() or {}
+    master_schedule = schedule.get("master_schedule") if isinstance(schedule, dict) else {}
+    master_schedule = master_schedule if isinstance(master_schedule, dict) else {}
+    by_id = master_schedule.get("by_id") if isinstance(master_schedule.get("by_id"), dict) else {}
+    games = master_schedule.get("games") if isinstance(master_schedule.get("games"), list) else []
+    games_by_id = {str(g.get("game_id") or ""): g for g in games if isinstance(g, dict) and g.get("game_id")}
+
+    season_id = str(schedule.get("active_season_id") or "") or None
+    cache = state.get_standings_cache_snapshot() or {}
+    if not isinstance(cache, dict) or not isinstance(cache.get("records_by_team"), dict):
+        cache = create_empty_standings_cache(list(ALL_TEAM_IDS), season_id=season_id)
+
+    applied = 0
+    missing = 0
+    for gid in target_ids:
+        g = by_id.get(gid) if isinstance(by_id, dict) else None
+        if not isinstance(g, dict):
+            g = games_by_id.get(gid)
+        if not isinstance(g, dict):
+            missing += 1
+            continue
+        cache, changed = apply_final_game(cache, g, TEAM_TO_CONF_DIV)
+        if changed:
+            applied += 1
+
+    state.set_standings_cache(cache)
+    return {"candidates": len(target_ids), "applied": int(applied), "missing": int(missing)}
 
 
 
@@ -29,6 +95,7 @@ async def api_simulate_game(req: SimGameRequest):
             home_tactics=req.home_tactics,
             away_tactics=req.away_tactics,
         )
+        _apply_standings_cache_incremental_updates(game_ids=[result.get("game_id")])
         return result
     except ValueError as e:
         # 팀을 찾지 못한 경우 등
@@ -51,39 +118,17 @@ async def api_advance_league(req: AdvanceLeagueRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
     db_path = state.get_db_path()
+    _apply_standings_cache_incremental_updates(
+        game_ids=[g.get("game_id") for g in simulated if isinstance(g, dict)]
+    )
 
-    # 2차: 월별 대학 스탯 스냅샷(변동성 모델) + watch-run(사전 빅보드) 체크포인트 갱신
-    try:
-        from college.service import run_monthly_watch_and_stats_checkpoints
+    college_checkpoints, scouting_checkpoints = _run_monthly_checkpoints(
+        db_path=str(db_path),
+        from_date=str(prev_date),
+        to_date=str(req.target_date),
+        api_key=req.apiKey,
+    )
 
-        college_checkpoints = run_monthly_watch_and_stats_checkpoints(
-            str(db_path),
-            from_date=str(prev_date),
-            to_date=str(req.target_date),
-            min_inclusion_prob=0.35,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"college monthly checkpoints failed: {e}") from e
-
-    # 3차: 월별 스카우팅 리포트 체크포인트(유저 선택 기반)
-    # - ACTIVE assignment가 없으면 no-op이어야 한다.
-    # - 월말 기준 14일 이내 배정된 스카우터는 해당 월 리포트를 작성하지 않는다.
-    try:
-        from scouting.service import run_monthly_scouting_checkpoints
-
-        scouting_checkpoints = run_monthly_scouting_checkpoints(
-            str(db_path),
-            from_date=str(prev_date),
-            to_date=str(req.target_date),
-            api_key=req.apiKey,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"scouting monthly checkpoints failed: {e}") from e
-    
     return {
         "target_date": req.target_date,
         "simulated_count": len(simulated),
@@ -91,3 +136,105 @@ async def api_advance_league(req: AdvanceLeagueRequest):
         "college_checkpoints": college_checkpoints,
         "scouting_checkpoints": scouting_checkpoints,
     }
+
+
+def _run_monthly_checkpoints(*, db_path: str, from_date: str, to_date: str, api_key: str | None):
+
+    try:
+        from college.service import run_monthly_watch_and_stats_checkpoints
+
+        college_checkpoints = run_monthly_watch_and_stats_checkpoints(
+            str(db_path),
+            from_date=str(from_date),
+            to_date=str(to_date),
+            min_inclusion_prob=0.35,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"college monthly checkpoints failed: {e}") from e
+
+    try:
+        from scouting.service import run_monthly_scouting_checkpoints
+
+        scouting_checkpoints = run_monthly_scouting_checkpoints(
+            str(db_path),
+            from_date=str(from_date),
+            to_date=str(to_date),
+            api_key=api_key,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"scouting monthly checkpoints failed: {e}") from e
+    
+    return college_checkpoints, scouting_checkpoints
+
+
+@router.post("/api/game/progress-next-user-game-day")
+async def api_progress_next_user_game_day(req: ProgressNextUserGameDayRequest):
+    prev_date = state.get_current_date_as_date().isoformat()
+    try:
+        result = progress_next_user_game_day(req.user_team_id, mode=req.mode)
+    except ValueError as e:
+        msg = str(e)
+        if msg.startswith("INVALID_MODE"):
+            raise HTTPException(status_code=400, detail=msg)
+        if msg.startswith("NO_NEXT_USER_GAME"):
+            raise HTTPException(status_code=409, detail=msg)
+        if msg.startswith("USER_GAME_NOT_TODAY"):
+            raise HTTPException(status_code=409, detail=msg)
+        if msg.startswith("USER_GAME_ALREADY_FINAL"):
+            raise HTTPException(status_code=409, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+
+    game_ids: list[str] = []
+    auto_ids = ((result.get("auto_advance") or {}).get("simulated_game_ids") or []) if isinstance(result, dict) else []
+    if isinstance(auto_ids, list):
+        game_ids.extend([str(x) for x in auto_ids])
+    user_gid = (((result.get("game_day") or {}).get("user_game") or {}).get("game_id")) if isinstance(result, dict) else None
+    if user_gid:
+        game_ids.append(str(user_gid))
+    other_ids = ((result.get("game_day") or {}).get("other_game_ids") or []) if isinstance(result, dict) else []
+    if isinstance(other_ids, list):
+        game_ids.extend([str(x) for x in other_ids])
+    _apply_standings_cache_incremental_updates(game_ids=game_ids)
+
+    current_after = state.get_current_date_as_date().isoformat()
+    db_path = state.get_db_path()
+    college_checkpoints, scouting_checkpoints = _run_monthly_checkpoints(
+        db_path=str(db_path),
+        from_date=str(prev_date),
+        to_date=str(current_after),
+        api_key=req.apiKey,
+    )
+    result["college_checkpoints"] = college_checkpoints
+    result["scouting_checkpoints"] = scouting_checkpoints
+    return result
+
+
+@router.post("/api/game/auto-advance-to-next-user-game-day")
+async def api_auto_advance_to_next_user_game_day(req: AutoAdvanceToNextUserGameDayRequest):
+    prev_date = state.get_current_date_as_date().isoformat()
+    try:
+        result = auto_advance_to_next_user_game_day(req.user_team_id)
+    except ValueError as e:
+        msg = str(e)
+        if msg.startswith("NO_NEXT_USER_GAME"):
+            raise HTTPException(status_code=409, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+
+    auto_ids = ((result.get("auto_advance") or {}).get("simulated_game_ids") or []) if isinstance(result, dict) else []
+    _apply_standings_cache_incremental_updates(game_ids=auto_ids if isinstance(auto_ids, list) else [])
+
+    current_after = state.get_current_date_as_date().isoformat()
+    db_path = state.get_db_path()
+    college_checkpoints, scouting_checkpoints = _run_monthly_checkpoints(
+        db_path=str(db_path),
+        from_date=str(prev_date),
+        to_date=str(current_after),
+        api_key=req.apiKey,
+    )
+    result["college_checkpoints"] = college_checkpoints
+    result["scouting_checkpoints"] = scouting_checkpoints
+    return result

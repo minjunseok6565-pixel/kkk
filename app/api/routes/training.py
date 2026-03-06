@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import datetime as _dt
 import logging
+import datetime as _dt
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -18,6 +18,43 @@ from app.schemas.training import PlayerTrainingPlanRequest, TeamTrainingPlanRequ
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _resolve_practice_fallback_schemes(team_id: str) -> tuple[Optional[str], Optional[str]]:
+    fb_off = None
+    fb_def = None
+    try:
+        from sim import roster_adapter as _roster_adapter
+        from matchengine_v3.tactics import canonical_defense_scheme
+
+        cfg = _roster_adapter._build_tactics_config(None)
+        _roster_adapter._apply_default_coach_preset(team_id, cfg)
+        _roster_adapter._apply_coach_preset_tactics(team_id, cfg, None)
+        fb_off = str(cfg.offense_scheme)
+        fb_def = canonical_defense_scheme(cfg.defense_scheme)
+    except Exception:
+        fb_off, fb_def = (None, None)
+    return fb_off, fb_def
+
+
+def _build_days_to_next_game_map(team_id: str, date_from: str, date_to: str) -> Dict[str, Optional[int]]:
+    start = _dt.date.fromisoformat(date_from)
+    end = _dt.date.fromisoformat(date_to)
+    out: Dict[str, Optional[int]] = {}
+    day = start
+    while day <= end:
+        day_iso = day.isoformat()
+        try:
+            out[day_iso] = state.get_days_to_next_game(team_id=team_id, date_iso=day_iso)
+        except Exception:
+            logger.exception(
+                "state.get_days_to_next_game failed (practice range). team=%s date=%s",
+                team_id,
+                day_iso,
+            )
+            out[day_iso] = None
+        day += _dt.timedelta(days=1)
+    return out
 
 
 
@@ -180,19 +217,7 @@ async def api_get_team_practice_session(
         d2g = None
 
     # Best-effort fallback schemes from coach presets.
-    fb_off = None
-    fb_def = None
-    try:
-        from sim import roster_adapter as _roster_adapter
-        from matchengine_v3.tactics import canonical_defense_scheme
-
-        cfg = _roster_adapter._build_tactics_config(None)
-        _roster_adapter._apply_default_coach_preset(tid, cfg)
-        _roster_adapter._apply_coach_preset_tactics(tid, cfg, None)
-        fb_off = str(cfg.offense_scheme)
-        fb_def = canonical_defense_scheme(cfg.defense_scheme)
-    except Exception:
-        fb_off, fb_def = (None, None)
+    fb_off, fb_def = _resolve_practice_fallback_schemes(tid)
 
     with LeagueRepo(db_path) as repo:
         repo.init_db()
@@ -253,6 +278,75 @@ async def api_list_team_practice_sessions(
             date_to=date_to,
         )
     return {"team_id": str(team_id).upper(), "season_year": sy, "sessions": rows}
+
+
+@router.get("/api/practice/team/{team_id}/sessions/resolve")
+async def api_resolve_team_practice_sessions(
+    team_id: str,
+    date_from: str,
+    date_to: str,
+    season_year: Optional[int] = None,
+    include_games: bool = False,
+    only_missing: bool = True,
+    max_days: int = 42,
+):
+    """Resolve a date-range sessions map in one request.
+
+    Existing stored rows are returned as-is, and missing rows can be auto-resolved/persisted.
+    """
+    db_path = state.get_db_path()
+    league_ctx = state.get_league_context_snapshot() or {}
+    sy = int(season_year or (league_ctx.get("season_year") or 0))
+    if sy <= 0:
+        raise HTTPException(status_code=500, detail="Invalid season_year in state.")
+
+    tid = str(team_id).upper()
+    df = game_time.require_date_iso(date_from, field="date_from")
+    dt = game_time.require_date_iso(date_to, field="date_to")
+    if dt < df:
+        raise HTTPException(status_code=400, detail="date_to must be >= date_from")
+
+    safe_max_days = max(1, min(int(max_days), 84))
+
+    d2g_map = _build_days_to_next_game_map(tid, df, dt)
+    skip_dates = set()
+    if not include_games:
+        skip_dates = {d for d, d2g in d2g_map.items() if d2g == 0}
+
+    fb_off, fb_def = _resolve_practice_fallback_schemes(tid)
+
+    from practice.service import resolve_team_practice_sessions_in_range
+
+    with LeagueRepo(db_path) as repo:
+        repo.init_db()
+        roster_rows = repo.get_team_roster(tid)
+        roster_pids = [str(r.get("player_id")) for r in (roster_rows or []) if r.get("player_id")]
+        try:
+            result = resolve_team_practice_sessions_in_range(
+                repo=repo,
+                team_id=tid,
+                season_year=sy,
+                date_from=df,
+                date_to=dt,
+                fallback_off_scheme=fb_off,
+                fallback_def_scheme=fb_def,
+                roster_pids=roster_pids,
+                days_to_next_game_by_date=d2g_map,
+                skip_dates=skip_dates,
+                only_missing=bool(only_missing),
+                max_days=safe_max_days,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "team_id": tid,
+        "season_year": sy,
+        "date_from": df,
+        "date_to": dt,
+        "sessions": result.get("sessions") or {},
+        "meta": result.get("meta") or {},
+    }
 
 
 

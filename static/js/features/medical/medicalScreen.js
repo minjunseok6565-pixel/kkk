@@ -1,11 +1,14 @@
 import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
-import { fetchJson, setLoading } from "../../core/api.js";
+import { fetchCachedJson, getCachedValue, fetchJson, setLoading } from "../../core/api.js";
 import { num, clamp } from "../../core/guards.js";
 import { formatPercent, formatSignedDelta } from "../../core/format.js";
 import { TEAM_FULL_NAMES } from "../../core/constants/teams.js";
 import { renderEmptyScheduleRow } from "../schedule/scheduleScreen.js";
+
+const MEDICAL_CACHE_TTL_MS = 10000;
+let medicalRequestSeq = 0;
 
 function renderMedicalEmpty(tbody, colSpan, text) {
   tbody.innerHTML = `<tr><td colspan="${colSpan}" class="schedule-empty">${text}</td></tr>`;
@@ -192,13 +195,16 @@ async function showMedicalScreen() {
     alert('먼저 팀을 선택해주세요.');
     return;
   }
-  setLoading(true, '메디컬 센터 데이터를 불러오는 중...');
-  try {
-    const [overview, alerts, calendar] = await Promise.all([
-      fetchJson(`/api/medical/team/${encodeURIComponent(state.selectedTeamId)}/overview`),
-      fetchJson(`/api/medical/team/${encodeURIComponent(state.selectedTeamId)}/alerts`).catch(() => ({})),
-      fetchJson(`/api/medical/team/${encodeURIComponent(state.selectedTeamId)}/risk-calendar?days=14`).catch(() => ({ days: [] })),
-    ]);
+  const teamId = String(state.selectedTeamId || '').toUpperCase();
+  const overviewKey = `medical:overview:${teamId}`;
+  const alertsKey = `medical:alerts:${teamId}`;
+  const calendarKey = `medical:risk-calendar:${teamId}:14`;
+  const requestSeq = medicalRequestSeq + 1;
+  medicalRequestSeq = requestSeq;
+  const hasCached = Boolean(getCachedValue(overviewKey));
+  if (!hasCached) setLoading(true, '메디컬 센터 데이터를 불러오는 중...');
+
+  const applyMedicalPayload = async (overview, alerts, calendar) => {
     state.medicalOverview = overview;
     const teamName = state.selectedTeamName || TEAM_FULL_NAMES[state.selectedTeamId] || state.selectedTeamId;
     els.medicalTitle.textContent = `${teamName} 메디컬 센터`;
@@ -226,8 +232,33 @@ async function showMedicalScreen() {
     }
 
     activateScreen(els.medicalScreen);
+  };
+
+  try {
+    const [overview, alerts, calendar] = await Promise.all([
+      fetchCachedJson({
+        key: overviewKey,
+        url: `/api/medical/team/${encodeURIComponent(teamId)}/overview`,
+        ttlMs: MEDICAL_CACHE_TTL_MS,
+        staleWhileRevalidate: true,
+      }),
+      fetchCachedJson({
+        key: alertsKey,
+        url: `/api/medical/team/${encodeURIComponent(teamId)}/alerts`,
+        ttlMs: MEDICAL_CACHE_TTL_MS,
+        staleWhileRevalidate: true,
+      }).catch(() => ({})),
+      fetchCachedJson({
+        key: calendarKey,
+        url: `/api/medical/team/${encodeURIComponent(teamId)}/risk-calendar?days=14`,
+        ttlMs: MEDICAL_CACHE_TTL_MS,
+        staleWhileRevalidate: true,
+      }).catch(() => ({ days: [] })),
+    ]);
+    if (requestSeq !== medicalRequestSeq) return;
+    await applyMedicalPayload(overview, alerts, calendar);
   } finally {
-    setLoading(false);
+    if (requestSeq === medicalRequestSeq) setLoading(false);
   }
 }
 

@@ -2,13 +2,19 @@ import { els } from "./dom.js";
 import { state } from "./state.js";
 import { activateScreen } from "./router.js";
 import { fetchJson, showConfirmModal } from "../core/api.js";
-import { showMainScreen, createNewGame, continueGame } from "../features/main/mainScreen.js";
+import {
+  showMainScreen,
+  createNewGame,
+  continueGame,
+  progressNextGameFromHome,
+  autoAdvanceToNextGameDayFromHome,
+} from "../features/main/mainScreen.js";
 import { showMyTeamScreen, rerenderMyTeamBoard } from "../features/myteam/myTeamScreen.js";
-import { showTacticsScreen, toggleTacticsOptions } from "../features/tactics/tacticsScreen.js";
+import { showTacticsScreen, toggleTacticsOptions, saveTacticsDraft, hasUnsavedTacticsChanges } from "../features/tactics/tacticsScreen.js";
 import { showScheduleScreen } from "../features/schedule/scheduleScreen.js";
 import { showTrainingScreen } from "../features/training/trainingScreen.js";
 import { showStandingsScreen } from "../features/standings/standingsScreen.js";
-import { showCollegeScreen, switchCollegeTab } from "../features/college/collegeScreen.js";
+import { showCollegeScreen, switchCollegeTab, ensureCollegeTabData } from "../features/college/collegeScreen.js";
 import { loadCollegeLeaders } from "../features/college/leaders.js";
 import { closeCollegeBigboardDetailScreen } from "../features/college/bigboard.js";
 import {
@@ -21,20 +27,48 @@ import {
   searchScoutingPlayers,
   queueScoutingPlayerSearch,
   loadCollegeScouting,
+  invalidateCollegeScoutingCache,
 } from "../features/college/scouting.js";
 import { showMedicalScreen } from "../features/medical/medicalScreen.js";
 import { renderTrainingDetail } from "../features/training/trainingDetail.js";
 
 function bindEvents() {
+  const onCollegeTabClick = (tab) => {
+    switchCollegeTab(tab);
+    ensureCollegeTabData(tab).catch((e) => alert(e.message));
+  };
+
   els.newGameBtn.addEventListener("click", () => createNewGame().catch((e) => alert(e.message)));
   els.continueBtn.addEventListener("click", () => continueGame().catch((e) => alert(e.message)));
   els.myTeamBtn.addEventListener("click", () => showMyTeamScreen().catch((e) => alert(e.message)));
   els.tacticsMenuBtn.addEventListener("click", () => showTacticsScreen().catch((e) => alert(e.message)));
   els.nextGameTacticsBtn.addEventListener("click", () => showTacticsScreen().catch((e) => alert(e.message)));
+  els.nextGamePlayBtn.addEventListener("click", () => progressNextGameFromHome().catch((e) => alert(e.message)));
+  els.nextGameQuickBtn.addEventListener("click", () => autoAdvanceToNextGameDayFromHome().catch((e) => alert(e.message)));
   els.scheduleBtn.addEventListener("click", () => showScheduleScreen().catch((e) => alert(e.message)));
   els.scheduleBackBtn.addEventListener("click", () => showMainScreen());
+  els.gameResultBackBtn?.addEventListener("click", () => showMainScreen());
   els.trainingMenuBtn.addEventListener("click", () => showTrainingScreen().catch((e) => alert(e.message)));
-  els.tacticsBackBtn.addEventListener("click", () => showMainScreen());
+  els.tacticsBackBtn.addEventListener("click", async () => {
+    try {
+      if (hasUnsavedTacticsChanges()) {
+        const shouldSave = await showConfirmModal({
+          title: "저장되지 않은 전술 변경 사항",
+          body: "저장하지 않은 전술 변경 사항이 있습니다. 저장 후 나가시겠습니까?",
+          okLabel: "예",
+          cancelLabel: "아니오",
+        });
+        if (shouldSave) {
+          const saved = await saveTacticsDraft({ showSuccessMessage: false });
+          if (!saved) return;
+        }
+      }
+      showMainScreen();
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+  els.tacticsSaveBtn?.addEventListener("click", () => saveTacticsDraft({ showSuccessMessage: true }).catch((e) => alert(e.message)));
   els.tacticsOffenseBtn.addEventListener("click", () => toggleTacticsOptions("offense"));
   els.tacticsDefenseBtn.addEventListener("click", () => toggleTacticsOptions("defense"));
   els.standingsMenuBtn.addEventListener("click", () => showStandingsScreen().catch((e) => alert(e.message)));
@@ -44,10 +78,10 @@ function bindEvents() {
   els.medicalBackBtn.addEventListener("click", () => showMainScreen());
   els.standingsBackBtn.addEventListener("click", () => showMainScreen());
   els.collegeBackBtn.addEventListener("click", () => showMainScreen());
-  els.collegeTabTeams.addEventListener("click", () => switchCollegeTab("teams"));
-  els.collegeTabLeaders.addEventListener("click", () => switchCollegeTab("leaders"));
-  els.collegeTabBigboard.addEventListener("click", () => switchCollegeTab("bigboard"));
-  els.collegeTabScouting.addEventListener("click", () => switchCollegeTab("scouting"));
+  els.collegeTabTeams.addEventListener("click", () => onCollegeTabClick("teams"));
+  els.collegeTabLeaders.addEventListener("click", () => onCollegeTabClick("leaders"));
+  els.collegeTabBigboard.addEventListener("click", () => onCollegeTabClick("bigboard"));
+  els.collegeTabScouting.addEventListener("click", () => onCollegeTabClick("scouting"));
   els.collegeLeaderSort.addEventListener("change", () => {
     state.collegeLeadersSort = els.collegeLeaderSort.value || "pts";
     loadCollegeLeaders().catch((e) => alert(e.message));
@@ -157,7 +191,8 @@ function bindEvents() {
         body: JSON.stringify({ team_id: state.selectedTeamId, scout_id: scoutId, player_id: playerId, target_kind: "COLLEGE" })
       });
       if (player && playerId) state.scoutingPlayerLookup[playerId] = player;
-      await loadCollegeScouting();
+      invalidateCollegeScoutingCache(state.selectedTeamId);
+      await loadCollegeScouting({ force: true });
       setCollegeScoutingFeedback(`${scout?.display_name || scoutId} → ${player?.name || playerId} 배정 완료`, "ok");
       closeScoutPlayerModal();
     } catch (error) {

@@ -507,6 +507,105 @@ def list_team_practice_sessions(
     return out
 
 
+def resolve_team_practice_sessions_in_range(
+    *,
+    repo: LeagueRepo,
+    team_id: str,
+    season_year: int,
+    date_from: str,
+    date_to: str,
+    fallback_off_scheme: Optional[str] = None,
+    fallback_def_scheme: Optional[str] = None,
+    roster_pids: Optional[list[str]] = None,
+    days_to_next_game_by_date: Optional[Mapping[str, Optional[int]]] = None,
+    skip_dates: Optional[set[str]] = None,
+    only_missing: bool = True,
+    max_days: int = 42,
+) -> Dict[str, Any]:
+    """Resolve sessions in a date range and return normalized date->session map.
+
+    Commercial constraints:
+      - Uses in-game date only (no host clock).
+      - Deterministic DB writes via resolve_practice_session.
+      - Existing stored sessions are preserved.
+    """
+    df = game_time.require_date_iso(date_from, field="date_from")
+    dt = game_time.require_date_iso(date_to, field="date_to")
+    if dt < df:
+        raise ValueError("date_to must be >= date_from")
+
+    total_days = int((_dt.date.fromisoformat(dt) - _dt.date.fromisoformat(df)).days) + 1
+    max_allowed = max(1, int(max_days))
+    if total_days > max_allowed:
+        raise ValueError(f"requested date range too large: {total_days} > {max_allowed}")
+
+    tid = str(team_id).upper()
+    sy = int(season_year)
+    roster = [str(pid) for pid in (roster_pids or []) if str(pid)]
+    d2g_map = {str(k)[:10]: v for k, v in (days_to_next_game_by_date or {}).items()}
+    skip_set = {str(x)[:10] for x in (skip_dates or set())}
+
+    start = _dt.date.fromisoformat(df)
+    end = _dt.date.fromisoformat(dt)
+
+    out: Dict[str, Dict[str, Any]] = {}
+    resolved_days = 0
+    stored_hit_days = 0
+    skipped_days = 0
+
+    with repo.transaction() as cur:
+        stored_rows = p_repo.list_team_practice_sessions(
+            cur,
+            team_id=tid,
+            season_year=sy,
+            date_from=df,
+            date_to=dt,
+        )
+
+        day = start
+        while day <= end:
+            day_iso = day.isoformat()
+            day += _dt.timedelta(days=1)
+
+            if day_iso in skip_set:
+                skipped_days += 1
+                continue
+
+            payload = (stored_rows or {}).get(day_iso)
+            if payload is not None:
+                sess = p_types.normalize_session(payload.get("session") or {})
+                out[day_iso] = {"session": sess, "is_user_set": bool(payload.get("is_user_set"))}
+                stored_hit_days += 1
+                if only_missing:
+                    continue
+
+            sess = resolve_practice_session(
+                cur,
+                team_id=tid,
+                season_year=sy,
+                date_iso=day_iso,
+                fallback_off_scheme=fallback_off_scheme,
+                fallback_def_scheme=fallback_def_scheme,
+                roster_pids=roster,
+                days_to_next_game=d2g_map.get(day_iso),
+                now_iso=game_time.utc_like_from_date_iso(day_iso, field="date_iso"),
+            )
+            out[day_iso] = {"session": sess, "is_user_set": bool((payload or {}).get("is_user_set")) if payload else False}
+            if payload is None:
+                resolved_days += 1
+
+    return {
+        "sessions": out,
+        "meta": {
+            "requested_days": total_days,
+            "resolved_days": int(resolved_days),
+            "stored_hit_days": int(stored_hit_days),
+            "skipped_game_days": int(skipped_days),
+            "only_missing": bool(only_missing),
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Core: resolve a per-day session (DB-backed, deterministic)
 # ---------------------------------------------------------------------------
