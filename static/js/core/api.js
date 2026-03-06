@@ -55,6 +55,12 @@ function normalizeCacheKey(key) {
   return String(key || "").trim();
 }
 
+function normalizeOptionalString(value) {
+  if (value == null) return null;
+  const out = String(value).trim();
+  return out || null;
+}
+
 function getCacheStore() {
   if (!state.viewCache || typeof state.viewCache !== "object") state.viewCache = {};
   return state.viewCache;
@@ -94,12 +100,16 @@ function ensureCacheEntryShape(entry, key = "") {
   const ttlMs = normalizeTtlMs(entry.ttlMs);
   const cacheGroup = entry.cacheGroup || resolveCacheGroup(key);
   const estimatedSize = Number(entry.estimatedSize);
+  const sourceEventVersion = normalizeOptionalString(entry.sourceEventVersion);
+  const domainTag = normalizeOptionalString(entry.domainTag);
   return {
     ...entry,
     fetchedAt,
     lastAccessedAt,
     ttlMs,
     cacheGroup,
+    sourceEventVersion,
+    domainTag,
     estimatedSize: Number.isFinite(estimatedSize) ? estimatedSize : estimatePayloadSize(entry.data),
   };
 }
@@ -227,12 +237,16 @@ function setCachedValue(key, data, fetchedAt = Date.now(), options = {}) {
   const now = Date.now();
   const ttlMs = normalizeTtlMs(options.ttlMs);
   const cacheGroup = options.cacheGroup || resolveCacheGroup(normalized);
+  const sourceEventVersion = normalizeOptionalString(options.sourceEventVersion);
+  const domainTag = normalizeOptionalString(options.domainTag);
   getCacheStore()[normalized] = {
     data,
     fetchedAt: Number(fetchedAt) || Date.now(),
     lastAccessedAt: now,
     ttlMs,
     cacheGroup,
+    sourceEventVersion,
+    domainTag,
     estimatedSize: estimatePayloadSize(data),
   };
   maybeRunCacheMaintenance({ incomingKey: normalized });
@@ -257,6 +271,11 @@ function invalidateCachedValuesByPrefix(prefix) {
   Array.from(inflightStore.keys()).forEach((key) => {
     if (String(key).startsWith(normalized)) inflightStore.delete(key);
   });
+}
+
+function invalidateCacheKeys(keys) {
+  const list = Array.isArray(keys) ? keys : [];
+  list.forEach((key) => invalidateCachedValue(key));
 }
 
 function clearAllCachedValues() {
@@ -327,6 +346,17 @@ async function fetchCachedJson({
   return request;
 }
 
+async function prefetchCachedJson(params = {}) {
+  try {
+    return await fetchCachedJson({
+      ...params,
+      staleWhileRevalidate: params.staleWhileRevalidate ?? true,
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
 function setLoading(show, msg = "") {
   els.loadingOverlay.classList.toggle("hidden", !show);
   if (msg) els.loadingText.textContent = msg;
@@ -379,7 +409,9 @@ export {
   setCachedValue,
   invalidateCachedValue,
   invalidateCachedValuesByPrefix,
+  invalidateCacheKeys,
   clearAllCachedValues,
+  prefetchCachedJson,
   setLoading,
   showConfirmModal,
 };

@@ -28,11 +28,19 @@ import {
   queueScoutingPlayerSearch,
   loadCollegeScouting,
   invalidateCollegeScoutingCache,
+  prefetchCollegeScoutingData,
 } from "../features/college/scouting.js";
 import { showMedicalScreen } from "../features/medical/medicalScreen.js";
 import { renderTrainingDetail } from "../features/training/trainingDetail.js";
+import { emitCacheEvent } from "./cacheEvents.js";
+import { CACHE_EVENT_TYPES, getPrefetchPlanForEvent, registerCachePolicyEventHandlers, runPrefetchPlan } from "./cachePolicy.js";
+
+let unregisterCachePolicyHandlers = null;
 
 function bindEvents() {
+  if (!unregisterCachePolicyHandlers) {
+    unregisterCachePolicyHandlers = registerCachePolicyEventHandlers();
+  }
   const onCollegeTabClick = (tab) => {
     switchCollegeTab(tab);
     ensureCollegeTabData(tab).catch((e) => alert(e.message));
@@ -192,6 +200,9 @@ function bindEvents() {
       });
       if (player && playerId) state.scoutingPlayerLookup[playerId] = player;
       invalidateCollegeScoutingCache(state.selectedTeamId);
+      emitCacheEvent(CACHE_EVENT_TYPES.SCOUT_ASSIGN, { teamId: state.selectedTeamId, scoutId, playerId });
+      void runPrefetchPlan(getPrefetchPlanForEvent(CACHE_EVENT_TYPES.SCOUT_ASSIGN, { teamId: state.selectedTeamId, scoutId, playerId }));
+      void prefetchCollegeScoutingData(state.selectedTeamId);
       await loadCollegeScouting({ force: true });
       setCollegeScoutingFeedback(`${scout?.display_name || scoutId} → ${player?.name || playerId} 배정 완료`, "ok");
       closeScoutPlayerModal();

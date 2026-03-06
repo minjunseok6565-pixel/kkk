@@ -2,6 +2,7 @@ import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
 import { fetchJson, invalidateCachedValuesByPrefix, setLoading, showConfirmModal } from "../../core/api.js";
+import { CACHE_EVENT_TYPES, getPrefetchPlanAfterGame, invalidateByEvent, runPrefetchPlan } from "../../app/cachePolicy.js";
 import { formatIsoDate, formatWinPct } from "../../core/format.js";
 import { num } from "../../core/guards.js";
 import { TEAM_FULL_NAMES, applyTeamLogo, getTeamBranding, renderTeamLogoMark, getScheduleVenueText } from "../../core/constants/teams.js";
@@ -33,22 +34,121 @@ function randomTipoffTime() {
   return `${hour12}:${String(minute).padStart(2, "0")} PM`;
 }
 
+const POST_GAME_PREFETCH_BUDGET_MS = 2000;
+
+function getNowMs() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function isCacheDebugEnabled() {
+  return typeof globalThis !== "undefined" && Boolean(globalThis.__CACHE_DEBUG__);
+}
+
+function debugPostGamePrefetch(message, meta = {}) {
+  if (!isCacheDebugEnabled()) return;
+  console.debug(`[cache][post-game] ${message}`, meta);
+}
+
+function getPrefetchTier(item) {
+  const tier = Number(item?.priorityTier);
+  if (Number.isFinite(tier) && tier > 0) return tier;
+  return 3;
+}
+
+function deferTask(task) {
+  if (typeof task !== "function") return;
+  if (typeof globalThis !== "undefined" && typeof globalThis.requestIdleCallback === "function") {
+    globalThis.requestIdleCallback(() => task(), { timeout: 1500 });
+    return;
+  }
+  window.setTimeout(() => task(), 0);
+}
+
+async function runPostGamePrefetchWithBudget(plan = [], { budgetMs = POST_GAME_PREFETCH_BUDGET_MS } = {}) {
+  const items = (Array.isArray(plan) ? plan : []).filter((item) => item?.key && item?.url);
+  if (!items.length) return;
+
+  const tierMap = new Map();
+  items.forEach((item) => {
+    const tier = getPrefetchTier(item);
+    const list = tierMap.get(tier) || [];
+    list.push(item);
+    tierMap.set(tier, list);
+  });
+
+  const tierOrder = [...tierMap.keys()].sort((a, b) => a - b);
+  const startedAt = getNowMs();
+
+  for (let idx = 0; idx < tierOrder.length; idx += 1) {
+    const tier = tierOrder[idx];
+    const elapsed = getNowMs() - startedAt;
+    if (elapsed >= budgetMs) {
+      const remainingItems = tierOrder.slice(idx).flatMap((t) => tierMap.get(t) || []);
+      debugPostGamePrefetch("budget-exhausted", {
+        budgetMs,
+        elapsedMs: Math.round(elapsed),
+        deferredCount: remainingItems.length,
+      });
+      deferTask(() => {
+        debugPostGamePrefetch("continuation-start", { count: remainingItems.length });
+        void runPrefetchPlan(remainingItems);
+      });
+      return;
+    }
+
+    const tierItems = tierMap.get(tier) || [];
+    debugPostGamePrefetch("tier-start", { tier, count: tierItems.length, elapsedMs: Math.round(elapsed) });
+    await runPrefetchPlan(tierItems);
+    debugPostGamePrefetch("tier-complete", { tier, count: tierItems.length });
+  }
+}
+
+function resolvePostGameTrainingRangeContext(teamId) {
+  const tid = String(teamId || state.selectedTeamId || "").toUpperCase();
+  if (!tid) return null;
+  const cached = state.trainingPrefetchContext;
+  if (!cached) return null;
+  const cachedTeamId = String(cached.teamId || "").toUpperCase();
+  const from = String(cached.from || "").slice(0, 10);
+  const to = String(cached.to || "").slice(0, 10);
+  if (cachedTeamId !== tid || !from || !to) return null;
+  return { from, to };
+}
+
 function invalidatePostGameViewCaches(teamId) {
   const tid = String(teamId || state.selectedTeamId || "").toUpperCase();
   if (!tid) return;
+  invalidateByEvent(CACHE_EVENT_TYPES.GAME_PROGRESS, { teamId: tid });
+}
 
-  invalidateCachedValuesByPrefix(`schedule:${tid}`);
-  invalidateCachedValuesByPrefix("standings:");
-  invalidateCachedValuesByPrefix(`medical:overview:${tid}`);
-  invalidateCachedValuesByPrefix(`medical:alerts:${tid}`);
-  invalidateCachedValuesByPrefix(`medical:risk-calendar:${tid}`);
-  invalidateCachedValuesByPrefix(`training:schedule:${tid}`);
-  invalidateCachedValuesByPrefix(`training:sessions:${tid}:`);
-  invalidateCachedValuesByPrefix(`training:sessions-resolve:${tid}:`);
-  invalidateCachedValuesByPrefix(`training:session:${tid}:`);
-  invalidateCachedValuesByPrefix(`training:team-detail:${tid}`);
-  invalidateCachedValuesByPrefix(`training:familiarity:${tid}:`);
-  invalidateCachedValuesByPrefix(`team-detail:${tid}`);
+function queuePostGamePrefetch(teamId) {
+  const tid = String(teamId || state.selectedTeamId || "").toUpperCase();
+  if (!tid) return;
+  const trainingRange = resolvePostGameTrainingRangeContext(tid);
+  const plan = getPrefetchPlanAfterGame({
+    teamId: tid,
+    currentDate: state.currentDate,
+    trainingRange,
+  });
+  if (!plan.length) return;
+
+  const criticalPlan = plan.filter((item) => getPrefetchTier(item) <= 2 || item?.critical);
+  const deferredPlan = plan.filter((item) => !criticalPlan.includes(item));
+
+  if (criticalPlan.length) {
+    debugPostGamePrefetch("critical-start", {
+      count: criticalPlan.length,
+      hasTrainingRangeContext: Boolean(trainingRange),
+    });
+    void runPrefetchPlan(criticalPlan);
+  }
+
+  if (deferredPlan.length) {
+    void runPostGamePrefetchWithBudget(deferredPlan, { budgetMs: POST_GAME_PREFETCH_BUDGET_MS });
+  }
 }
 
 function invalidateAllTeamDetailCaches() {
@@ -158,6 +258,7 @@ async function progressNextGameFromHome() {
     });
 
     invalidatePostGameViewCaches(state.selectedTeamId);
+    queuePostGamePrefetch(state.selectedTeamId);
 
     const playedGameId = progressResult?.game_day?.user_game?.game_id;
     if (playedGameId) {
@@ -199,6 +300,7 @@ async function autoAdvanceToNextGameDayFromHome() {
       }),
     });
     invalidatePostGameViewCaches(state.selectedTeamId);
+    queuePostGamePrefetch(state.selectedTeamId);
     await refreshMainDashboard();
     alert("경기가 있는 날짜까지 자동 진행이 완료되었습니다.");
   } catch (e) {

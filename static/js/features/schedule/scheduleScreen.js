@@ -2,10 +2,10 @@ import { els } from "../../app/dom.js";
 import { state } from "../../app/state.js";
 import { activateScreen } from "../../app/router.js";
 import { fetchCachedJson, getCachedValue, setLoading } from "../../core/api.js";
+import { CACHE_TTL_MS, buildCacheKeys } from "../../app/cachePolicy.js";
 import { TEAM_FULL_NAMES, getScheduleVenueText, renderTeamLogoMark } from "../../core/constants/teams.js";
 import { formatLeader } from "../main/homeWidgets.js";
 
-const SCHEDULE_CACHE_TTL_MS = 12000;
 let scheduleRequestSeq = 0;
 
 function isCompletedGame(game) {
@@ -14,6 +14,25 @@ function isCompletedGame(game) {
 
 function renderEmptyScheduleRow(colSpan, text) {
   return `<tr><td colspan="${colSpan}" class="schedule-empty">${text}</td></tr>`;
+}
+
+function formatScheduleResult(result) {
+  const wl = String(result?.wl || "").toUpperCase();
+  const display = String(result?.display || "").trim();
+  if (!display) {
+    return { wl, score: "" };
+  }
+
+  if (wl && display.toUpperCase().startsWith(wl)) {
+    return { wl, score: display.slice(wl.length).trim() };
+  }
+
+  const matched = display.match(/^([WL])\s*(.*)$/i);
+  if (matched) {
+    return { wl: matched[1].toUpperCase(), score: (matched[2] || "").trim() };
+  }
+
+  return { wl, score: display };
 }
 
 function renderScheduleTables(games) {
@@ -27,11 +46,21 @@ function renderScheduleTables(games) {
       const leaders = g.leaders || {};
       const opponentTeamId = String(g.opponent_team_id || "").toUpperCase();
       const venueName = getScheduleVenueText(g);
+      const formattedResult = formatScheduleResult(result);
+      const wlClass = formattedResult.wl === "W" ? "schedule-result-win" : "schedule-result-loss";
       return `
         <tr>
           <td>${g.date_mmdd || "--/--"}</td>
-          <td class="schedule-opponent-cell">${g.opponent_label || "-"} ${renderTeamLogoMark(opponentTeamId, "schedule-team-logo")}<span class="schedule-opponent-name">${venueName}</span></td>
-          <td><span class="schedule-result-badge ${result.wl === "W" ? "schedule-result-win" : "schedule-result-loss"}">${result.display || "-"}</span></td>
+          <td class="schedule-opponent-cell">
+            <div class="schedule-opponent-main">${renderTeamLogoMark(opponentTeamId, "schedule-team-logo")}<span class="schedule-opponent-label">${g.opponent_label || "-"}</span></div>
+            <span class="schedule-opponent-name">${venueName}</span>
+          </td>
+          <td>
+            <span class="schedule-result-badge">
+              <span class="schedule-result-flag ${wlClass}">${formattedResult.wl || "-"}</span>
+              <span class="schedule-result-score">${formattedResult.score || "-"}</span>
+            </span>
+          </td>
           <td>${record.display || "-"}</td>
           <td>${formatLeader(leaders.points)}</td>
           <td>${formatLeader(leaders.rebounds)}</td>
@@ -48,7 +77,10 @@ function renderScheduleTables(games) {
       return `
         <tr>
           <td>${g.date_mmdd || "--/--"}</td>
-          <td class="schedule-opponent-cell">${g.opponent_label || "-"} ${renderTeamLogoMark(opponentTeamId, "schedule-team-logo")}<span class="schedule-opponent-name">${venueName}</span></td>
+          <td class="schedule-opponent-cell">
+            <div class="schedule-opponent-main">${renderTeamLogoMark(opponentTeamId, "schedule-team-logo")}<span class="schedule-opponent-label">${g.opponent_label || "-"}</span></div>
+            <span class="schedule-opponent-name">${venueName}</span>
+          </td>
           <td><span class="schedule-time-chip">${g.tipoff_time || "--:-- --"}</span></td>
         </tr>
       `;
@@ -57,7 +89,7 @@ function renderScheduleTables(games) {
 }
 
 function scheduleCacheKey(teamId) {
-  return `schedule:${String(teamId || "").toUpperCase()}`;
+  return buildCacheKeys(teamId).schedule;
 }
 
 function renderScheduleScreen(schedule, teamId) {
@@ -89,7 +121,7 @@ async function showScheduleScreen() {
     const schedule = await fetchCachedJson({
       key: cacheKey,
       url,
-      ttlMs: SCHEDULE_CACHE_TTL_MS,
+      ttlMs: CACHE_TTL_MS.schedule,
       staleWhileRevalidate: true,
       onRevalidated: (freshSchedule) => {
         const isSameTeam = String(state.selectedTeamId || "").toUpperCase() === teamId;

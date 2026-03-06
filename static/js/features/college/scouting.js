@@ -1,12 +1,13 @@
 import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { fetchCachedJson, fetchJson, invalidateCachedValuesByPrefix } from "../../core/api.js";
+import { CACHE_TTL_MS, buildCacheKeys } from "../../app/cachePolicy.js";
 import { escapeHtml } from "../../core/guards.js";
 
-const COLLEGE_SCOUTING_TTL_MS = 10000;
+const COLLEGE_SCOUTING_TTL_MS = CACHE_TTL_MS.college;
 
 function getCollegeScoutingCachePrefix(teamId) {
-  return `college:scouting:team=${String(teamId || "")}`;
+  return `college:scouting:team=${String(teamId || "").toUpperCase()}`;
 }
 
 function invalidateCollegeScoutingCache(teamId = state.selectedTeamId) {
@@ -20,6 +21,20 @@ function getCollegeScoutingScoutsCacheKey(teamId) {
 
 function getCollegeScoutingReportsCacheKey(teamId) {
   return `${getCollegeScoutingCachePrefix(teamId)}:reports`;
+}
+
+async function prefetchCollegeScoutingData(teamId = state.selectedTeamId) {
+  const tid = String(teamId || "").toUpperCase();
+  if (!tid) return null;
+  const keys = buildCacheKeys(tid);
+  await Promise.all([
+    fetchCachedJson({ key: keys.collegeMeta, url: "/api/college/meta", ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }).catch(() => null),
+    fetchCachedJson({ key: keys.collegeTeams, url: "/api/college/teams", ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }).catch(() => null),
+    fetchCachedJson({ key: keys.collegeExperts, url: "/api/offseason/draft/experts", ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }).catch(() => null),
+    fetchCachedJson({ key: getCollegeScoutingScoutsCacheKey(tid), url: `/api/scouting/scouts?team_id=${encodeURIComponent(tid)}`, ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }).catch(() => null),
+    fetchCachedJson({ key: getCollegeScoutingReportsCacheKey(tid), url: `/api/scouting/reports?team_id=${encodeURIComponent(tid)}&status=all`, ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }).catch(() => null),
+  ]);
+  return true;
 }
 
 function renderCollegeEmpty(tbody, colspan, msg) {
@@ -116,19 +131,19 @@ function renderScoutingReportInbox() {
 }
 
 async function loadCollegeScouting({ force = false } = {}) {
-  const teamId = String(state.selectedTeamId || "");
+  const teamId = String(state.selectedTeamId || "").toUpperCase();
   if (!teamId) return;
   const [scoutsPayload, reportsPayload] = await Promise.all([
     fetchCachedJson({
       key: getCollegeScoutingScoutsCacheKey(teamId),
-      url: `/api/scouting/scouts/${encodeURIComponent(teamId)}`,
+      url: `/api/scouting/scouts?team_id=${encodeURIComponent(teamId)}`,
       ttlMs: COLLEGE_SCOUTING_TTL_MS,
       staleWhileRevalidate: true,
       force,
     }),
     fetchCachedJson({
       key: getCollegeScoutingReportsCacheKey(teamId),
-      url: `/api/scouting/reports?team_id=${encodeURIComponent(teamId)}&limit=50`,
+      url: `/api/scouting/reports?team_id=${encodeURIComponent(teamId)}&status=all`,
       ttlMs: COLLEGE_SCOUTING_TTL_MS,
       staleWhileRevalidate: true,
       force,
@@ -467,6 +482,7 @@ export {
   renderCollegeEmpty,
   setCollegeScoutingFeedback,
   loadCollegeScouting,
+  prefetchCollegeScoutingData,
   invalidateCollegeScoutingCache,
   getScoutingReadStorageKey,
   getScoutingReadMap,

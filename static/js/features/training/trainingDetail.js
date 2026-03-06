@@ -3,7 +3,9 @@ import { els } from "../../app/dom.js";
 import { fetchJson } from "../../core/api.js";
 import { dateToIso, parseIsoDate, addDays } from "../../core/format.js";
 import { TACTICS_OFFENSE_SCHEMES, TACTICS_DEFENSE_SCHEMES } from "../../core/constants/tactics.js";
-import { loadTrainingData } from "./trainingScreen.js";
+import { loadTrainingData, prefetchTrainingCoreData } from "./trainingScreen.js";
+import { CACHE_EVENT_TYPES, getPrefetchPlanForEvent, runPrefetchPlan } from "../../app/cachePolicy.js";
+import { emitCacheEvent } from "../../app/cacheEvents.js";
 import { renderTrainingCalendar } from "./trainingCalendar.js";
 
 function trainingTypeLabel(t) {
@@ -462,6 +464,15 @@ async function renderTrainingDetail(type) {
         ...state.trainingDraftSession
       })
     })));
+    const sorted = [...dates].sort();
+    const trainingRange = {
+      from: sorted[0] || state.currentDate,
+      to: sorted[sorted.length - 1] || state.currentDate,
+    };
+    emitCacheEvent(CACHE_EVENT_TYPES.TRAINING_SAVE, { teamId: state.selectedTeamId, trainingRange });
+    const prefetchPlan = getPrefetchPlanForEvent(CACHE_EVENT_TYPES.TRAINING_SAVE, { teamId: state.selectedTeamId, trainingRange });
+    void runPrefetchPlan(prefetchPlan);
+    await prefetchTrainingCoreData({ teamId: state.selectedTeamId, currentDate: state.currentDate, progressiveSessionHydration: true });
     await loadTrainingData();
     renderTrainingCalendar();
     alert(`${dates.length}일에 훈련을 적용했습니다.`);

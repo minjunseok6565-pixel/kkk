@@ -2,14 +2,78 @@ import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
 import { fetchCachedJson, getCachedValue, setLoading } from "../../core/api.js";
+import { CACHE_TTL_MS, buildCacheKeys } from "../../app/cachePolicy.js";
 import { fetchInGameDate } from "../main/mainScreen.js";
 import { buildCalendar4Weeks, renderTrainingCalendar } from "./trainingCalendar.js";
 import { renderTrainingSummaryStrip, renderTrainingContextPanel, refreshTrainingTypeButtonsState } from "./trainingDetail.js";
 
-const TRAINING_CACHE_TTL_MS = 10000;
 const TRAINING_SESSION_FETCH_CONCURRENCY = 4;
 const TRAINING_SESSION_RENDER_BATCH_MS = 120;
 let trainingRequestSeq = 0;
+
+function normalizeTrainingTeamId(teamId) {
+  return String(teamId || state.selectedTeamId || "").toUpperCase();
+}
+
+function buildTrainingRangeFromCurrentDate(currentDate) {
+  const normalizedCurrentDate = String(currentDate || "").slice(0, 10);
+  if (!normalizedCurrentDate) return null;
+  const allDays = buildCalendar4Weeks(normalizedCurrentDate);
+  if (!allDays.length) return null;
+  const from = allDays[0];
+  const to = allDays[allDays.length - 1];
+  if (!from || !to) return null;
+  return {
+    from,
+    to,
+    allDays,
+  };
+}
+
+function setTrainingPrefetchContext(context = {}) {
+  const normalizedTeamId = normalizeTrainingTeamId(context.teamId);
+  const from = String(context.from || "").slice(0, 10);
+  const to = String(context.to || "").slice(0, 10);
+  const currentDate = String(context.currentDate || "").slice(0, 10);
+  if (!normalizedTeamId || !from || !to) return null;
+  state.trainingPrefetchContext = {
+    teamId: normalizedTeamId,
+    from,
+    to,
+    currentDate,
+    updatedAt: Date.now(),
+  };
+  return state.trainingPrefetchContext;
+}
+
+function getTrainingPrefetchContext({ teamId = state.selectedTeamId, currentDate = state.currentDate } = {}) {
+  const normalizedTeamId = normalizeTrainingTeamId(teamId);
+  if (!normalizedTeamId) return null;
+
+  const cached = state.trainingPrefetchContext;
+  if (cached
+    && String(cached.teamId || "").toUpperCase() === normalizedTeamId
+    && cached.from
+    && cached.to) {
+    return {
+      teamId: normalizedTeamId,
+      from: String(cached.from),
+      to: String(cached.to),
+      currentDate: String(cached.currentDate || currentDate || "").slice(0, 10),
+    };
+  }
+
+  const normalizedCurrentDate = String(currentDate || "").slice(0, 10);
+  if (!normalizedCurrentDate) return null;
+  const computed = buildTrainingRangeFromCurrentDate(normalizedCurrentDate);
+  if (!computed) return null;
+  return {
+    teamId: normalizedTeamId,
+    currentDate: normalizedCurrentDate,
+    from: computed.from,
+    to: computed.to,
+  };
+}
 
 function createSessionUpdateScheduler(requestSeq) {
   let timerId = null;
@@ -54,7 +118,7 @@ async function hydrateMissingSessions({
       const res = await fetchCachedJson({
         key: `training:session:${teamId}:${dateIso}`,
         url: `/api/practice/team/${encodeURIComponent(teamId)}/session?date_iso=${encodeURIComponent(dateIso)}`,
-        ttlMs: TRAINING_CACHE_TTL_MS,
+        ttlMs: CACHE_TTL_MS.training,
         staleWhileRevalidate: true,
       });
       sessions[dateIso] = { session: res.session, is_user_set: res.is_user_set };
@@ -73,64 +137,70 @@ async function hydrateMissingSessions({
   }
 }
 
-async function loadTrainingData({
-  progressiveSessionHydration = false,
+async function prefetchTrainingCoreData({
+  teamId,
+  currentDate = null,
   requestSeq = trainingRequestSeq,
   onSessionsUpdated = null,
+  progressiveSessionHydration = true,
 } = {}) {
-  if (!state.selectedTeamId) return;
-  const teamId = String(state.selectedTeamId || "").toUpperCase();
-  const currentDate = state.currentDate || await fetchInGameDate();
-  state.currentDate = currentDate;
-  const allDays = buildCalendar4Weeks(currentDate);
+  const normalizedTeamId = normalizeTrainingTeamId(teamId);
+  if (!normalizedTeamId) return null;
+
+  const resolvedCurrentDate = String(currentDate || state.currentDate || await fetchInGameDate() || "").slice(0, 10);
+  state.currentDate = resolvedCurrentDate;
+  const computedRange = buildTrainingRangeFromCurrentDate(resolvedCurrentDate);
+  if (!computedRange) return null;
+  const { allDays, from, to } = computedRange;
   state.trainingCalendarDays = allDays;
+  setTrainingPrefetchContext({ teamId: normalizedTeamId, currentDate: resolvedCurrentDate, from, to });
+
+  const keys = buildCacheKeys(normalizedTeamId, { from, to });
 
   const schedule = await fetchCachedJson({
-    key: `training:schedule:${teamId}`,
-    url: `/api/team-schedule/${encodeURIComponent(teamId)}`,
-    ttlMs: TRAINING_CACHE_TTL_MS,
+    key: keys.trainingSchedule,
+    url: `/api/team-schedule/${encodeURIComponent(normalizedTeamId)}?view=light`,
+    ttlMs: CACHE_TTL_MS.training,
     staleWhileRevalidate: true,
   });
   const gameByDate = {};
   (schedule.games || []).forEach((g) => {
     const d = String(g.date || "").slice(0, 10);
     if (!d) return;
-    const opp = g.home_team_id === teamId ? g.away_team_id : g.home_team_id;
+    const opp = g.home_team_id === normalizedTeamId ? g.away_team_id : g.home_team_id;
     gameByDate[d] = String(opp || "").toUpperCase();
   });
 
-  const from = allDays[0];
-  const to = allDays[allDays.length - 1];
   const resolved = await fetchCachedJson({
-    key: `training:sessions-resolve:${teamId}:${from}:${to}:nogame:missing`,
-    url: `/api/practice/team/${encodeURIComponent(teamId)}/sessions/resolve?date_from=${encodeURIComponent(from)}&date_to=${encodeURIComponent(to)}&only_missing=true&include_games=false`,
-    ttlMs: TRAINING_CACHE_TTL_MS,
+    key: keys.trainingSessionsResolve,
+    url: `/api/practice/team/${encodeURIComponent(normalizedTeamId)}/sessions/resolve?date_from=${encodeURIComponent(from)}&date_to=${encodeURIComponent(to)}&only_missing=true&include_games=false`,
+    ttlMs: CACHE_TTL_MS.training,
     staleWhileRevalidate: true,
   });
   const sessions = { ...(resolved.sessions || {}) };
 
-  const previewDates = allDays.filter((d) => d >= currentDate && !gameByDate[d]);
+  const previewDates = allDays.filter((d) => d >= resolvedCurrentDate && !gameByDate[d]);
   const missingDates = previewDates.filter((d) => !sessions[d]);
 
   const teamDetail = await fetchCachedJson({
-    key: `training:team-detail:${teamId}`,
-    url: `/api/team-detail/${encodeURIComponent(teamId)}`,
-    ttlMs: TRAINING_CACHE_TTL_MS,
+    key: keys.trainingTeamDetail,
+    url: `/api/team-detail/${encodeURIComponent(normalizedTeamId)}?view=light`,
+    ttlMs: CACHE_TTL_MS.training,
     staleWhileRevalidate: true,
   });
   state.trainingRoster = teamDetail.roster || [];
 
   const [offFam, defFam] = await Promise.all([
     fetchCachedJson({
-      key: `training:familiarity:${teamId}:offense`,
-      url: `/api/readiness/team/${encodeURIComponent(teamId)}/familiarity?scheme_type=offense`,
-      ttlMs: TRAINING_CACHE_TTL_MS,
+      key: keys.trainingFamiliarityOffense,
+      url: `/api/readiness/team/${encodeURIComponent(normalizedTeamId)}/familiarity?scheme_type=offense`,
+      ttlMs: CACHE_TTL_MS.training,
       staleWhileRevalidate: true,
     }).catch(() => ({ items: [] })),
     fetchCachedJson({
-      key: `training:familiarity:${teamId}:defense`,
-      url: `/api/readiness/team/${encodeURIComponent(teamId)}/familiarity?scheme_type=defense`,
-      ttlMs: TRAINING_CACHE_TTL_MS,
+      key: keys.trainingFamiliarityDefense,
+      url: `/api/readiness/team/${encodeURIComponent(normalizedTeamId)}/familiarity?scheme_type=defense`,
+      ttlMs: CACHE_TTL_MS.training,
       staleWhileRevalidate: true,
     }).catch(() => ({ items: [] })),
   ]);
@@ -141,21 +211,44 @@ async function loadTrainingData({
 
   if (progressiveSessionHydration) {
     void hydrateMissingSessions({
-      teamId,
+      teamId: normalizedTeamId,
       sessions,
       missingDates,
       requestSeq,
       onSessionsUpdated,
     });
-    return;
+  } else {
+    await hydrateMissingSessions({
+      teamId: normalizedTeamId,
+      sessions,
+      missingDates,
+      requestSeq,
+      onSessionsUpdated,
+    });
   }
 
-  await hydrateMissingSessions({
-    teamId,
-    sessions,
+  return {
+    teamId: normalizedTeamId,
+    currentDate: resolvedCurrentDate,
+    from,
+    to,
     missingDates,
+  };
+}
+
+async function loadTrainingData({
+  progressiveSessionHydration = false,
+  requestSeq = trainingRequestSeq,
+  onSessionsUpdated = null,
+} = {}) {
+  if (!state.selectedTeamId) return;
+  const teamId = String(state.selectedTeamId || "").toUpperCase();
+  await prefetchTrainingCoreData({
+    teamId,
+    currentDate: state.currentDate,
     requestSeq,
     onSessionsUpdated,
+    progressiveSessionHydration,
   });
 }
 
@@ -165,7 +258,7 @@ async function showTrainingScreen() {
     return;
   }
   const teamId = String(state.selectedTeamId || "").toUpperCase();
-  const cacheKey = `training:team-detail:${teamId}`;
+  const cacheKey = buildCacheKeys(teamId).trainingTeamDetail;
   const requestSeq = trainingRequestSeq + 1;
   trainingRequestSeq = requestSeq;
   const hasCached = Boolean(getCachedValue(cacheKey));
@@ -195,4 +288,4 @@ async function showTrainingScreen() {
   }
 }
 
-export { loadTrainingData, showTrainingScreen };
+export { prefetchTrainingCoreData, loadTrainingData, showTrainingScreen, getTrainingPrefetchContext, setTrainingPrefetchContext };

@@ -5,10 +5,11 @@ import { fetchCachedJson } from "../../core/api.js";
 import { escapeHtml } from "../../core/guards.js";
 import { parseSummaryTags, tierChip } from "./leaders.js";
 import { switchCollegeTab } from "./collegeScreen.js";
+import { CACHE_TTL_MS } from "../../app/cachePolicy.js";
 
 const COLLEGE_BIGBOARD_OVERVIEW_LIMIT = 10;
-const COLLEGE_BIGBOARD_OVERVIEW_TTL_MS = 15000;
-const COLLEGE_BIGBOARD_DETAIL_TTL_MS = 20000;
+const COLLEGE_BIGBOARD_OVERVIEW_TTL_MS = CACHE_TTL_MS.college;
+const COLLEGE_BIGBOARD_DETAIL_TTL_MS = CACHE_TTL_MS.college;
 const COLLEGE_BIGBOARD_FETCH_CONCURRENCY = 3;
 
 function getBigboardOverviewCacheKey(expertId) {

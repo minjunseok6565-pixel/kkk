@@ -6,8 +6,8 @@ import { num, clamp } from "../../core/guards.js";
 import { formatPercent, formatSignedDelta } from "../../core/format.js";
 import { TEAM_FULL_NAMES } from "../../core/constants/teams.js";
 import { renderEmptyScheduleRow } from "../schedule/scheduleScreen.js";
+import { CACHE_TTL_MS, buildCacheKeys } from "../../app/cachePolicy.js";
 
-const MEDICAL_CACHE_TTL_MS = 10000;
 let medicalRequestSeq = 0;
 
 function renderMedicalEmpty(tbody, colSpan, text) {
@@ -196,9 +196,10 @@ async function showMedicalScreen() {
     return;
   }
   const teamId = String(state.selectedTeamId || '').toUpperCase();
-  const overviewKey = `medical:overview:${teamId}`;
-  const alertsKey = `medical:alerts:${teamId}`;
-  const calendarKey = `medical:risk-calendar:${teamId}:14`;
+  const keys = buildCacheKeys(teamId);
+  const overviewKey = keys.medicalOverview;
+  const alertsKey = keys.medicalAlerts;
+  const calendarKey = keys.medicalRiskCalendar;
   const requestSeq = medicalRequestSeq + 1;
   medicalRequestSeq = requestSeq;
   const hasCached = Boolean(getCachedValue(overviewKey));
@@ -239,19 +240,19 @@ async function showMedicalScreen() {
       fetchCachedJson({
         key: overviewKey,
         url: `/api/medical/team/${encodeURIComponent(teamId)}/overview`,
-        ttlMs: MEDICAL_CACHE_TTL_MS,
+        ttlMs: CACHE_TTL_MS.medical,
         staleWhileRevalidate: true,
       }),
       fetchCachedJson({
         key: alertsKey,
         url: `/api/medical/team/${encodeURIComponent(teamId)}/alerts`,
-        ttlMs: MEDICAL_CACHE_TTL_MS,
+        ttlMs: CACHE_TTL_MS.medical,
         staleWhileRevalidate: true,
       }).catch(() => ({})),
       fetchCachedJson({
         key: calendarKey,
         url: `/api/medical/team/${encodeURIComponent(teamId)}/risk-calendar?days=14`,
-        ttlMs: MEDICAL_CACHE_TTL_MS,
+        ttlMs: CACHE_TTL_MS.medical,
         staleWhileRevalidate: true,
       }).catch(() => ({ days: [] })),
     ]);

@@ -2,10 +2,10 @@ import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
 import { fetchCachedJson, getCachedValue, setLoading } from "../../core/api.js";
+import { CACHE_TTL_MS, buildCacheKeys } from "../../app/cachePolicy.js";
 import { formatSignedDiff } from "../../core/format.js";
 import { TEAM_FULL_NAMES, renderTeamLogoMark } from "../../core/constants/teams.js";
 
-const STANDINGS_CACHE_TTL_MS = 12000;
 let standingsRequestSeq = 0;
 
 function renderStandingsRows(tbody, rows) {
@@ -37,7 +37,7 @@ function renderStandingsRows(tbody, rows) {
 }
 
 async function showStandingsScreen() {
-  const cacheKey = "standings:table";
+  const cacheKey = buildCacheKeys(state.selectedTeamId).standings;
   const requestSeq = standingsRequestSeq + 1;
   standingsRequestSeq = requestSeq;
   const cached = getCachedValue(cacheKey);
@@ -49,7 +49,7 @@ async function showStandingsScreen() {
     const payload = await fetchCachedJson({
       key: cacheKey,
       url: "/api/standings/table",
-      ttlMs: STANDINGS_CACHE_TTL_MS,
+      ttlMs: CACHE_TTL_MS.standings,
       staleWhileRevalidate: true,
       onRevalidated: (freshPayload) => {
         if (!els.standingsScreen?.classList?.contains("active")) return;

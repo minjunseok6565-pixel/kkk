@@ -32,25 +32,41 @@
 .schedule-opponent-cell {
   text-align: left !important;
   font-weight: 700;
+}
+
+.schedule-opponent-main {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  line-height: 1.1;
+}
+
+.schedule-opponent-label {
+  display: inline-block;
 }
 
 .schedule-opponent-name {
   color: #9fb2d4;
   font-weight: 500;
-  margin-left: 6px;
+  margin-top: 5px;
+  margin-left: 42px;
+  display: block;
 }
 
 .schedule-result-win {
-  color: #7ff0a7;
-  background: rgba(22, 102, 56, 0.34);
+  color: #1f9d55;
 }
 
 .schedule-result-loss {
-  color: #ffadb8;
-  background: rgba(125, 29, 49, 0.38);
+  color: #dc2626;
+}
+
+.schedule-result-flag {
+  font-weight: 800;
+}
+
+.schedule-result-score {
+  color: #0f172a;
 }
 
 .schedule-empty {
