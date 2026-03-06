@@ -2534,7 +2534,7 @@ async def api_game_result(game_id: str, user_team_id: str):
             },
         },
         "tabs": {
-            "default": "playbyplay" if bool((play_by_play or {}).get("available")) else "gamecast",
+            "default": "gamecast",
             "enabled": ["gamecast", "playbyplay", "boxscore", "teamstats"],
             "disabled": [],
         },

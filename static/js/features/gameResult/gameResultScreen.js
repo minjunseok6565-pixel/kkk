@@ -540,11 +540,38 @@ function getPbpUiState() {
       onlyKey: false,
       expandedGroups: new Set(),
       renderLimit: PBP_INITIAL_RENDER_LIMIT,
+      hydrated: false,
+      hydratedGameId: null,
       cachedResult: null,
       cachedPbp: null,
     };
   }
   return state.gameResultPbp;
+}
+
+function setPbpLazyPlaceholder() {
+  if (els.gameResultPbpSummary) {
+    els.gameResultPbpSummary.textContent = "Play by Play 탭을 열면 이벤트를 불러옵니다.";
+  }
+  if (els.gameResultPbpList) {
+    els.gameResultPbpList.innerHTML = '<li class="game-result-pbp-empty">Play by Play 탭에서 로그를 렌더링합니다.</li>';
+  }
+  if (els.gameResultPbpLoadMore) {
+    els.gameResultPbpLoadMore.hidden = true;
+  }
+}
+
+function hydratePbpIfNeeded(result = {}) {
+  const uiState = getPbpUiState();
+  const targetResult = result || {};
+  const gameId = String(targetResult?.game_id || "");
+  if (uiState.hydrated && (!gameId || uiState.hydratedGameId === gameId)) {
+    return getNormalizedPbp(targetResult);
+  }
+  const pbp = rerenderPbpSection(targetResult, { resetLimit: true });
+  uiState.hydrated = true;
+  uiState.hydratedGameId = gameId || null;
+  return pbp;
 }
 
 function getNormalizedPbp(result = {}) {
@@ -765,6 +792,7 @@ function bindPbpControls() {
       else uiState.tags.add(value);
     }
     if (type === "only-key") uiState.onlyKey = !uiState.onlyKey;
+    hydratePbpIfNeeded(state.lastGameResult || {});
     rerenderPbpSection(state.lastGameResult || {}, { resetLimit: true });
   };
 
@@ -799,6 +827,7 @@ function bindPbpControls() {
     els.gameResultPbpLoadMore.addEventListener("click", () => {
       const uiState = getPbpUiState();
       uiState.renderLimit += PBP_RENDER_STEP;
+      hydratePbpIfNeeded(state.lastGameResult || {});
       rerenderPbpSection(state.lastGameResult || {});
     });
   }
@@ -812,6 +841,7 @@ function bindPbpControls() {
       const uiState = getPbpUiState();
       if (uiState.expandedGroups.has(groupId)) uiState.expandedGroups.delete(groupId);
       else uiState.expandedGroups.add(groupId);
+      hydratePbpIfNeeded(state.lastGameResult || {});
       rerenderPbpSection(state.lastGameResult || {});
     });
 
@@ -868,6 +898,9 @@ function bindGameResultTabs() {
       const key = btn.dataset.tab;
       if (!TAB_KEYS.includes(key)) return;
       state.gameResultActiveTab = key;
+      if (key === "playbyplay") {
+        hydratePbpIfNeeded(state.lastGameResult || {});
+      }
       setActiveTab(key);
     });
   });
@@ -916,10 +949,12 @@ function renderGameResult(result) {
   uiState.onlyKey = false;
   uiState.expandedGroups = new Set();
   uiState.renderLimit = PBP_INITIAL_RENDER_LIMIT;
+  uiState.hydrated = false;
+  uiState.hydratedGameId = null;
   uiState.cachedResult = null;
   uiState.cachedPbp = null;
 
-  const pbp = rerenderPbpSection(result, { resetLimit: true });
+  setPbpLazyPlaceholder();
 
   const winSeries = result?.gamecast?.win_probability?.series || [];
   els.gameResultWinprobMeta.textContent = winSeries.length ? "쿼터 단위 승률 추정" : "데이터 없음";
@@ -947,12 +982,8 @@ function renderGameResult(result) {
   bindGameResultTabs();
   bindPbpControls();
 
-  const suggestedTab = result?.tabs?.default
-    ? String(result.tabs.default).toLowerCase()
-    : (pbp.available ? "playbyplay" : (state.gameResultActiveTab || "gamecast"));
-  const activeTab = TAB_KEYS.includes(suggestedTab) ? suggestedTab : "gamecast";
-  state.gameResultActiveTab = activeTab;
-  setActiveTab(activeTab);
+  state.gameResultActiveTab = "gamecast";
+  setActiveTab("gamecast");
 
   activateScreen(els.gameResultScreen);
 }
