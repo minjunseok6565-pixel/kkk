@@ -4,6 +4,21 @@ import { activateScreen } from "../../app/router.js";
 import { fetchJson, setLoading } from "../../core/api.js";
 import { TACTICS_OFFENSE_SCHEMES, TACTICS_DEFENSE_SCHEMES, TACTICS_OFFENSE_ROLES } from "../../core/constants/tactics.js";
 import { tacticsSchemeLabel, tacticDisplayLabel, getDefenseRolesForScheme, buildTacticsDraft, computeTacticsInsights, rowHealthState } from "./tacticsInsights.js";
+import { fetchTeamDetail, hasTeamDetailCache } from "../team/teamDetailCache.js";
+
+let tacticsRequestSeq = 0;
+
+function applyTacticsDetail(detail, savedTactics, teamId) {
+  state.rosterRows = detail?.roster || [];
+  state.tacticsDraft = normalizeDraftForRoster(savedTactics?.tactics, state.rosterRows);
+  state.tacticsDraftTeamId = teamId;
+  state.tacticsDirty = false;
+  state.tacticsSaving = false;
+
+  renderSchemeOptions("offense");
+  renderSchemeOptions("defense");
+  renderTacticsScreen();
+}
 
 function normalizeRow(row, fallback = {}) {
   const out = {
@@ -269,26 +284,30 @@ async function showTacticsScreen() {
     alert("먼저 팀을 선택해주세요.");
     return;
   }
-  setLoading(true, "전술 데이터를 불러오는 중...");
+  const teamId = String(state.selectedTeamId || "").trim();
+  const requestSeq = tacticsRequestSeq + 1;
+  tacticsRequestSeq = requestSeq;
+  const hasCachedDetail = hasTeamDetailCache(teamId);
+  if (!hasCachedDetail) setLoading(true, "전술 데이터를 불러오는 중...");
   try {
-    const teamId = String(state.selectedTeamId || "").trim();
     const [detail, savedTactics] = await Promise.all([
-      fetchJson(`/api/team-detail/${encodeURIComponent(teamId)}`),
+      fetchTeamDetail(teamId, {
+        onRevalidated: (freshDetail) => {
+          if (requestSeq !== tacticsRequestSeq) return;
+          if (String(state.selectedTeamId || "").trim() !== teamId) return;
+          if (!els.tacticsScreen?.classList.contains("active")) return;
+          if (state.tacticsDirty || state.tacticsSaving) return;
+          applyTacticsDetail(freshDetail, savedTactics, teamId);
+        },
+      }),
       fetchJson(`/api/tactics/${encodeURIComponent(teamId)}`).catch(() => ({ tactics: null })),
     ]);
+    if (requestSeq !== tacticsRequestSeq) return;
 
-    state.rosterRows = detail.roster || [];
-    state.tacticsDraft = normalizeDraftForRoster(savedTactics?.tactics, state.rosterRows);
-    state.tacticsDraftTeamId = teamId;
-    state.tacticsDirty = false;
-    state.tacticsSaving = false;
-
-    renderSchemeOptions("offense");
-    renderSchemeOptions("defense");
-    renderTacticsScreen();
+    applyTacticsDetail(detail, savedTactics, teamId);
     activateScreen(els.tacticsScreen);
   } finally {
-    setLoading(false);
+    if (requestSeq === tacticsRequestSeq) setLoading(false);
   }
 }
 

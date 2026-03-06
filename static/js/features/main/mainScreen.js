@@ -48,6 +48,11 @@ function invalidatePostGameViewCaches(teamId) {
   invalidateCachedValuesByPrefix(`training:session:${tid}:`);
   invalidateCachedValuesByPrefix(`training:team-detail:${tid}`);
   invalidateCachedValuesByPrefix(`training:familiarity:${tid}:`);
+  invalidateCachedValuesByPrefix(`team-detail:${tid}`);
+}
+
+function invalidateAllTeamDetailCaches() {
+  invalidateCachedValuesByPrefix("team-detail:");
 }
 
 async function fetchInGameDate() {
@@ -305,6 +310,7 @@ async function createNewGame() {
     });
 
     state.lastSaveSlotId = response.slot_id;
+    invalidateAllTeamDetailCaches();
     await renderTeams();
     showTeamSelection();
   } finally {
@@ -321,6 +327,8 @@ async function continueGame() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ slot_id: state.lastSaveSlotId, strict: true })
     });
+
+    invalidateAllTeamDetailCaches();
 
     const savedTeamId = String(loaded.user_team_id || "").toUpperCase();
     if (savedTeamId) {
@@ -356,6 +364,8 @@ async function confirmTeamSelection(teamId, fullName) {
       body: JSON.stringify({ slot_id: state.lastSaveSlotId, user_team_id: teamId })
     });
   }
+
+  invalidateAllTeamDetailCaches();
 
   showMainScreen();
 }
