@@ -46,9 +46,13 @@
 }
 
 .schedule-team-logo {
-  margin: 0 6px;
-  width: 30px;
-  height: 30px;
+  margin: 0;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
 }
 
 .standings-team-logo {
