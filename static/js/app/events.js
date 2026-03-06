@@ -15,7 +15,7 @@ import { showScheduleScreen } from "../features/schedule/scheduleScreen.js";
 import { showTrainingScreen } from "../features/training/trainingScreen.js";
 import { showStandingsScreen } from "../features/standings/standingsScreen.js";
 import { showCollegeScreen, switchCollegeTab, ensureCollegeTabData } from "../features/college/collegeScreen.js";
-import { showMarketScreen, openMarketSubTab, handleMarketDetailAction } from "../features/market/marketScreen.js";
+import { showMarketScreen, openMarketSubTab, openTradeBlockScope, handleMarketDetailAction } from "../features/market/marketScreen.js";
 import { loadCollegeLeaders } from "../features/college/leaders.js";
 import { closeCollegeBigboardDetailScreen } from "../features/college/bigboard.js";
 import {
@@ -91,6 +91,8 @@ function bindEvents() {
   els.marketBackBtn?.addEventListener("click", () => showMainScreen());
   els.marketSubtabFa?.addEventListener("click", () => openMarketSubTab("fa").catch((e) => alert(e.message)));
   els.marketSubtabTradeBlock?.addEventListener("click", () => openMarketSubTab("trade-block").catch((e) => alert(e.message)));
+  els.marketTradeBlockScopeOther?.addEventListener("click", () => openTradeBlockScope("other").catch((e) => alert(e.message)));
+  els.marketTradeBlockScopeMine?.addEventListener("click", () => openTradeBlockScope("mine").catch((e) => alert(e.message)));
   els.collegeTabTeams.addEventListener("click", () => onCollegeTabClick("teams"));
   els.collegeTabLeaders.addEventListener("click", () => onCollegeTabClick("leaders"));
   els.collegeTabBigboard.addEventListener("click", () => onCollegeTabClick("bigboard"));

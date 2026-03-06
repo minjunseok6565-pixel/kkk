@@ -16,6 +16,21 @@
   display: block;
 }
 
+.market-trade-block-scope-panel {
+  display: none;
+}
+
+.market-trade-block-scope-panel.active {
+  display: block;
+}
+
+.market-trade-block-mine-overview {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
 #market-screen .player-detail-panel {
   min-height: 240px;
 }
