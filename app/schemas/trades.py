@@ -53,3 +53,24 @@ class TradeBlockAggregateQuery(BaseModel):
     limit: int = 300
     offset: int = 0
     sort: str = "priority_desc"
+
+
+class TradeNegotiationInboxQuery(BaseModel):
+    team_id: str
+    status: str = "ACTIVE"
+    phase: str = "OPEN"
+    include_expired: bool = False
+    limit: int = 50
+    offset: int = 0
+    sort: str = "updated_desc"
+
+
+class TradeNegotiationRejectRequest(BaseModel):
+    session_id: str
+    team_id: str
+    reason: str = ""
+
+
+class TradeNegotiationOpenRequest(BaseModel):
+    session_id: str
+    team_id: str
