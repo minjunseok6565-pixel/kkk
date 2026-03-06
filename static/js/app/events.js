@@ -93,6 +93,7 @@ function bindEvents() {
   els.marketSubtabTradeBlock?.addEventListener("click", () => openMarketSubTab("trade-block").catch((e) => alert(e.message)));
   els.marketTradeBlockScopeOther?.addEventListener("click", () => openTradeBlockScope("other").catch((e) => alert(e.message)));
   els.marketTradeBlockScopeMine?.addEventListener("click", () => openTradeBlockScope("mine").catch((e) => alert(e.message)));
+  els.marketSubtabTradeInbox?.addEventListener("click", () => openMarketSubTab("trade-inbox").catch((e) => alert(e.message)));
   els.collegeTabTeams.addEventListener("click", () => onCollegeTabClick("teams"));
   els.collegeTabLeaders.addEventListener("click", () => onCollegeTabClick("leaders"));
   els.collegeTabBigboard.addEventListener("click", () => onCollegeTabClick("bigboard"));

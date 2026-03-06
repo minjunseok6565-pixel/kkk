@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from typing import Any, Dict, List, Optional
 
 import sqlite3
@@ -35,7 +35,10 @@ from app.schemas.trades import (
     TradeBlockAggregateQuery,
     TradeBlockUnlistRequest,
     TradeEvaluateRequest,
+    TradeNegotiationInboxQuery,
     TradeNegotiationCommitRequest,
+    TradeNegotiationOpenRequest,
+    TradeNegotiationRejectRequest,
     TradeNegotiationStartRequest,
     TradeSubmitCommittedRequest,
     TradeSubmitRequest,
@@ -416,6 +419,317 @@ def _sort_trade_block_rows(rows: List[Dict[str, Any]], *, sort_key: str) -> List
     return data
 
 
+def _normalize_inbox_status(raw: Any, *, default: str = "ACTIVE") -> str:
+    v = str(raw or default).upper().strip()
+    if v in {"ACTIVE", "CLOSED", "ALL"}:
+        return v
+    return str(default).upper()
+
+
+def _normalize_inbox_phase(raw: Any, *, default: str = "OPEN") -> str:
+    v = str(raw or default).upper().strip()
+    if v in {"OPEN", "COUNTER_PENDING", "REJECTED", "ACCEPTED", "ALL"}:
+        return v
+    return str(default).upper()
+
+
+def _normalize_inbox_sort(raw: Any, *, default: str = "updated_desc") -> str:
+    v = str(raw or default).lower().strip()
+    if v in {"updated_desc", "created_desc", "expires_asc"}:
+        return v
+    return str(default).lower()
+
+
+def _parse_trade_negotiation_inbox_query(
+    *,
+    team_id: Any,
+    status: Any = "ACTIVE",
+    phase: Any = "OPEN",
+    include_expired: Any = False,
+    limit: Any = 50,
+    offset: Any = 0,
+    sort: Any = "updated_desc",
+) -> TradeNegotiationInboxQuery:
+    tid = str(team_id or "").upper().strip()
+    if not tid:
+        raise TradeError("NEGOTIATION_BAD_QUERY", "team_id is required")
+    return TradeNegotiationInboxQuery(
+        team_id=tid,
+        status=_normalize_inbox_status(status, default="ACTIVE"),
+        phase=_normalize_inbox_phase(phase, default="OPEN"),
+        include_expired=bool(include_expired),
+        limit=_clamp_int(limit, lo=1, hi=200, default=50),
+        offset=_clamp_int(offset, lo=0, hi=1_000_000, default=0),
+        sort=_normalize_inbox_sort(sort, default="updated_desc"),
+    )
+
+
+def _iso_date(s: Any) -> Optional[date]:
+    if not s:
+        return None
+    raw = str(s).strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw[:10])
+    except Exception:
+        return None
+
+
+def _ensure_session_ready_for_commit(
+    session: Dict[str, Any],
+    *,
+    session_id: str,
+    today: date,
+) -> Optional[Dict[str, Any]]:
+    status = str(session.get("status") or "ACTIVE").upper()
+    phase = str(session.get("phase") or "INIT").upper()
+
+    # Idempotent success: already accepted & closed with committed deal.
+    committed_deal_id = str(session.get("committed_deal_id") or "").strip()
+    if status == "CLOSED" and phase == "ACCEPTED" and committed_deal_id:
+        return {
+            "ok": True,
+            "accepted": True,
+            "idempotent": True,
+            "deal_id": committed_deal_id,
+            "expires_at": session.get("valid_until"),
+            "session_id": str(session_id),
+        }
+
+    if status != "ACTIVE":
+        raise TradeError(
+            "NEGOTIATION_NOT_ACTIVE",
+            "Negotiation session is closed",
+            {"session_id": str(session_id), "status": status, "phase": phase},
+        )
+
+    if phase not in {"NEGOTIATING", "COUNTER_PENDING"}:
+        raise TradeError(
+            "NEGOTIATION_INVALID_PHASE",
+            "Negotiation session cannot be committed from current phase",
+            {"session_id": str(session_id), "phase": phase},
+        )
+
+    expires_on = _iso_date(session.get("valid_until"))
+    if expires_on is not None and today > expires_on:
+        raise TradeError(
+            "NEGOTIATION_EXPIRED",
+            "Negotiation session has expired",
+            {"session_id": str(session_id), "valid_until": session.get("valid_until"), "today": today.isoformat()},
+        )
+
+    return None
+
+
+def _phase_matches_inbox_filter(*, phase: str, phase_filter: str) -> bool:
+    pf = _normalize_inbox_phase(phase_filter, default="OPEN")
+    p = str(phase or "").upper()
+    if pf == "ALL":
+        return True
+    if pf == "OPEN":
+        return p in {"INIT", "INBOX_PENDING", "NEGOTIATING"}
+    return p == pf
+
+
+def _status_matches_filter(*, status: str, status_filter: str) -> bool:
+    sf = _normalize_inbox_status(status_filter, default="ACTIVE")
+    st = str(status or "").upper()
+    if sf == "ALL":
+        return True
+    return st == sf
+
+
+def _count_assets_for_user(offer_payload: Dict[str, Any], *, user_team_id: str) -> Dict[str, int]:
+    counts = {
+        "user_outgoing_players": 0,
+        "user_incoming_players": 0,
+        "user_outgoing_picks": 0,
+        "user_incoming_picks": 0,
+    }
+    legs = offer_payload.get("legs") if isinstance(offer_payload, dict) else None
+    if not isinstance(legs, list):
+        return counts
+
+    tid = str(user_team_id).upper()
+    for leg in legs:
+        if not isinstance(leg, dict):
+            continue
+        from_team = str(leg.get("from_team") or "").upper()
+        to_team = str(leg.get("to_team") or "").upper()
+        assets = leg.get("assets")
+        if not isinstance(assets, list):
+            continue
+
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            kind = str(asset.get("kind") or "").upper()
+            if kind not in {"PLAYER", "PICK"}:
+                continue
+            if from_team == tid:
+                key = "user_outgoing_players" if kind == "PLAYER" else "user_outgoing_picks"
+                counts[key] += 1
+            if to_team == tid:
+                key = "user_incoming_players" if kind == "PLAYER" else "user_incoming_picks"
+                counts[key] += 1
+    return counts
+
+
+def _build_trade_negotiation_inbox_row(session: Dict[str, Any], *, today: date) -> Dict[str, Any]:
+    phase = str(session.get("phase") or "INIT").upper()
+    status = str(session.get("status") or "ACTIVE").upper()
+    team_id = str(session.get("user_team_id") or "").upper()
+    offer_payload = session.get("last_offer") if isinstance(session.get("last_offer"), dict) else {}
+    market_context = session.get("market_context") if isinstance(session.get("market_context"), dict) else {}
+    offer_meta = market_context.get("offer_meta") if isinstance(market_context.get("offer_meta"), dict) else {}
+
+    expires = _iso_date(session.get("valid_until"))
+    is_expired = bool(expires and today > expires)
+
+    return {
+        "session_id": str(session.get("session_id") or ""),
+        "user_team_id": team_id,
+        "other_team_id": str(session.get("other_team_id") or "").upper(),
+        "status": status,
+        "phase": phase,
+        "created_at": session.get("created_at"),
+        "updated_at": session.get("updated_at"),
+        "valid_until": session.get("valid_until"),
+        "is_expired": is_expired,
+        "summary": {
+            "headline": f"{str(session.get('other_team_id') or '').upper()} → {team_id} 트레이드 제안",
+            "offer_tone": str(offer_meta.get("offer_tone") or "").upper() or None,
+            "offer_privacy": str(offer_meta.get("offer_privacy") or "PRIVATE").upper(),
+            "leak_status": str(offer_meta.get("leak_status") or "NONE").upper(),
+        },
+        "offer": {
+            "deal": offer_payload,
+            "asset_counts": _count_assets_for_user(offer_payload, user_team_id=team_id),
+        },
+        "actions": {
+            "can_open": status == "ACTIVE" and phase in {"INIT", "INBOX_PENDING", "NEGOTIATING", "COUNTER_PENDING"} and not is_expired,
+            "can_reject": status == "ACTIVE" and phase not in {"REJECTED", "ACCEPTED"},
+            "can_commit": status == "ACTIVE" and phase in {"NEGOTIATING", "COUNTER_PENDING"} and not is_expired,
+        },
+    }
+
+
+def _sort_trade_negotiation_inbox_rows(rows: List[Dict[str, Any]], *, sort_key: str) -> List[Dict[str, Any]]:
+    key = _normalize_inbox_sort(sort_key, default="updated_desc")
+    data = list(rows or [])
+
+    def _ts(v: Any) -> float:
+        raw = str(v or "").strip()
+        if not raw:
+            return float("-inf")
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return float("-inf")
+
+    if key == "created_desc":
+        data.sort(
+            key=lambda r: (
+                _ts(r.get("created_at")),
+                _ts(r.get("updated_at")),
+                str(r.get("session_id") or ""),
+            ),
+            reverse=True,
+        )
+        return data
+
+    if key == "expires_asc":
+        data.sort(
+            key=lambda r: (
+                _iso_date(r.get("valid_until")) or date.max,
+                -_ts(r.get("updated_at")),
+                str(r.get("session_id") or ""),
+            )
+        )
+        return data
+
+    # default updated_desc
+    data.sort(
+        key=lambda r: (
+            _ts(r.get("updated_at")),
+            _ts(r.get("created_at")),
+            str(r.get("session_id") or ""),
+        ),
+        reverse=True,
+    )
+    return data
+
+
+@router.get("/api/trade/negotiation/inbox")
+async def api_trade_negotiation_inbox(
+    team_id: str,
+    status: str = "ACTIVE",
+    phase: str = "OPEN",
+    include_expired: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    sort: str = "updated_desc",
+):
+    try:
+        q = _parse_trade_negotiation_inbox_query(
+            team_id=team_id,
+            status=status,
+            phase=phase,
+            include_expired=include_expired,
+            limit=limit,
+            offset=offset,
+            sort=sort,
+        )
+
+        today = state.get_current_date_as_date()
+        sessions = state.negotiations_get() or {}
+
+        rows: List[Dict[str, Any]] = []
+        for sid, raw in (sessions.items() if isinstance(sessions, dict) else []):
+            session = raw if isinstance(raw, dict) else {}
+            if str(session.get("user_team_id") or "").upper() != q.team_id:
+                continue
+
+            offer_payload = session.get("last_offer")
+            if not isinstance(offer_payload, dict) or not offer_payload:
+                # Inbox is only for already-proposed incoming offers.
+                continue
+
+            s = dict(session)
+            s.setdefault("session_id", str(sid))
+            row = _build_trade_negotiation_inbox_row(s, today=today)
+
+            if not q.include_expired and row.get("is_expired"):
+                continue
+            if not _status_matches_filter(status=row.get("status"), status_filter=q.status):
+                continue
+            if not _phase_matches_inbox_filter(phase=row.get("phase"), phase_filter=q.phase):
+                continue
+
+            rows.append(row)
+
+        rows = _sort_trade_negotiation_inbox_rows(rows, sort_key=q.sort)
+        total = len(rows)
+        paged = rows[q.offset:q.offset + q.limit]
+        return {
+            "ok": True,
+            "team_id": q.team_id,
+            "filters": {
+                "status": q.status,
+                "phase": q.phase,
+                "include_expired": q.include_expired,
+                "limit": q.limit,
+                "offset": q.offset,
+                "sort": q.sort,
+            },
+            "total": total,
+            "rows": paged,
+        }
+    except TradeError as exc:
+        return _trade_error_response(exc)
+
+
 @router.get("/api/trade/block")
 async def api_trade_block_aggregate(
     active_only: bool = True,
@@ -631,12 +945,103 @@ async def api_trade_negotiation_start(req: TradeNegotiationStartRequest):
         return _trade_error_response(exc)
 
 
+@router.post("/api/trade/negotiation/open")
+async def api_trade_negotiation_open(req: TradeNegotiationOpenRequest):
+    try:
+        team_id = str(req.team_id or "").upper().strip()
+        if not team_id:
+            raise TradeError("NEGOTIATION_BAD_QUERY", "team_id is required")
+
+        session = negotiation_store.get_session(req.session_id)
+        owner_team_id = str(session.get("user_team_id") or "").upper().strip()
+        if not owner_team_id or owner_team_id != team_id:
+            raise TradeError(
+                "NEGOTIATION_NOT_AUTHORIZED",
+                "Only the recipient team can open this negotiation",
+                {"session_id": str(req.session_id), "team_id": team_id, "owner_team_id": owner_team_id or None},
+            )
+
+        status = str(session.get("status") or "ACTIVE").upper()
+        phase = str(session.get("phase") or "INIT").upper()
+        if status != "ACTIVE" or phase == "REJECTED":
+            raise TradeError(
+                "NEGOTIATION_NOT_ACTIVE",
+                "Negotiation session is not active",
+                {"session_id": str(req.session_id), "status": status, "phase": phase},
+            )
+
+        today = state.get_current_date_as_date()
+        expires_on = _iso_date(session.get("valid_until"))
+        if expires_on is not None and today > expires_on:
+            raise TradeError(
+                "NEGOTIATION_EXPIRED",
+                "Negotiation session has expired",
+                {"session_id": str(req.session_id), "valid_until": session.get("valid_until"), "today": today.isoformat()},
+            )
+
+        result = negotiation_store.open_inbox_session(req.session_id)
+        updated = result.get("session") if isinstance(result, dict) else None
+        if not isinstance(updated, dict):
+            updated = negotiation_store.get_session(req.session_id)
+
+        return {
+            "ok": True,
+            "session": updated,
+            "opened": True,
+            "idempotent": bool((result or {}).get("idempotent")) if isinstance(result, dict) else False,
+        }
+    except TradeError as exc:
+        return _trade_error_response(exc)
+
+
+@router.post("/api/trade/negotiation/reject")
+async def api_trade_negotiation_reject(req: TradeNegotiationRejectRequest):
+    try:
+        team_id = str(req.team_id or "").upper().strip()
+        if not team_id:
+            raise TradeError("NEGOTIATION_BAD_QUERY", "team_id is required")
+
+        session = negotiation_store.get_session(req.session_id)
+        owner_team_id = str(session.get("user_team_id") or "").upper().strip()
+        if not owner_team_id or owner_team_id != team_id:
+            raise TradeError(
+                "NEGOTIATION_NOT_AUTHORIZED",
+                "Only the recipient team can reject this negotiation",
+                {"session_id": str(req.session_id), "team_id": team_id, "owner_team_id": owner_team_id or None},
+            )
+
+        result = negotiation_store.close_as_rejected(req.session_id, reason=req.reason)
+        updated = result.get("session") if isinstance(result, dict) else None
+        if not isinstance(updated, dict):
+            updated = negotiation_store.get_session(req.session_id)
+
+        return {
+            "ok": True,
+            "session_id": str(updated.get("session_id") or req.session_id),
+            "status": str(updated.get("status") or "CLOSED").upper(),
+            "phase": str(updated.get("phase") or "REJECTED").upper(),
+            "rejected": True,
+            "idempotent": bool((result or {}).get("idempotent")) if isinstance(result, dict) else False,
+        }
+    except TradeError as exc:
+        return _trade_error_response(exc)
+
+
 @router.post("/api/trade/negotiation/commit")
 async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
     try:
         in_game_date = state.get_current_date_as_date()
         db_path = state.get_db_path()
         session = negotiation_store.get_session(req.session_id)
+
+        idempotent_payload = _ensure_session_ready_for_commit(
+            session,
+            session_id=str(req.session_id),
+            today=in_game_date,
+        )
+        if isinstance(idempotent_payload, dict):
+            return idempotent_payload
+
         deal = canonicalize_deal(parse_deal(req.deal))
         team_ids = {session["user_team_id"].upper(), session["other_team_id"].upper()}
         if set(deal.teams) != team_ids or len(deal.teams) != 2:
@@ -688,10 +1093,11 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                         validate=False,   # already validated above
                         db_path=db_path,
                     )
-                    negotiation_store.set_committed(req.session_id, committed["deal_id"])
-                    negotiation_store.set_status(req.session_id, "CLOSED")
-                    negotiation_store.set_phase(req.session_id, "ACCEPTED")
-                    negotiation_store.set_valid_until(req.session_id, committed["expires_at"])
+                    negotiation_store.mark_committed_and_close(
+                        req.session_id,
+                        deal_id=str(committed["deal_id"]),
+                        expires_at=committed.get("expires_at"),
+                    )
 
                     fast_decision = DealDecision(
                         verdict=DealVerdict.ACCEPT,
@@ -1025,13 +1431,11 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                 validate=False,   # already validated above
                 db_path=db_path,  # keep hash/locking based on the same db snapshot
             )
-            negotiation_store.set_committed(req.session_id, committed["deal_id"])
-            # Once committed, this negotiation should no longer consume "ACTIVE" capacity.
-            negotiation_store.set_status(req.session_id, "CLOSED")
-            # Optional but useful for UI/debugging.
-            negotiation_store.set_phase(req.session_id, "ACCEPTED")
-            # Keep session expiry aligned with the committed deal expiry.
-            negotiation_store.set_valid_until(req.session_id, committed["expires_at"])
+            negotiation_store.mark_committed_and_close(
+                req.session_id,
+                deal_id=str(committed["deal_id"]),
+                expires_at=committed.get("expires_at"),
+            )
             return {
                 "ok": True,
                 "accepted": True,

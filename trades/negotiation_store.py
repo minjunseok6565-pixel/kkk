@@ -282,3 +282,112 @@ def set_last_counter(session_id: str, payload: Any) -> None:
         session["last_counter"] = payload
 
     _atomic_update(session_id, _patch)
+
+
+def close_as_rejected(session_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
+    reason_text = str(reason or "").strip()
+    idempotent = False
+
+    def _patch(session: Dict[str, Any]) -> None:
+        nonlocal idempotent
+        current_phase = str(session.get("phase") or "").upper()
+        current_status = str(session.get("status") or "").upper()
+        if current_phase == "REJECTED" and current_status == "CLOSED":
+            idempotent = True
+            return
+
+        session["phase"] = "REJECTED"
+        session["status"] = "CLOSED"
+
+        if reason_text:
+            messages = session.get("messages")
+            if not isinstance(messages, list):
+                messages = []
+                session["messages"] = messages
+            messages.append({
+                "speaker": "USER_GM",
+                "text": f"REJECTED: {reason_text}",
+                "at": _now_iso(),
+            })
+
+    updated = _atomic_update(session_id, _patch)
+    return {"session": updated, "idempotent": bool(idempotent)}
+
+
+def open_inbox_session(session_id: str) -> Dict[str, Any]:
+    idempotent = False
+
+    def _patch(session: Dict[str, Any]) -> None:
+        nonlocal idempotent
+        phase = str(session.get("phase") or "INIT").upper()
+        status = str(session.get("status") or "ACTIVE").upper()
+
+        if status != "ACTIVE":
+            raise TradeError(
+                "NEGOTIATION_NOT_ACTIVE",
+                "Negotiation session is closed",
+                {"session_id": session_id, "status": status},
+            )
+
+        if phase in {"NEGOTIATING", "COUNTER_PENDING"}:
+            idempotent = True
+            return
+
+        if phase in {"INIT", "INBOX_PENDING"}:
+            session["phase"] = "NEGOTIATING"
+            return
+
+        raise TradeError(
+            "NEGOTIATION_INVALID_PHASE",
+            "Negotiation session cannot be opened from current phase",
+            {"session_id": session_id, "phase": phase},
+        )
+
+    updated = _atomic_update(session_id, _patch)
+    return {"session": updated, "idempotent": bool(idempotent)}
+
+
+def mark_committed_and_close(
+    session_id: str,
+    *,
+    deal_id: str,
+    expires_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    deal_id_s = str(deal_id or "").strip()
+    if not deal_id_s:
+        raise TradeError("DEAL_INVALIDATED", "deal_id is required", {"session_id": session_id})
+
+    expires_value = expires_at if isinstance(expires_at, str) else None
+    idempotent = False
+
+    def _patch(session: Dict[str, Any]) -> None:
+        nonlocal idempotent
+        status = str(session.get("status") or "").upper()
+        phase = str(session.get("phase") or "").upper()
+        cur_deal = str(session.get("committed_deal_id") or "").strip()
+
+        if status == "CLOSED" and phase == "ACCEPTED" and cur_deal == deal_id_s:
+            idempotent = True
+            return
+
+        if status != "ACTIVE":
+            raise TradeError(
+                "NEGOTIATION_NOT_ACTIVE",
+                "Negotiation session is closed",
+                {"session_id": session_id, "status": status, "phase": phase},
+            )
+
+        if phase not in {"NEGOTIATING", "COUNTER_PENDING"}:
+            raise TradeError(
+                "NEGOTIATION_INVALID_PHASE",
+                "Negotiation session cannot be committed from current phase",
+                {"session_id": session_id, "phase": phase},
+            )
+
+        session["committed_deal_id"] = deal_id_s
+        session["status"] = "CLOSED"
+        session["phase"] = "ACCEPTED"
+        session["valid_until"] = expires_value
+
+    updated = _atomic_update(session_id, _patch)
+    return {"session": updated, "idempotent": bool(idempotent)}
