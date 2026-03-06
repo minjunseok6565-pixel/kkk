@@ -23,6 +23,22 @@ const state = {
   marketSubTab: "fa",
   marketFaRows: [],
   marketTradeBlockRows: [],
+  marketTradeInboxRows: [],
+  marketTradeInboxGrouped: [],
+  marketTradeInboxLoading: false,
+  marketTradeInboxLastLoadedAt: 0,
+  marketTradeActiveSession: null,
+  marketTradeDealDraft: null,
+  marketTradeAssetPool: {
+    myTeam: { players: [], picks: [], swaps: [], fixedAssets: [] },
+    otherTeam: { players: [], picks: [], swaps: [], fixedAssets: [] },
+  },
+  marketTradeUi: {
+    selectedAssets: { myTeam: [], otherTeam: [] },
+    validationErrors: [],
+    submitPending: false,
+    rejectPending: false,
+  },
   marketSelectedPlayerId: null,
   marketNegotiation: null,
   marketTradeModalPlayerId: null,
@@ -72,4 +88,58 @@ const state = {
   scoutingActiveScoutId: "",
 };
 
-export { state };
+function createEmptyMarketTradeDealDraft() {
+  return {
+    sessionId: null,
+    teams: [],
+    legs: {},
+    meta: {},
+  };
+}
+
+function createEmptyMarketTradeAssetPool() {
+  return {
+    myTeam: { players: [], picks: [], swaps: [], fixedAssets: [] },
+    otherTeam: { players: [], picks: [], swaps: [], fixedAssets: [] },
+  };
+}
+
+function createEmptyMarketTradeUi() {
+  return {
+    selectedAssets: { myTeam: [], otherTeam: [] },
+    validationErrors: [],
+    submitPending: false,
+    rejectPending: false,
+  };
+}
+
+function resetMarketTradeInboxState() {
+  state.marketTradeInboxRows = [];
+  state.marketTradeInboxGrouped = [];
+  state.marketTradeInboxLoading = false;
+  state.marketTradeInboxLastLoadedAt = 0;
+}
+
+function resetMarketTradeDealState() {
+  state.marketTradeActiveSession = null;
+  state.marketTradeDealDraft = createEmptyMarketTradeDealDraft();
+  state.marketTradeAssetPool = createEmptyMarketTradeAssetPool();
+  state.marketTradeUi = createEmptyMarketTradeUi();
+}
+
+function resetMarketTradeState() {
+  resetMarketTradeInboxState();
+  resetMarketTradeDealState();
+}
+
+resetMarketTradeDealState();
+
+export {
+  state,
+  createEmptyMarketTradeDealDraft,
+  createEmptyMarketTradeAssetPool,
+  createEmptyMarketTradeUi,
+  resetMarketTradeInboxState,
+  resetMarketTradeDealState,
+  resetMarketTradeState,
+};

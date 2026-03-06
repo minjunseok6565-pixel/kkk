@@ -91,6 +91,7 @@ function bindEvents() {
   els.marketBackBtn?.addEventListener("click", () => showMainScreen());
   els.marketSubtabFa?.addEventListener("click", () => openMarketSubTab("fa").catch((e) => alert(e.message)));
   els.marketSubtabTradeBlock?.addEventListener("click", () => openMarketSubTab("trade-block").catch((e) => alert(e.message)));
+  els.marketSubtabTradeInbox?.addEventListener("click", () => openMarketSubTab("trade-inbox").catch((e) => alert(e.message)));
   els.collegeTabTeams.addEventListener("click", () => onCollegeTabClick("teams"));
   els.collegeTabLeaders.addEventListener("click", () => onCollegeTabClick("leaders"));
   els.collegeTabBigboard.addEventListener("click", () => onCollegeTabClick("bigboard"));

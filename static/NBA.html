@@ -151,6 +151,7 @@
       <div class="market-subtab-row" role="tablist" aria-label="시장 하위 탭">
         <button id="market-subtab-fa" type="button" class="btn btn-secondary is-active" data-market-tab="fa" aria-selected="true">FA</button>
         <button id="market-subtab-trade-block" type="button" class="btn btn-secondary" data-market-tab="trade-block" aria-selected="false">트레이드 블록</button>
+        <button id="market-subtab-trade-inbox" type="button" class="btn btn-secondary" data-market-tab="trade-inbox" aria-selected="false">제안/협상</button>
       </div>
 
       <section id="market-panel-fa" class="market-panel active" aria-hidden="false">
@@ -209,6 +210,20 @@
               </thead>
               <tbody id="market-trade-block-body"></tbody>
             </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="market-panel-trade-inbox" class="market-panel" aria-hidden="true">
+        <section class="market-fa-overview" aria-label="제안 및 협상 개요">
+          <p id="market-trade-inbox-summary" class="subtitle">협상 제안 목록을 불러오는 중입니다.</p>
+        </section>
+
+        <div class="roster-shell">
+          <div class="roster-table-wrap">
+            <div id="market-trade-inbox-loading" class="subtitle">협상 inbox를 불러오는 중입니다...</div>
+            <p id="market-trade-inbox-empty" class="subtitle hidden">현재 확인할 제안/협상 내역이 없습니다.</p>
+            <div id="market-trade-inbox-groups" class="market-trade-inbox-groups"></div>
           </div>
         </div>
       </section>
@@ -999,6 +1014,45 @@
       <div class="confirm-modal-actions">
         <button id="market-trade-modal-cancel" type="button" class="btn btn-secondary">닫기</button>
         <button id="market-trade-modal-start" type="button" class="btn btn-primary">협상 시작</button>
+      </div>
+    </article>
+  </div>
+
+  <div id="market-trade-deal-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="market-trade-deal-title">
+    <div id="market-trade-deal-backdrop" class="confirm-modal-backdrop"></div>
+    <article class="confirm-modal-panel market-trade-deal-panel">
+      <p class="confirm-modal-eyebrow">TRADE DEAL EDITOR</p>
+      <div class="market-trade-deal-head">
+        <div>
+          <h3 id="market-trade-deal-title" class="confirm-modal-title">제안/협상 딜 편집기</h3>
+          <p id="market-trade-deal-session" class="confirm-modal-body">세션: -</p>
+          <p id="market-trade-deal-meta" class="confirm-modal-body">상대팀: - / 만료일: -</p>
+        </div>
+      </div>
+
+      <div class="market-trade-deal-layout">
+        <section class="market-trade-deal-column" aria-label="자산 선택 패널">
+          <h4>자산 선택</h4>
+          <div id="market-trade-deal-assets-my-team" class="market-trade-deal-list" aria-label="우리팀 자산"></div>
+          <div id="market-trade-deal-assets-other-team" class="market-trade-deal-list" aria-label="상대팀 자산"></div>
+        </section>
+
+        <section class="market-trade-deal-column" aria-label="현재 제안 구성">
+          <h4>현재 제안(legs)</h4>
+          <div id="market-trade-deal-legs-preview" class="market-trade-deal-list"></div>
+        </section>
+
+        <section class="market-trade-deal-column" aria-label="협상 상태">
+          <h4>협상 상태</h4>
+          <div id="market-trade-deal-status" class="market-trade-deal-list"></div>
+          <div id="market-trade-deal-messages" class="market-trade-deal-list"></div>
+        </section>
+      </div>
+
+      <div class="confirm-modal-actions">
+        <button id="market-trade-deal-cancel" type="button" class="btn btn-secondary">취소</button>
+        <button id="market-trade-deal-reject" type="button" class="btn btn-secondary">거절</button>
+        <button id="market-trade-deal-submit" type="button" class="btn btn-primary">제출</button>
       </div>
     </article>
   </div>
