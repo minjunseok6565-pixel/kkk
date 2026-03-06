@@ -482,6 +482,7 @@ export {
   renderCollegeEmpty,
   setCollegeScoutingFeedback,
   loadCollegeScouting,
+  prefetchCollegeScoutingData,
   invalidateCollegeScoutingCache,
   getScoutingReadStorageKey,
   getScoutingReadMap,
