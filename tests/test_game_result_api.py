@@ -109,6 +109,7 @@ def test_api_game_result_avoids_heavy_state_exports_and_team_schedule(monkeypatc
     assert out["leaders"]["points"]["home"]["name"] == "J. Tatum"
     assert out["leaders"]["points"]["away"]["name"] == "L. James"
     assert out["matchups"]["season_record"] == {"user_team_wins": 1, "user_team_losses": 1}
+    assert out["tabs"]["default"] == "gamecast"
     assert len(out["matchups"]["completed"]) == 2
     assert len(out["matchups"]["upcoming"]) == 1
 

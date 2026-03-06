@@ -13,6 +13,8 @@ const state = {
     onlyKey: false,
     expandedGroups: new Set(),
     renderLimit: 80,
+    hydrated: false,
+    hydratedGameId: null,
     cachedResult: null,
     cachedPbp: null,
   },
