@@ -907,6 +907,88 @@ function bindGameResultTabs() {
   gameResultTabsBound = true;
 }
 
+
+let sameDayResultControlsBound = false;
+
+function updateSameDayNavState() {
+  const track = els.gameResultSameDayTrack;
+  const prev = els.gameResultSameDayPrev;
+  const next = els.gameResultSameDayNext;
+  if (!track || !prev || !next) return;
+
+  const maxLeft = Math.max(0, track.scrollWidth - track.clientWidth);
+  const hasOverflow = maxLeft > 8;
+  prev.disabled = !hasOverflow || track.scrollLeft <= 2;
+  next.disabled = !hasOverflow || track.scrollLeft >= (maxLeft - 2);
+}
+
+function bindSameDayResultControls() {
+  if (sameDayResultControlsBound) return;
+  const track = els.gameResultSameDayTrack;
+  const prev = els.gameResultSameDayPrev;
+  const next = els.gameResultSameDayNext;
+  if (!track || !prev || !next) return;
+
+  const scrollByPage = (dir) => {
+    const amount = Math.max(280, Math.round(track.clientWidth * 0.86));
+    track.scrollBy({ left: amount * dir, behavior: "smooth" });
+  };
+
+  prev.addEventListener("click", () => scrollByPage(-1));
+  next.addEventListener("click", () => scrollByPage(1));
+  track.addEventListener("scroll", updateSameDayNavState, { passive: true });
+
+  track.addEventListener("click", async (event) => {
+    const card = event.target.closest('[data-action="open-same-day-game"]');
+    if (!card) return;
+    const gameId = String(card.dataset.gameId || "");
+    if (!gameId) return;
+    await showGameResultScreenByGameId(gameId, { usePublic: true });
+  });
+
+  window.addEventListener("resize", updateSameDayNavState);
+  sameDayResultControlsBound = true;
+}
+
+function renderSameDayResults(cards, currentGameId) {
+  const section = els.gameResultSameDaySection;
+  const track = els.gameResultSameDayTrack;
+  if (!section || !track) return;
+
+  const rows = Array.isArray(cards) ? cards : [];
+  if (!rows.length) {
+    section.hidden = true;
+    track.innerHTML = "";
+    return;
+  }
+
+  section.hidden = false;
+  track.innerHTML = rows.map((card) => {
+    const homeId = String(card?.home_team_id || "").toUpperCase();
+    const awayId = String(card?.away_team_id || "").toUpperCase();
+    const statusLabel = escapeHtml(card?.status_label || "Final");
+    const gameId = escapeHtml(card?.game_id || "");
+    const isCurrent = String(card?.game_id || "") === String(currentGameId || "");
+    return `
+      <button type="button" class="game-result-mini-card ${isCurrent ? "is-current" : ""}" role="listitem" data-action="open-same-day-game" data-game-id="${gameId}" ${isCurrent ? "disabled" : ""}>
+        <p class="game-result-mini-status">${statusLabel}</p>
+        <div class="game-result-mini-row">
+          <span class="game-result-mini-team">${renderTeamLogoMark(homeId, "game-result-mini-logo")}<strong>${escapeHtml(homeId || "---")}</strong></span>
+          <strong class="game-result-mini-score">${escapeHtml(String(card?.home_score ?? "-"))}</strong>
+        </div>
+        <div class="game-result-mini-row">
+          <span class="game-result-mini-team">${renderTeamLogoMark(awayId, "game-result-mini-logo")}<strong>${escapeHtml(awayId || "---")}</strong></span>
+          <strong class="game-result-mini-score">${escapeHtml(String(card?.away_score ?? "-"))}</strong>
+        </div>
+      </button>
+    `;
+  }).join("");
+
+  bindSameDayResultControls();
+  track.scrollTo({ left: 0, behavior: "auto" });
+  updateSameDayNavState();
+}
+
 function renderGameResult(result) {
   state.lastGameResult = result;
   const header = result?.header || {};
@@ -935,6 +1017,8 @@ function renderGameResult(result) {
 
   applyTeamLogo(els.gameResultHomeLogo, homeId);
   applyTeamLogo(els.gameResultAwayLogo, awayId);
+
+  renderSameDayResults(result?.same_day_results || [], result?.game_id);
 
   els.gameResultLinescore.innerHTML = renderLinescore(header.boxscore_lines || {}, homeId, awayId);
   els.gameResultLeaders.innerHTML = renderLeaders(result?.leaders || {});
@@ -988,11 +1072,15 @@ function renderGameResult(result) {
   activateScreen(els.gameResultScreen);
 }
 
-async function showGameResultScreenByGameId(gameId) {
+async function showGameResultScreenByGameId(gameId, options = {}) {
   if (!state.selectedTeamId || !gameId) return;
+  const usePublic = !!options?.usePublic;
   setLoading(true, "경기 리포트를 생성 중...");
   try {
-    const result = await fetchJson(`/api/game/result/${encodeURIComponent(gameId)}?user_team_id=${encodeURIComponent(state.selectedTeamId)}`);
+    const endpoint = usePublic
+      ? `/api/game/result/public/${encodeURIComponent(gameId)}?viewer_team_id=${encodeURIComponent(state.selectedTeamId)}`
+      : `/api/game/result/${encodeURIComponent(gameId)}?user_team_id=${encodeURIComponent(state.selectedTeamId)}`;
+    const result = await fetchJson(endpoint);
     renderGameResult(result);
   } finally {
     setLoading(false);

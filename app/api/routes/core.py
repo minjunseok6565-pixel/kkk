@@ -2281,14 +2281,85 @@ async def api_home_dashboard(team_id: str):
     }
 
 
-@router.get("/api/game/result/{game_id}")
-async def api_game_result(game_id: str, user_team_id: str):
+def _build_same_day_results_cards(
+    *,
+    game_id: str,
+    game_date: str,
+    games: List[Dict[str, Any]],
+    game_results: Mapping[str, Any],
+) -> List[Dict[str, Any]]:
+    cards: List[Dict[str, Any]] = []
+    date_key = str(game_date or "")[:10]
+    if not date_key:
+        return cards
+
+    for g in games:
+        if not isinstance(g, dict):
+            continue
+        gid = str(g.get("game_id") or "")
+        if not gid or gid == game_id:
+            continue
+        if str(g.get("date") or "")[:10] != date_key:
+            continue
+
+        home_id = str(g.get("home_team_id") or "")
+        away_id = str(g.get("away_team_id") or "")
+        if not home_id or not away_id:
+            continue
+
+        gr = game_results.get(gid) if isinstance(game_results, Mapping) else None
+        final = (gr.get("final") if isinstance(gr, Mapping) else None) or {}
+        final = final if isinstance(final, Mapping) else {}
+        home_score = _to_int_or_none(final.get(home_id))
+        away_score = _to_int_or_none(final.get(away_id))
+        if home_score is None:
+            home_score = _to_int_or_none(g.get("home_score"))
+        if away_score is None:
+            away_score = _to_int_or_none(g.get("away_score"))
+        if home_score is None or away_score is None:
+            continue
+
+        game_meta = (gr.get("game") if isinstance(gr, Mapping) else None) or {}
+        game_meta = game_meta if isinstance(game_meta, Mapping) else {}
+        overtime_periods = _to_int_or_none(game_meta.get("overtime_periods"))
+        if overtime_periods is None:
+            overtime_periods = 1 if bool(g.get("is_overtime")) else 0
+        overtime_periods = max(0, int(overtime_periods))
+        if overtime_periods <= 0:
+            status_label = "Final"
+        elif overtime_periods == 1:
+            status_label = "Final/OT"
+        else:
+            status_label = f"Final/{overtime_periods}OT"
+
+        cards.append(
+            {
+                "game_id": gid,
+                "date": date_key,
+                "status": "final",
+                "status_label": status_label,
+                "overtime_periods": overtime_periods,
+                "home_team_id": home_id,
+                "away_team_id": away_id,
+                "home_team_name": TEAM_FULL_NAMES.get(home_id, home_id),
+                "away_team_name": TEAM_FULL_NAMES.get(away_id, away_id),
+                "home_score": int(home_score),
+                "away_score": int(away_score),
+                "winner_team_id": home_id if int(home_score) >= int(away_score) else away_id,
+            }
+        )
+
+    cards.sort(key=lambda x: str(x.get("game_id") or ""))
+    return cards
+
+
+def _build_game_result_response(*, game_id: str, viewer_team_id: str, require_viewer_in_game: bool) -> Dict[str, Any]:
     gid = str(game_id or "").strip()
     if not gid:
         raise HTTPException(status_code=404, detail="GAME_NOT_FOUND")
 
     try:
-        tid = str(normalize_team_id(user_team_id, strict=True))
+        tid = str(normalize_team_id(viewer_team_id, strict=True))
     except Exception:
         raise HTTPException(status_code=400, detail="INVALID_USER_TEAM")
 
@@ -2306,7 +2377,8 @@ async def api_game_result(game_id: str, user_team_id: str):
 
     home_id = str(schedule_entry.get("home_team_id") or "")
     away_id = str(schedule_entry.get("away_team_id") or "")
-    if tid not in {home_id, away_id}:
+    viewer_in_game = tid in {home_id, away_id}
+    if require_viewer_in_game and not viewer_in_game:
         raise HTTPException(status_code=400, detail="USER_TEAM_NOT_IN_GAME")
 
     game_results = state.get_game_results_snapshot(phase="regular") or {}
@@ -2326,9 +2398,10 @@ async def api_game_result(game_id: str, user_team_id: str):
     overtime_periods = _to_int_or_none(game_meta.get("overtime_periods")) or 0
     winner_team_id = home_id if home_score >= away_score else away_id
 
-    opponent_id = away_id if tid == home_id else home_id
-    user_games = _build_formatted_team_schedule_games(
-        team_id=tid,
+    perspective_team_id = tid if viewer_in_game else home_id
+    opponent_id = away_id if perspective_team_id == home_id else home_id
+    perspective_games = _build_formatted_team_schedule_games(
+        team_id=perspective_team_id,
         games=games,
         game_results=game_results,
     )
@@ -2338,13 +2411,13 @@ async def api_game_result(game_id: str, user_team_id: str):
         game_results=game_results,
     )
 
-    user_row = next((g for g in user_games if isinstance(g, dict) and str(g.get("game_id") or "") == gid), None)
+    user_row = next((g for g in perspective_games if isinstance(g, dict) and str(g.get("game_id") or "") == gid), None)
     opp_row = next((g for g in opp_games if isinstance(g, dict) and str(g.get("game_id") or "") == gid), None)
     if not isinstance(user_row, dict) or not bool(user_row.get("is_completed")):
         raise HTTPException(status_code=409, detail="GAME_NOT_FINAL")
 
-    user_record_after = (user_row.get("record_after_game") or {}).get("display") if isinstance(user_row, dict) else None
-    opp_record_after = (opp_row.get("record_after_game") or {}).get("display") if isinstance(opp_row, dict) else None
+    user_record_after = (user_row.get("record_after_game") or {}).get("display") if viewer_in_game and isinstance(user_row, dict) else None
+    opp_record_after = (opp_row.get("record_after_game") or {}).get("display") if viewer_in_game and isinstance(opp_row, dict) else None
 
     teams_box = game_result.get("teams") if isinstance(game_result, dict) else {}
     teams_box = teams_box if isinstance(teams_box, dict) else {}
@@ -2466,11 +2539,11 @@ async def api_game_result(game_id: str, user_team_id: str):
         overtime_periods=int(overtime_periods),
     )
 
-    user_w_before, user_l_before = _record_before_game(user_games, game_id=gid)
+    user_w_before, user_l_before = _record_before_game(perspective_games, game_id=gid)
     opp_w_before, opp_l_before = _record_before_game(opp_games, game_id=gid)
     user_win_pct = float(user_w_before) / float(max(1, user_w_before + user_l_before))
     opp_win_pct = float(opp_w_before) / float(max(1, opp_w_before + opp_l_before))
-    pre_game_strength_gap = user_win_pct - opp_win_pct if tid == home_id else opp_win_pct - user_win_pct
+    pre_game_strength_gap = user_win_pct - opp_win_pct if perspective_team_id == home_id else opp_win_pct - user_win_pct
 
     win_probability_series = _build_win_probability_series(
         game_flow_series,
@@ -2487,7 +2560,7 @@ async def api_game_result(game_id: str, user_team_id: str):
 
     matchup_games = [
         g
-        for g in user_games
+        for g in perspective_games
         if isinstance(g, dict) and str(g.get("opponent_team_id") or "") == opponent_id
     ]
     season_wins = 0
@@ -2526,6 +2599,13 @@ async def api_game_result(game_id: str, user_team_id: str):
                     "tipoff_time": g.get("tipoff_time"),
                 }
             )
+
+    same_day_results = _build_same_day_results_cards(
+        game_id=gid,
+        game_date=str(schedule_entry.get("date") or "")[:10],
+        games=games,
+        game_results=game_results,
+    )
 
     return {
         "game_id": gid,
@@ -2585,7 +2665,18 @@ async def api_game_result(game_id: str, user_team_id: str):
             "completed": completed,
             "upcoming": upcoming,
         },
+        "same_day_results": same_day_results,
     }
+
+
+@router.get("/api/game/result/public/{game_id}")
+async def api_game_result_public(game_id: str, viewer_team_id: str):
+    return _build_game_result_response(game_id=game_id, viewer_team_id=viewer_team_id, require_viewer_in_game=False)
+
+
+@router.get("/api/game/result/{game_id}")
+async def api_game_result(game_id: str, user_team_id: str):
+    return _build_game_result_response(game_id=game_id, viewer_team_id=user_team_id, require_viewer_in_game=True)
 
 
 # -------------------------------------------------------------------------
