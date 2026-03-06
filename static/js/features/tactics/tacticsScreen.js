@@ -290,18 +290,38 @@ async function showTacticsScreen() {
   const hasCachedDetail = hasTeamDetailCache(teamId);
   if (!hasCachedDetail) setLoading(true, "전술 데이터를 불러오는 중...");
   try {
+    let latestSavedTactics = null;
+    let savedTacticsReady = false;
+    let pendingFreshDetail = null;
+
+    const applyFreshDetailIfSafe = (freshDetail) => {
+      if (!savedTacticsReady) {
+        pendingFreshDetail = freshDetail;
+        return;
+      }
+      if (requestSeq !== tacticsRequestSeq) return;
+      if (String(state.selectedTeamId || "").trim() !== teamId) return;
+      if (!els.tacticsScreen?.classList.contains("active")) return;
+      if (state.tacticsDirty || state.tacticsSaving) return;
+      applyTacticsDetail(freshDetail, latestSavedTactics, teamId);
+    };
+
     const [detail, savedTactics] = await Promise.all([
       fetchTeamDetail(teamId, {
         onRevalidated: (freshDetail) => {
-          if (requestSeq !== tacticsRequestSeq) return;
-          if (String(state.selectedTeamId || "").trim() !== teamId) return;
-          if (!els.tacticsScreen?.classList.contains("active")) return;
-          if (state.tacticsDirty || state.tacticsSaving) return;
-          applyTacticsDetail(freshDetail, savedTactics, teamId);
+          applyFreshDetailIfSafe(freshDetail);
         },
       }),
       fetchJson(`/api/tactics/${encodeURIComponent(teamId)}`).catch(() => ({ tactics: null })),
     ]);
+    latestSavedTactics = savedTactics;
+    savedTacticsReady = true;
+
+    if (pendingFreshDetail) {
+      applyFreshDetailIfSafe(pendingFreshDetail);
+      pendingFreshDetail = null;
+    }
+
     if (requestSeq !== tacticsRequestSeq) return;
 
     applyTacticsDetail(detail, savedTactics, teamId);
