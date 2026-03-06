@@ -2,10 +2,10 @@ import { els } from "../../app/dom.js";
 import { state } from "../../app/state.js";
 import { activateScreen } from "../../app/router.js";
 import { fetchCachedJson, getCachedValue, setLoading } from "../../core/api.js";
+import { CACHE_TTL_MS, buildCacheKeys } from "../../app/cachePolicy.js";
 import { TEAM_FULL_NAMES, getScheduleVenueText, renderTeamLogoMark } from "../../core/constants/teams.js";
 import { formatLeader } from "../main/homeWidgets.js";
 
-const SCHEDULE_CACHE_TTL_MS = 12000;
 let scheduleRequestSeq = 0;
 
 function isCompletedGame(game) {
@@ -57,7 +57,7 @@ function renderScheduleTables(games) {
 }
 
 function scheduleCacheKey(teamId) {
-  return `schedule:${String(teamId || "").toUpperCase()}`;
+  return buildCacheKeys(teamId).schedule;
 }
 
 function renderScheduleScreen(schedule, teamId) {
@@ -89,7 +89,7 @@ async function showScheduleScreen() {
     const schedule = await fetchCachedJson({
       key: cacheKey,
       url,
-      ttlMs: SCHEDULE_CACHE_TTL_MS,
+      ttlMs: CACHE_TTL_MS.schedule,
       staleWhileRevalidate: true,
       onRevalidated: (freshSchedule) => {
         const isSameTeam = String(state.selectedTeamId || "").toUpperCase() === teamId;

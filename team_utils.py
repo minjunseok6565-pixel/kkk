@@ -703,6 +703,78 @@ def get_team_detail(team_id: str) -> Dict[str, Any]:
     }
 
 
+
+def get_team_detail_light(team_id: str) -> Dict[str, Any]:
+    """Return lightweight team detail for high-frequency tab entry reads.
+
+    Compared to ``get_team_detail`` this accessor intentionally skips:
+    - player season stats merge
+    - fatigue/sharpness joins
+    and returns a roster payload sufficient for tactics/training entry views.
+    """
+    tid = str(team_id).upper()
+
+    team_ids = set(_list_active_team_ids())
+    if tid not in team_ids:
+        raise ValueError(f"Team '{tid}' not found")
+
+    records = _compute_team_records()
+    standings = get_conference_standings_home_light()
+    rank_map = {r["team_id"]: r for r in (standings.get("east") or []) + (standings.get("west") or []) if isinstance(r, dict)}
+
+    meta = ui_teams_get().get(tid, {})
+    static_info = TEAM_TO_CONF_DIV.get(tid, {}) or {}
+    conf = meta.get("conference") or static_info.get("conference")
+    div = meta.get("division") or static_info.get("division")
+    rec = records.get(tid, {})
+    rank_entry = rank_map.get(tid, {})
+
+    wins = int(rec.get("wins", 0) or 0)
+    losses = int(rec.get("losses", 0) or 0)
+    gp = wins + losses
+    win_pct = wins / gp if gp else 0.0
+    pf = int(rec.get("pf", 0) or 0)
+    pa = int(rec.get("pa", 0) or 0)
+
+    summary = {
+        "team_id": tid,
+        "conference": conf,
+        "division": div,
+        "wins": wins,
+        "losses": losses,
+        "win_pct": win_pct,
+        "point_diff": pf - pa,
+        "rank": rank_entry.get("rank"),
+        "gb": rank_entry.get("gb"),
+        "tendency": meta.get("tendency"),
+        "payroll": _compute_team_payroll(tid),
+        "cap_space": _compute_cap_space(tid),
+    }
+
+    with _repo_ctx() as repo:
+        roster_rows = repo.get_team_roster(tid)
+
+    roster: List[Dict[str, Any]] = []
+    for row in (roster_rows or []):
+        roster.append(
+            {
+                "player_id": str(row.get("player_id") or ""),
+                "name": row.get("name"),
+                "pos": row.get("pos"),
+                "ovr": float(row.get("ovr") or 0.0),
+                "age": int(row.get("age") or 0),
+                "height_in": int(row.get("height_in") or 0),
+                "weight_lb": int(row.get("weight_lb") or 0),
+                "salary": float(row.get("salary_amount") or 0.0),
+            }
+        )
+
+    roster_sorted = sorted(roster, key=lambda r: r.get("ovr", 0), reverse=True)
+    return {
+        "summary": summary,
+        "roster": roster_sorted,
+    }
+
 def get_team_summary_light(team_id: str) -> Dict[str, Any]:
     """Return lightweight team summary for Home/dashboard reads.
 

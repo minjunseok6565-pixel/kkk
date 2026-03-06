@@ -23,6 +23,7 @@ from team_utils import (
     get_conference_standings_table,
     get_team_cards,
     get_team_detail,
+    get_team_detail_light,
     get_team_summary_light,
 )
 
@@ -947,8 +948,13 @@ async def api_teams():
 
 
 @router.get("/api/team-detail/{team_id}")
-async def api_team_detail(team_id: str):
+async def api_team_detail(team_id: str, view: str = "full"):
+    mode = str(view or "full").strip().lower()
+    if mode not in {"full", "light"}:
+        raise HTTPException(status_code=400, detail="view must be one of: full, light")
     try:
+        if mode == "light":
+            return get_team_detail_light(team_id)
         return get_team_detail(team_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -1519,7 +1525,7 @@ def _build_medical_alerts_payload(
     )
 
     tid = str(overview_now.get("team_id") or "")
-    schedule = schedule or _get_team_schedule_view(tid)
+    schedule = schedule or _get_team_schedule_view(tid, view_mode="light")
     current_date = str(schedule.get("current_date") or as_of.isoformat())[:10]
     cur_dt = date.fromisoformat(current_date)
     end_dt = cur_dt + timedelta(days=7)
@@ -1617,7 +1623,7 @@ def _build_medical_risk_calendar_payload(
     d1 = d0 + timedelta(days=days)
 
     tid = str(normalize_team_id(team_id, strict=True))
-    schedule = schedule or _get_team_schedule_view(tid)
+    schedule = schedule or _get_team_schedule_view(tid, view_mode="light")
 
     from practice.service import list_team_practice_sessions
     from fatigue import repo as fatigue_repo
@@ -1946,6 +1952,7 @@ def _build_formatted_team_schedule_games(
     team_id: str,
     games: List[Dict[str, Any]],
     game_results: Mapping[str, Any] | None,
+    include_leaders: bool = True,
 ) -> List[Dict[str, Any]]:
     team_games: List[Dict[str, Any]] = [
         g for g in (games or [])
@@ -1996,15 +2003,16 @@ def _build_formatted_team_schedule_games(
                 "display": f"{wins}-{losses}",
             }
 
-            gr = game_results.get(str(game_id)) if isinstance(game_results, Mapping) else None
-            team_box = ((gr or {}).get("teams") or {}).get(team_id) if isinstance(gr, dict) else None
-            rows = team_box.get("players") if isinstance(team_box, dict) else []
-            rows = rows if isinstance(rows, list) else []
-            leaders = {
-                "points": _pick_leader(rows, ["PTS"]),
-                "rebounds": _pick_leader(rows, ["REB", "TRB"]),
-                "assists": _pick_leader(rows, ["AST"]),
-            }
+            if include_leaders:
+                gr = game_results.get(str(game_id)) if isinstance(game_results, Mapping) else None
+                team_box = ((gr or {}).get("teams") or {}).get(team_id) if isinstance(gr, dict) else None
+                rows = team_box.get("players") if isinstance(team_box, dict) else []
+                rows = rows if isinstance(rows, list) else []
+                leaders = {
+                    "points": _pick_leader(rows, ["PTS"]),
+                    "rebounds": _pick_leader(rows, ["REB", "TRB"]),
+                    "assists": _pick_leader(rows, ["AST"]),
+                }
 
         if not status:
             status = "final" if is_completed else "scheduled"
@@ -2033,7 +2041,7 @@ def _build_formatted_team_schedule_games(
     return formatted_games
 
 
-def _get_team_schedule_view(team_id: str) -> Dict[str, Any]:
+def _get_team_schedule_view(team_id: str, *, view_mode: str = "full") -> Dict[str, Any]:
     """Build schedule payload parts for a team using lightweight state accessors.
 
     Returns the same core shape used by `/api/team-schedule` consumers so
@@ -2054,7 +2062,13 @@ def _get_team_schedule_view(team_id: str) -> Dict[str, Any]:
             detail="Master schedule is not initialized. Expected server startup_init_state() to run.",
         )
 
-    game_results = state.get_game_results_snapshot(phase="regular") or {}
+    mode = str(view_mode or "full").strip().lower()
+    if mode not in {"full", "light"}:
+        raise HTTPException(status_code=400, detail="view must be one of: full, light")
+
+    include_leaders = mode == "full"
+    game_results = state.get_game_results_snapshot(phase="regular") if include_leaders else {}
+    game_results = game_results or {}
     return {
         "team_id": team_id,
         "season_id": str(schedule_snapshot.get("active_season_id") or ""),
@@ -2063,14 +2077,15 @@ def _get_team_schedule_view(team_id: str) -> Dict[str, Any]:
             team_id=team_id,
             games=games,
             game_results=game_results,
+            include_leaders=include_leaders,
         ),
     }
 
 
 @router.get("/api/team-schedule/{team_id}")
-async def team_schedule(team_id: str):
+async def team_schedule(team_id: str, view: str = "full"):
     """마스터 스케줄 기준으로 특정 팀의 전체 시즌 일정을 UI 친화 포맷으로 반환."""
-    return _get_team_schedule_view(team_id)
+    return _get_team_schedule_view(team_id, view_mode=view)
 
 
 @router.get("/api/home/dashboard/{team_id}")
@@ -2086,7 +2101,7 @@ async def api_home_dashboard(team_id: str):
     sy = int(league_ctx.get("season_year") or 0)
     as_of = state.get_current_date_as_date()
 
-    schedule = _get_team_schedule_view(tid)
+    schedule = _get_team_schedule_view(tid, view_mode="light")
     team_summary = get_team_summary_light(tid)
     standings_table = get_conference_standings_home_light()
     medical_overview = _medical_team_overview_payload(

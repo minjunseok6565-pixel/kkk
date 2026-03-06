@@ -1,10 +1,12 @@
 import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
-import { fetchJson, setLoading } from "../../core/api.js";
+import { fetchCachedJson, fetchJson, setLoading } from "../../core/api.js";
 import { TACTICS_OFFENSE_SCHEMES, TACTICS_DEFENSE_SCHEMES, TACTICS_OFFENSE_ROLES } from "../../core/constants/tactics.js";
 import { tacticsSchemeLabel, tacticDisplayLabel, getDefenseRolesForScheme, buildTacticsDraft, computeTacticsInsights, rowHealthState } from "./tacticsInsights.js";
 import { fetchTeamDetail, hasTeamDetailCache } from "../team/teamDetailCache.js";
+import { CACHE_EVENT_TYPES, CACHE_TTL_MS, buildCacheKeys, getPrefetchPlanForEvent, runPrefetchPlan } from "../../app/cachePolicy.js";
+import { emitCacheEvent } from "../../app/cacheEvents.js";
 
 let tacticsRequestSeq = 0;
 
@@ -131,6 +133,9 @@ async function saveTacticsDraft({ showSuccessMessage = true } = {}) {
       body: JSON.stringify({ tactics: buildTacticsPayload() }),
     });
     state.tacticsDirty = false;
+    emitCacheEvent(CACHE_EVENT_TYPES.TACTICS_SAVE, { teamId });
+    const prefetchPlan = getPrefetchPlanForEvent(CACHE_EVENT_TYPES.TACTICS_SAVE, { teamId });
+    void runPrefetchPlan(prefetchPlan);
     if (showSuccessMessage && els.tacticsTotalMessage) {
       els.tacticsTotalMessage.textContent = "전술 저장이 완료되었습니다.";
     }
@@ -291,7 +296,13 @@ async function showTacticsScreen() {
   if (!hasCachedDetail) setLoading(true, "전술 데이터를 불러오는 중...");
   try {
     let latestSavedTactics = { tactics: null };
-    const savedTacticsPromise = fetchJson(`/api/tactics/${encodeURIComponent(teamId)}`).catch(() => ({ tactics: null }));
+    const tacticsCacheKey = buildCacheKeys(teamId).tactics;
+    const savedTacticsPromise = fetchCachedJson({
+      key: tacticsCacheKey,
+      url: `/api/tactics/${encodeURIComponent(teamId)}`,
+      ttlMs: CACHE_TTL_MS.tactics,
+      staleWhileRevalidate: true,
+    }).catch(() => ({ tactics: null }));
     const [detail, savedTactics] = await Promise.all([
       fetchTeamDetail(teamId, {
         onRevalidated: (freshDetail) => {

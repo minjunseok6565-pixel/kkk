@@ -1,6 +1,7 @@
 import { fetchCachedJson, getCachedValue, invalidateCachedValuesByPrefix } from "../../core/api.js";
+import { CACHE_TTL_MS, buildCacheKeys } from "../../app/cachePolicy.js";
 
-const TEAM_DETAIL_CACHE_TTL_MS = 7000;
+const TEAM_DETAIL_CACHE_TTL_MS = CACHE_TTL_MS.teamDetail;
 
 function normalizeTeamId(teamId) {
   return String(teamId || "").trim().toUpperCase();
@@ -9,7 +10,7 @@ function normalizeTeamId(teamId) {
 function buildTeamDetailCacheKey(teamId) {
   const normalized = normalizeTeamId(teamId);
   if (!normalized) return "";
-  return `team-detail:${normalized}`;
+  return buildCacheKeys(normalized).teamDetail;
 }
 
 async function fetchTeamDetail(teamId, {

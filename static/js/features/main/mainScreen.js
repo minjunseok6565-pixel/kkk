@@ -2,6 +2,7 @@ import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
 import { fetchJson, invalidateCachedValuesByPrefix, setLoading, showConfirmModal } from "../../core/api.js";
+import { CACHE_EVENT_TYPES, getPrefetchPlanAfterGame, invalidateByEvent, runPrefetchPlan } from "../../app/cachePolicy.js";
 import { formatIsoDate, formatWinPct } from "../../core/format.js";
 import { num } from "../../core/guards.js";
 import { TEAM_FULL_NAMES, applyTeamLogo, getTeamBranding, renderTeamLogoMark, getScheduleVenueText } from "../../core/constants/teams.js";
@@ -36,19 +37,15 @@ function randomTipoffTime() {
 function invalidatePostGameViewCaches(teamId) {
   const tid = String(teamId || state.selectedTeamId || "").toUpperCase();
   if (!tid) return;
+  invalidateByEvent(CACHE_EVENT_TYPES.GAME_PROGRESS, { teamId: tid });
+}
 
-  invalidateCachedValuesByPrefix(`schedule:${tid}`);
-  invalidateCachedValuesByPrefix("standings:");
-  invalidateCachedValuesByPrefix(`medical:overview:${tid}`);
-  invalidateCachedValuesByPrefix(`medical:alerts:${tid}`);
-  invalidateCachedValuesByPrefix(`medical:risk-calendar:${tid}`);
-  invalidateCachedValuesByPrefix(`training:schedule:${tid}`);
-  invalidateCachedValuesByPrefix(`training:sessions:${tid}:`);
-  invalidateCachedValuesByPrefix(`training:sessions-resolve:${tid}:`);
-  invalidateCachedValuesByPrefix(`training:session:${tid}:`);
-  invalidateCachedValuesByPrefix(`training:team-detail:${tid}`);
-  invalidateCachedValuesByPrefix(`training:familiarity:${tid}:`);
-  invalidateCachedValuesByPrefix(`team-detail:${tid}`);
+function queuePostGamePrefetch(teamId) {
+  const tid = String(teamId || state.selectedTeamId || "").toUpperCase();
+  if (!tid) return;
+  const plan = getPrefetchPlanAfterGame({ teamId: tid });
+  if (!plan.length) return;
+  void runPrefetchPlan(plan);
 }
 
 function invalidateAllTeamDetailCaches() {
@@ -158,6 +155,7 @@ async function progressNextGameFromHome() {
     });
 
     invalidatePostGameViewCaches(state.selectedTeamId);
+    queuePostGamePrefetch(state.selectedTeamId);
 
     const playedGameId = progressResult?.game_day?.user_game?.game_id;
     if (playedGameId) {
@@ -199,6 +197,7 @@ async function autoAdvanceToNextGameDayFromHome() {
       }),
     });
     invalidatePostGameViewCaches(state.selectedTeamId);
+    queuePostGamePrefetch(state.selectedTeamId);
     await refreshMainDashboard();
     alert("경기가 있는 날짜까지 자동 진행이 완료되었습니다.");
   } catch (e) {

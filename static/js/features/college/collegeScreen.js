@@ -1,11 +1,12 @@
 import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
-import { fetchJson, setLoading } from "../../core/api.js";
+import { fetchCachedJson, fetchJson, setLoading } from "../../core/api.js";
 import { escapeHtml, safeNum } from "../../core/guards.js";
 import { renderCollegeEmpty, loadCollegeScouting } from "./scouting.js";
 import { teamSeedChip, collegeStat, loadCollegeLeaders } from "./leaders.js";
 import { loadCollegeBigboard } from "./bigboard.js";
+import { CACHE_TTL_MS, buildCacheKeys } from "../../app/cachePolicy.js";
 
 const COLLEGE_LAZY_TABS = ["leaders", "bigboard", "scouting"];
 
@@ -120,7 +121,12 @@ function renderCollegeTeams(teams) {
 
 async function loadCollegeTeamDetail(teamId) {
   if (!teamId) return;
-  const payload = await fetchJson(`/api/college/team-detail/${encodeURIComponent(teamId)}`);
+  const payload = await fetchCachedJson({
+    key: `college:team-detail:${encodeURIComponent(String(teamId || ""))}` ,
+    url: `/api/college/team-detail/${encodeURIComponent(teamId)}` ,
+    ttlMs: CACHE_TTL_MS.college,
+    staleWhileRevalidate: true,
+  });
   const teamName = payload?.team?.name || teamId;
   const roster = payload?.roster || [];
   state.selectedCollegeTeamId = teamId;
@@ -161,10 +167,11 @@ async function showCollegeScreen() {
   setLoading(true, "대학 리그 정보를 불러오는 중입니다...");
   try {
     resetCollegeLazyTabState();
+    const keys = buildCacheKeys(state.selectedTeamId);
     const [meta, teams, experts] = await Promise.all([
-      fetchJson("/api/college/meta"),
-      fetchJson("/api/college/teams"),
-      fetchJson("/api/offseason/draft/experts"),
+      fetchCachedJson({ key: keys.collegeMeta, url: "/api/college/meta", ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }),
+      fetchCachedJson({ key: keys.collegeTeams, url: "/api/college/teams", ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }),
+      fetchCachedJson({ key: keys.collegeExperts, url: "/api/offseason/draft/experts", ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }),
     ]);
     state.collegeMeta = meta;
     state.collegeTeams = teams || [];
