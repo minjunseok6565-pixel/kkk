@@ -1,11 +1,29 @@
 import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
-import { fetchJson, setLoading } from "../../core/api.js";
+import { setLoading } from "../../core/api.js";
 import { num, clamp } from "../../core/guards.js";
 import { formatHeightIn, formatWeightLb, formatMoney, formatWinPct } from "../../core/format.js";
 import { TEAM_FULL_NAMES } from "../../core/constants/teams.js";
 import { loadPlayerDetail } from "./playerDetail.js";
+import { fetchTeamDetail, hasTeamDetailCache } from "../team/teamDetailCache.js";
+
+let myTeamRequestSeq = 0;
+
+function applyMyTeamDetail(detail, { resetSelection = true } = {}) {
+  state.rosterRows = detail?.roster || [];
+  if (resetSelection) state.selectedPlayerId = null;
+
+  const teamName = state.selectedTeamName || TEAM_FULL_NAMES[state.selectedTeamId] || state.selectedTeamId;
+  els.myTeamTitle.textContent = `${teamName} 선수단`;
+
+  renderMyTeamOverview(detail?.summary || {}, state.rosterRows);
+  rerenderMyTeamBoard();
+  if (resetSelection) {
+    els.playerDetailContent.innerHTML = "";
+    els.playerDetailTitle.textContent = "선수 상세 정보";
+  }
+}
 
 function ratioToColor(ratio) {
   const r = clamp(num(ratio, 0), 0, 1);
@@ -192,22 +210,26 @@ async function showMyTeamScreen() {
     return;
   }
 
-  setLoading(true, "내 팀 로스터를 불러오는 중...");
+  const teamId = String(state.selectedTeamId || "").trim();
+  const requestSeq = myTeamRequestSeq + 1;
+  myTeamRequestSeq = requestSeq;
+  const hasCached = hasTeamDetailCache(teamId);
+  if (!hasCached) setLoading(true, "내 팀 로스터를 불러오는 중...");
   try {
-    const detail = await fetchJson(`/api/team-detail/${encodeURIComponent(state.selectedTeamId)}`);
-    state.rosterRows = detail.roster || [];
-    state.selectedPlayerId = null;
+    const detail = await fetchTeamDetail(teamId, {
+      onRevalidated: (freshDetail) => {
+        if (requestSeq !== myTeamRequestSeq) return;
+        if (String(state.selectedTeamId || "").trim() !== teamId) return;
+        if (!els.myTeamScreen?.classList.contains("active")) return;
+        applyMyTeamDetail(freshDetail, { resetSelection: false });
+      },
+    });
+    if (requestSeq !== myTeamRequestSeq) return;
 
-    const teamName = state.selectedTeamName || TEAM_FULL_NAMES[state.selectedTeamId] || state.selectedTeamId;
-    els.myTeamTitle.textContent = `${teamName} 선수단`;
-
-    renderMyTeamOverview(detail.summary || {}, state.rosterRows);
-    rerenderMyTeamBoard();
-    els.playerDetailContent.innerHTML = "";
-    els.playerDetailTitle.textContent = "선수 상세 정보";
+    applyMyTeamDetail(detail);
     activateScreen(els.myTeamScreen);
   } finally {
-    setLoading(false);
+    if (requestSeq === myTeamRequestSeq) setLoading(false);
   }
 }
 
