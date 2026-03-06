@@ -7,6 +7,41 @@ import { renderCollegeEmpty, loadCollegeScouting } from "./scouting.js";
 import { teamSeedChip, collegeStat, loadCollegeLeaders } from "./leaders.js";
 import { loadCollegeBigboard } from "./bigboard.js";
 
+const COLLEGE_LAZY_TABS = ["leaders", "bigboard", "scouting"];
+
+function resetCollegeLazyTabState() {
+  state.collegeTabLoaded = { leaders: false, bigboard: false, scouting: false };
+  state.collegeTabLoading = { leaders: false, bigboard: false, scouting: false };
+}
+
+async function ensureCollegeTabData(tab) {
+  if (!COLLEGE_LAZY_TABS.includes(tab)) return;
+  if (!state.collegeTabLoaded || typeof state.collegeTabLoaded !== "object") {
+    state.collegeTabLoaded = { leaders: false, bigboard: false, scouting: false };
+  }
+  if (!state.collegeTabLoading || typeof state.collegeTabLoading !== "object") {
+    state.collegeTabLoading = { leaders: false, bigboard: false, scouting: false };
+  }
+  if (state.collegeTabLoaded[tab] || state.collegeTabLoading[tab]) return;
+
+  state.collegeTabLoading[tab] = true;
+  try {
+    if (tab === "leaders") {
+      await loadCollegeLeaders();
+    } else if (tab === "bigboard") {
+      await loadCollegeBigboard();
+    } else if (tab === "scouting") {
+      await loadCollegeScouting();
+    }
+    state.collegeTabLoaded[tab] = true;
+  } catch (error) {
+    state.collegeTabLoaded[tab] = false;
+    throw error;
+  } finally {
+    state.collegeTabLoading[tab] = false;
+  }
+}
+
 function renderCollegeTeamsKpi(teams) {
   if (!els.collegeTeamsKpi) return;
   if (!teams.length) {
@@ -125,6 +160,7 @@ async function showCollegeScreen() {
   }
   setLoading(true, "대학 리그 정보를 불러오는 중입니다...");
   try {
+    resetCollegeLazyTabState();
     const [meta, teams, experts] = await Promise.all([
       fetchJson("/api/college/meta"),
       fetchJson("/api/college/teams"),
@@ -147,11 +183,7 @@ async function showCollegeScreen() {
     els.collegeLeaderSort.value = state.collegeLeadersSort;
     if (els.collegeLeaderPosFilter) els.collegeLeaderPosFilter.innerHTML = "";
     if (els.collegeLeaderTeamFilter) els.collegeLeaderTeamFilter.innerHTML = "";
-    await loadCollegeLeaders();
 
-    await loadCollegeBigboard();
-
-    await loadCollegeScouting();
     switchCollegeTab("teams");
     activateScreen(els.collegeScreen);
   } finally {
@@ -159,4 +191,11 @@ async function showCollegeScreen() {
   }
 }
 
-export { renderCollegeTeamsKpi, switchCollegeTab, renderCollegeTeams, loadCollegeTeamDetail, showCollegeScreen };
+export {
+  renderCollegeTeamsKpi,
+  switchCollegeTab,
+  renderCollegeTeams,
+  loadCollegeTeamDetail,
+  ensureCollegeTabData,
+  showCollegeScreen,
+};

@@ -1,7 +1,26 @@
 import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
-import { fetchJson } from "../../core/api.js";
+import { fetchCachedJson, fetchJson, invalidateCachedValuesByPrefix } from "../../core/api.js";
 import { escapeHtml } from "../../core/guards.js";
+
+const COLLEGE_SCOUTING_TTL_MS = 10000;
+
+function getCollegeScoutingCachePrefix(teamId) {
+  return `college:scouting:team=${String(teamId || "")}`;
+}
+
+function invalidateCollegeScoutingCache(teamId = state.selectedTeamId) {
+  const prefix = getCollegeScoutingCachePrefix(teamId);
+  invalidateCachedValuesByPrefix(prefix);
+}
+
+function getCollegeScoutingScoutsCacheKey(teamId) {
+  return `${getCollegeScoutingCachePrefix(teamId)}:scouts`;
+}
+
+function getCollegeScoutingReportsCacheKey(teamId) {
+  return `${getCollegeScoutingCachePrefix(teamId)}:reports`;
+}
 
 function renderCollegeEmpty(tbody, colspan, msg) {
   tbody.innerHTML = `<tr><td class="schedule-empty" colspan="${colspan}">${msg}</td></tr>`;
@@ -96,11 +115,24 @@ function renderScoutingReportInbox() {
   }).join("");
 }
 
-async function loadCollegeScouting() {
-  if (!state.selectedTeamId) return;
+async function loadCollegeScouting({ force = false } = {}) {
+  const teamId = String(state.selectedTeamId || "");
+  if (!teamId) return;
   const [scoutsPayload, reportsPayload] = await Promise.all([
-    fetchJson(`/api/scouting/scouts/${encodeURIComponent(state.selectedTeamId)}`),
-    fetchJson(`/api/scouting/reports?team_id=${encodeURIComponent(state.selectedTeamId)}&limit=50`),
+    fetchCachedJson({
+      key: getCollegeScoutingScoutsCacheKey(teamId),
+      url: `/api/scouting/scouts/${encodeURIComponent(teamId)}`,
+      ttlMs: COLLEGE_SCOUTING_TTL_MS,
+      staleWhileRevalidate: true,
+      force,
+    }),
+    fetchCachedJson({
+      key: getCollegeScoutingReportsCacheKey(teamId),
+      url: `/api/scouting/reports?team_id=${encodeURIComponent(teamId)}&limit=50`,
+      ttlMs: COLLEGE_SCOUTING_TTL_MS,
+      staleWhileRevalidate: true,
+      force,
+    }),
   ]);
   state.scoutingScouts = scoutsPayload?.scouts || [];
   state.scoutingReports = reportsPayload?.reports || [];
@@ -435,6 +467,7 @@ export {
   renderCollegeEmpty,
   setCollegeScoutingFeedback,
   loadCollegeScouting,
+  invalidateCollegeScoutingCache,
   getScoutingReadStorageKey,
   getScoutingReadMap,
   markScoutReportsRead,
