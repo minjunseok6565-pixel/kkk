@@ -15,6 +15,7 @@ import { showScheduleScreen } from "../features/schedule/scheduleScreen.js";
 import { showTrainingScreen } from "../features/training/trainingScreen.js";
 import { showStandingsScreen } from "../features/standings/standingsScreen.js";
 import { showCollegeScreen, switchCollegeTab, ensureCollegeTabData } from "../features/college/collegeScreen.js";
+import { showMarketScreen, openMarketSubTab, handleMarketDetailAction } from "../features/market/marketScreen.js";
 import { loadCollegeLeaders } from "../features/college/leaders.js";
 import { closeCollegeBigboardDetailScreen } from "../features/college/bigboard.js";
 import {
@@ -49,6 +50,7 @@ function bindEvents() {
   els.newGameBtn.addEventListener("click", () => createNewGame().catch((e) => alert(e.message)));
   els.continueBtn.addEventListener("click", () => continueGame().catch((e) => alert(e.message)));
   els.myTeamBtn.addEventListener("click", () => showMyTeamScreen().catch((e) => alert(e.message)));
+  els.marketMenuBtn?.addEventListener("click", () => showMarketScreen().catch((e) => alert(e.message)));
   els.tacticsMenuBtn.addEventListener("click", () => showTacticsScreen().catch((e) => alert(e.message)));
   els.nextGameTacticsBtn.addEventListener("click", () => showTacticsScreen().catch((e) => alert(e.message)));
   els.nextGamePlayBtn.addEventListener("click", () => progressNextGameFromHome().catch((e) => alert(e.message)));
@@ -86,6 +88,9 @@ function bindEvents() {
   els.medicalBackBtn.addEventListener("click", () => showMainScreen());
   els.standingsBackBtn.addEventListener("click", () => showMainScreen());
   els.collegeBackBtn.addEventListener("click", () => showMainScreen());
+  els.marketBackBtn?.addEventListener("click", () => showMainScreen());
+  els.marketSubtabFa?.addEventListener("click", () => openMarketSubTab("fa").catch((e) => alert(e.message)));
+  els.marketSubtabTradeBlock?.addEventListener("click", () => openMarketSubTab("trade-block").catch((e) => alert(e.message)));
   els.collegeTabTeams.addEventListener("click", () => onCollegeTabClick("teams"));
   els.collegeTabLeaders.addEventListener("click", () => onCollegeTabClick("leaders"));
   els.collegeTabBigboard.addEventListener("click", () => onCollegeTabClick("bigboard"));
@@ -219,7 +224,21 @@ function bindEvents() {
     btn.addEventListener("click", () => renderTrainingDetail(btn.dataset.trainingType).catch((e) => alert(e.message)));
   });
   els.backToMainBtn.addEventListener("click", () => showMainScreen());
-  els.backToRosterBtn.addEventListener("click", () => activateScreen(els.myTeamScreen));
+  els.backToRosterBtn.addEventListener("click", () => {
+    if (String(state.playerDetailBackTarget || "").toLowerCase() === "market") {
+      activateScreen(els.marketScreen);
+      return;
+    }
+    activateScreen(els.myTeamScreen);
+  });
+
+  els.playerDetailContent?.addEventListener("click", (event) => {
+    const target = event.target instanceof HTMLElement ? event.target.closest("button[data-market-action]") : null;
+    if (!target) return;
+    const action = String(target.dataset.marketAction || "");
+    if (!action) return;
+    handleMarketDetailAction(action).catch((e) => alert(e.message));
+  });
 
   if (els.myTeamSortControls) {
     els.myTeamSortControls.querySelectorAll('.myteam-chip[data-sort]').forEach((btn) => {

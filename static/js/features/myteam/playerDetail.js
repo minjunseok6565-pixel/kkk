@@ -135,7 +135,9 @@ function buildAttrIntelligence(attrs) {
   return { categoryHtml, strengthsHtml, weaknessesHtml };
 }
 
-function renderPlayerDetail(detail) {
+function renderPlayerDetail(detail, options = {}) {
+  const context = String(options?.context || "myteam").toLowerCase();
+  const isMarketFa = context === "market-fa";
   const p = detail.player || {};
   const contract = detail.contract || {};
   const diss = getDissatisfactionSummary(detail.dissatisfaction);
@@ -181,6 +183,83 @@ function renderPlayerDetail(detail) {
   const ovr = Math.round(num(p.ovr, 0));
   const sharp = clamp(num(condition.sharpness, 50), 0, 100);
   const { categoryHtml, strengthsHtml, weaknessesHtml } = buildAttrIntelligence(p.attrs || {});
+  const marketNegotiation = (isMarketFa && state.marketNegotiation && state.marketNegotiation.player_id === p.player_id)
+    ? state.marketNegotiation
+    : null;
+  const marketMode = String(marketNegotiation?.mode || "").toUpperCase();
+  const marketPhase = String(marketNegotiation?.phase || "").toUpperCase();
+  const marketStatus = String(marketNegotiation?.status || "").toUpperCase();
+  const marketVerdict = String(marketNegotiation?.last_decision?.verdict || "").toUpperCase();
+  const isActive = marketStatus === "ACTIVE";
+  const isAccepted = marketPhase === "ACCEPTED";
+  const isNegotiating = marketPhase === "INIT" || marketPhase === "NEGOTIATING";
+  const canOfferFa = marketMode === "SIGN_FA" && isActive && isNegotiating;
+  const canAcceptCounter = marketMode === "SIGN_FA" && isActive && isNegotiating && Boolean(marketNegotiation?.last_counter);
+  const canCommitFa = marketMode === "SIGN_FA" && isActive && isAccepted;
+  const canTwoWayDecision = marketMode === "SIGN_TWO_WAY" && isActive && isNegotiating;
+  const canCommitTwoWay = marketMode === "SIGN_TWO_WAY" && isActive && isAccepted;
+
+  const marketRulesHtml = isMarketFa
+    ? `
+      <ul class="kv-list market-rule-list">
+        <li>FA 계약은 선수 수락(ACCEPTED) 이후에만 <strong>계약 확정</strong>이 활성화됩니다.</li>
+        <li>샐러리캡 부족 시 FA 계약 확정이 거절될 수 있습니다.</li>
+        <li>투웨이 계약은 팀당 최대 3명, 수락 시에만 계약 확정이 가능합니다.</li>
+      </ul>
+    `
+    : "";
+
+  const marketStatusHtml = isMarketFa
+    ? `
+      <ul class="compact-kv-list">
+        <li><span>협상 모드</span><strong>${marketMode || "-"}</strong></li>
+        <li><span>진행 상태</span><strong>${marketPhase || "-"} / ${marketStatus || "-"}</strong></li>
+        <li><span>최근 응답</span><strong>${marketVerdict || "-"}</strong></li>
+      </ul>
+      ${marketNegotiation?.info ? `<p class="section-copy status-ok">${marketNegotiation.info}</p>` : ""}
+      ${marketNegotiation?.error ? `<p class="section-copy status-danger">${marketNegotiation.error}</p>` : ""}
+    `
+    : "";
+
+  const marketActionHtml = isMarketFa
+    ? (() => {
+      if (!marketNegotiation) {
+        return `
+          <div class="market-action-row">
+            <button type="button" class="btn btn-primary" data-market-action="start-fa">FA 협상 시작</button>
+            <button type="button" class="btn btn-secondary" data-market-action="start-two-way">투웨이 협상 시작</button>
+          </div>
+        `;
+      }
+
+      if (marketMode === "SIGN_FA") {
+        return `
+          <div class="market-action-row">
+            <button type="button" class="btn btn-primary" data-market-action="offer-fa" ${canOfferFa ? "" : "disabled aria-disabled=\"true\""}>오퍼 제출</button>
+            <button type="button" class="btn btn-secondary" data-market-action="accept-counter" ${canAcceptCounter ? "" : "disabled aria-disabled=\"true\""}>카운터 수락</button>
+            <button type="button" class="btn btn-primary" data-market-action="commit-fa" ${canCommitFa ? "" : "disabled aria-disabled=\"true\""}>계약 확정</button>
+          </div>
+        `;
+      }
+
+      if (marketMode === "SIGN_TWO_WAY") {
+        return `
+          <div class="market-action-row">
+            <button type="button" class="btn btn-secondary" data-market-action="two-way-accept" ${canTwoWayDecision ? "" : "disabled aria-disabled=\"true\""}>투웨이 수락 확인</button>
+            <button type="button" class="btn btn-secondary" data-market-action="two-way-reject" ${canTwoWayDecision ? "" : "disabled aria-disabled=\"true\""}>투웨이 거절 확인</button>
+            <button type="button" class="btn btn-primary" data-market-action="commit-two-way" ${canCommitTwoWay ? "" : "disabled aria-disabled=\"true\""}>계약 확정</button>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="market-action-row">
+          <button type="button" class="btn btn-primary" data-market-action="start-fa">FA 협상 재시작</button>
+          <button type="button" class="btn btn-secondary" data-market-action="start-two-way">투웨이 협상 재시작</button>
+        </div>
+      `;
+    })()
+    : "";
 
   els.playerDetailTitle.textContent = `${playerName} 상세 정보`;
   els.playerDetailContent.innerHTML = `
@@ -191,11 +270,11 @@ function renderPlayerDetail(detail) {
             <p class="detail-eyebrow">FRANCHISE PLAYER CARD</p>
             <h3>${playerName}</h3>
             <p class="detail-subline">${p.pos || "-"} · ${num(p.age, 0)}세 · ${formatHeightIn(p.height_in)} / ${formatWeightLb(p.weight_lb)}</p>
-            <p class="hero-summary">${injury.is_injured ? "건강 관리 필요" : "출전 가능"} · Sharp ${Math.round(sharp)} · ${detail.dissatisfaction?.is_dissatisfied ? "불만 관리 필요" : "불만 낮음"}</p>
+            <p class="hero-summary">${injury.is_injured ? "건강 관리 필요" : "출전 가능"} · ${isMarketFa ? "FA 시장 모드" : `Sharp ${Math.round(sharp)}`} · ${detail.dissatisfaction?.is_dissatisfied ? "불만 관리 필요" : "불만 낮음"}</p>
           </div>
           <div class="hero-kpi-stack">
             <span class="ovr-medal">OVR ${ovr}</span>
-            ${renderSharpnessBadgeV2(sharp)}
+            ${isMarketFa ? "" : renderSharpnessBadgeV2(sharp)}
             <span class="status-line ${injury.is_injured ? "status-danger" : "status-ok"}">${injury.is_injured ? "Injured" : "Available"}</span>
           </div>
         </div>
@@ -225,6 +304,14 @@ function renderPlayerDetail(detail) {
         </div>
       </section>
 
+      ${isMarketFa ? `
+      <section class="detail-card detail-card-health">
+        <h4>시장 액션</h4>
+        ${marketStatusHtml}
+        ${marketRulesHtml}
+        ${marketActionHtml}
+      </section>
+      ` : `
       <section class="detail-card detail-card-health">
         <h4>건강 상태</h4>
         <ul class="compact-kv-list compact-kv-list-health">
@@ -235,6 +322,7 @@ function renderPlayerDetail(detail) {
         <p class="section-copy">${healthText}</p>
         ${injuryDetails.length ? `<ul class="kv-list">${injuryDetails.map((item) => `<li>${item}</li>`).join("")}</ul>` : ""}
       </section>
+      `}
 
       <section class="detail-card detail-card-stats">
         <h4>시즌 퍼포먼스</h4>
@@ -248,11 +336,13 @@ function renderPlayerDetail(detail) {
   `;
 }
 
-async function loadPlayerDetail(playerId) {
+async function loadPlayerDetail(playerId, options = {}) {
+  const backTarget = String(options?.backTarget || "myteam").toLowerCase();
+  state.playerDetailBackTarget = backTarget === "market" ? "market" : "myteam";
   setLoading(true, "선수 상세 정보를 불러오는 중...");
   try {
     const detail = await fetchJson(`/api/player-detail/${encodeURIComponent(playerId)}`);
-    renderPlayerDetail(detail);
+    renderPlayerDetail(detail, options);
     activateScreen(els.playerDetailScreen);
   } finally {
     setLoading(false);

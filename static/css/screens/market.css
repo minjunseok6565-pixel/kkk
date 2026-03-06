@@ -1,0 +1,46 @@
+.market-subtab-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.market-fa-overview {
+  margin-bottom: 12px;
+}
+
+.market-panel {
+  display: none;
+}
+
+.market-panel.active {
+  display: block;
+}
+
+#market-screen .player-detail-panel {
+  min-height: 240px;
+}
+
+.market-action-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.market-rule-list {
+  margin: 10px 0 14px;
+  color: rgba(232, 238, 251, 0.9);
+}
+
+.market-rule-list li {
+  margin-bottom: 6px;
+}
+
+.market-trade-block-table th:last-child,
+.market-trade-block-table td:last-child {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.market-trade-offer-btn {
+  min-width: 110px;
+}
