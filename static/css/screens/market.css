@@ -34,3 +34,13 @@
 .market-rule-list li {
   margin-bottom: 6px;
 }
+
+.market-trade-block-table th:last-child,
+.market-trade-block-table td:last-child {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.market-trade-offer-btn {
+  min-width: 110px;
+}

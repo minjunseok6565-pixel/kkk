@@ -44,3 +44,12 @@ class TradeEvaluateRequest(BaseModel):
     deal: Dict[str, Any]
     team_id: str
     include_breakdown: bool = True
+
+
+class TradeBlockAggregateQuery(BaseModel):
+    active_only: bool = True
+    visibility: str = "PUBLIC"
+    team_id: str | None = None
+    limit: int = 300
+    offset: int = 0
+    sort: str = "priority_desc"
