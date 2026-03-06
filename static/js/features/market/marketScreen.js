@@ -16,6 +16,7 @@ import { num } from "../../core/guards.js";
 import { formatHeightIn, formatMoney, formatWeightLb } from "../../core/format.js";
 import { TEAM_FULL_NAMES } from "../../core/constants/teams.js";
 import { loadPlayerDetail } from "../myteam/playerDetail.js";
+import { fetchTeamDetail } from "../team/teamDetailCache.js";
 import { fetchTeamDetail, invalidateTeamDetailCache } from "../team/teamDetailCache.js";
 
 const MARKET_TRADE_INBOX_CACHE_TTL_MS = 30 * 1000;
@@ -86,6 +87,22 @@ function switchMarketSubTab(tab) {
   });
 }
 
+function switchTradeBlockScope(scope) {
+  const next = scope === "mine" ? "mine" : "other";
+  state.marketTradeBlockScope = next;
+
+  const mapping = {
+    other: [els.marketTradeBlockScopeOther, els.marketTradeBlockPanelOther],
+    mine: [els.marketTradeBlockScopeMine, els.marketTradeBlockPanelMine],
+  };
+
+  Object.entries(mapping).forEach(([key, [btn, panel]]) => {
+    const active = key === next;
+    btn?.classList.toggle("is-active", active);
+    btn?.setAttribute("aria-selected", active ? "true" : "false");
+    panel?.classList.toggle("active", active);
+    panel?.setAttribute("aria-hidden", active ? "false" : "true");
+  });
 function setMarketTradeInboxLoading(loading) {
   state.marketTradeInboxLoading = !!loading;
   if (els.marketTradeInboxLoading) {
@@ -780,6 +797,14 @@ function renderTradeBlockSummary(rows) {
   els.marketTradeBlockSummary.textContent = `총 ${count}명 · ${teamCount}개 팀`;
 }
 
+function renderTradeBlockMineSummary(rows) {
+  if (!els.marketTradeBlockMineSummary) return;
+  const count = rows.length;
+  els.marketTradeBlockMineSummary.textContent = count
+    ? `내 팀 등록 선수 ${count}명`
+    : "등록된 선수가 없습니다.";
+}
+
 function closeTradeNegotiationModal() {
   if (!els.marketTradeModal) return;
   els.marketTradeModal.classList.add("hidden");
@@ -881,6 +906,176 @@ function renderTradeBlockRows(rows) {
   });
 }
 
+function renderTradeBlockMineRows(rows) {
+  if (!els.marketTradeBlockMineBody) return;
+  els.marketTradeBlockMineBody.innerHTML = "";
+
+  if (!rows.length) {
+    els.marketTradeBlockMineBody.innerHTML = '<tr><td class="schedule-empty" colspan="12">등록된 선수가 없습니다.</td></tr>';
+    return;
+  }
+
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.className = "roster-row";
+    tr.dataset.playerId = row.player_id;
+    tr.innerHTML = `
+      <td><div class="myteam-name-cell"><strong>${row.name || "-"}</strong></div></td>
+      <td>${row.pos || "-"}</td>
+      <td><span class="myteam-ovr-pill">${Math.round(num(row.overall, 0))}</span></td>
+      <td>${num(row.age, 0)}</td>
+      <td>${formatHeightIn(row.height_in)}</td>
+      <td>${formatWeightLb(row.weight_lb)}</td>
+      <td>${formatMoney(row.salary ?? 0)}</td>
+      <td>${num(row.pts, 0).toFixed(1)}</td>
+      <td>${num(row.ast, 0).toFixed(1)}</td>
+      <td>${num(row.reb, 0).toFixed(1)}</td>
+      <td>${num(row.three_pm, 0).toFixed(1)}</td>
+      <td><button type="button" class="btn btn-secondary market-trade-unlist-btn" data-market-trade-unlist="${row.player_id}">해제</button></td>
+    `;
+
+    tr.addEventListener("click", (ev) => {
+      if (ev.target instanceof HTMLElement && ev.target.closest("[data-market-trade-unlist]")) return;
+      state.marketSelectedPlayerId = row.player_id;
+      loadPlayerDetail(row.player_id, {
+        context: "market-trade-block",
+        backTarget: "market",
+      }).catch((e) => alert(e.message));
+    });
+
+    const unlistBtn = tr.querySelector("[data-market-trade-unlist]");
+    unlistBtn?.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      setLoading(true, "트레이드 블록에서 해제하는 중...");
+      unlistPlayerFromTradeBlock(row.player_id)
+        .then((out) => {
+          if (out?.removed === false) {
+            alert("이미 해제된 선수입니다. 목록을 갱신합니다.");
+          }
+          return loadTradeBlockMineList();
+        })
+        .catch((e) => alert(e.message || "트레이드 블록 해제에 실패했습니다."))
+        .finally(() => setLoading(false));
+    });
+
+    els.marketTradeBlockMineBody.appendChild(tr);
+  });
+}
+
+function closeTradeBlockRosterModal() {
+  if (!els.marketTradeBlockRosterModal) return;
+  state.marketTradeBlockRosterModalOpen = false;
+  els.marketTradeBlockRosterModal.classList.add("hidden");
+  document.body.classList.remove("is-modal-open");
+}
+
+function renderTradeBlockRosterModalList(rows) {
+  if (!els.marketTradeBlockRosterList) return;
+  const selected = String(state.marketTradeBlockSelectedRosterPlayerId || "");
+  const listed = new Set((state.marketTradeBlockMyRows || []).map((row) => String(row?.player_id || "")));
+  if (!rows.length) {
+    els.marketTradeBlockRosterList.innerHTML = '<p class="college-inline-meta">로스터 데이터가 없습니다.</p>';
+    return;
+  }
+
+  els.marketTradeBlockRosterList.innerHTML = rows.map((row) => {
+    const pid = String(row?.player_id || "");
+    const disabled = listed.has(pid);
+    return `
+      <button type="button" class="college-player-option ${selected === pid ? "is-selected" : ""}" data-market-roster-pid="${pid}" ${disabled ? "disabled" : ""}>
+        <strong>${row?.name || "-"}</strong>
+        <span>${row?.pos || "-"} · OVR ${Math.round(num(row?.overall, 0))}</span>
+        ${disabled ? '<em>이미 등록됨</em>' : ""}
+      </button>
+    `;
+  }).join("");
+}
+
+async function loadMyTeamRosterForTradeBlock() {
+  if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
+  const detail = await fetchTeamDetail(state.selectedTeamId, { force: true, staleWhileRevalidate: false });
+  const roster = (detail?.roster || []).map((row) => ({
+    ...row,
+    player_id: String(row?.player_id || ""),
+  })).filter((row) => row.player_id);
+  state.marketTradeBlockRosterRows = roster;
+  return roster;
+}
+
+async function openTradeBlockRosterModal() {
+  if (!els.marketTradeBlockRosterModal) return;
+  state.marketTradeBlockSelectedRosterPlayerId = null;
+  const rosterRows = await loadMyTeamRosterForTradeBlock();
+  renderTradeBlockRosterModalList(rosterRows);
+  state.marketTradeBlockRosterModalOpen = true;
+  els.marketTradeBlockRosterModal.classList.remove("hidden");
+  document.body.classList.add("is-modal-open");
+}
+
+async function listPlayerToTradeBlock(playerId) {
+  if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
+  if (!playerId) throw new Error("등록할 선수를 선택해주세요.");
+  await fetchJson("/api/trade/block/list", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      team_id: state.selectedTeamId,
+      player_id: String(playerId),
+      visibility: "PUBLIC",
+      reason_code: "MANUAL",
+    }),
+  });
+}
+
+async function unlistPlayerFromTradeBlock(playerId) {
+  if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
+  if (!playerId) throw new Error("해제할 선수 정보를 찾을 수 없습니다.");
+
+  const out = await fetchJson("/api/trade/block/unlist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      team_id: state.selectedTeamId,
+      player_id: String(playerId),
+      reason_code: "MANUAL_REMOVE",
+    }),
+  });
+
+  return out;
+}
+
+async function loadTradeBlockMineList() {
+  if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
+  const payload = await fetchJson(`/api/trade/block?active_only=true&visibility=PUBLIC&limit=300&sort=priority_desc&team_id=${encodeURIComponent(state.selectedTeamId)}`);
+  const rows = (payload?.rows || []).map((row) => ({
+    ...row,
+    height_in: getFirstNumber(row?.height_in),
+    weight_lb: getFirstNumber(row?.weight_lb),
+    salary: getFirstNumber(row?.salary),
+    pts: getFirstNumber(row?.pts),
+    ast: getFirstNumber(row?.ast),
+    reb: getFirstNumber(row?.reb),
+    three_pm: getFirstNumber(row?.three_pm),
+  }));
+  state.marketTradeBlockMyRows = rows;
+  const displayRows = getTradeBlockDisplayRows(rows);
+  renderTradeBlockMineSummary(displayRows);
+  renderTradeBlockMineRows(displayRows);
+}
+
+async function openTradeBlockScope(scope) {
+  switchTradeBlockScope(scope);
+  if (state.marketSubTab !== "trade-block") return;
+  if (state.marketTradeBlockScope === "mine") {
+    setLoading(true, "내 팀 트레이드 블록 명단을 불러오는 중...");
+    try {
+      await loadTradeBlockMineList();
+    } finally {
+      setLoading(false);
+    }
+  }
+}
+
 async function loadTradeBlockList() {
   const payload = await fetchJson("/api/trade/block?active_only=true&visibility=PUBLIC&limit=300&sort=priority_desc");
   const rows = (payload?.rows || []).map((row) => ({
@@ -893,8 +1088,10 @@ async function loadTradeBlockList() {
     reb: getFirstNumber(row?.reb),
     three_pm: getFirstNumber(row?.three_pm),
   }));
-  state.marketTradeBlockRows = rows;
-  const displayRows = getTradeBlockDisplayRows(rows);
+  const selectedTeamId = String(state.selectedTeamId || "").toUpperCase();
+  const filteredRows = rows.filter((row) => String(row?.team_id || "").toUpperCase() !== selectedTeamId);
+  state.marketTradeBlockRows = filteredRows;
+  const displayRows = getTradeBlockDisplayRows(filteredRows);
   renderTradeBlockSummary(displayRows);
   renderTradeBlockRows(displayRows);
 }
@@ -949,7 +1146,11 @@ async function openMarketSubTab(tab) {
   setLoading(true, state.marketSubTab === "fa" ? "FA 명단을 불러오는 중..." : "트레이드 블록 명단을 불러오는 중...");
   try {
     if (state.marketSubTab === "fa") await loadFaList();
-    else await loadTradeBlockList();
+    else {
+      switchTradeBlockScope(state.marketTradeBlockScope || "other");
+      if ((state.marketTradeBlockScope || "other") === "mine") await loadTradeBlockMineList();
+      else await loadTradeBlockList();
+    }
   } finally {
     setLoading(false);
   }
@@ -1216,6 +1417,7 @@ async function showMarketScreen() {
 
   state.playerDetailBackTarget = "market";
   switchMarketSubTab(state.marketSubTab || "fa");
+  switchTradeBlockScope(state.marketTradeBlockScope || "other");
   activateScreen(els.marketScreen);
   await openMarketSubTab(state.marketSubTab || "fa");
 
@@ -1247,10 +1449,41 @@ async function showMarketScreen() {
 
     state.marketTradeModalBound = true;
   }
+
+  if (!state.marketTradeBlockRosterModalBound) {
+    els.marketTradeBlockRegisterBtn?.addEventListener("click", () => {
+      setLoading(true, "로스터를 불러오는 중...");
+      openTradeBlockRosterModal().catch((e) => alert(e.message)).finally(() => setLoading(false));
+    });
+    els.marketTradeBlockRosterModalCancel?.addEventListener("click", closeTradeBlockRosterModal);
+    els.marketTradeBlockRosterModalBackdrop?.addEventListener("click", closeTradeBlockRosterModal);
+    els.marketTradeBlockRosterList?.addEventListener("click", (event) => {
+      const option = event.target instanceof HTMLElement ? event.target.closest("[data-market-roster-pid]") : null;
+      if (!option) return;
+      const pid = String(option.getAttribute("data-market-roster-pid") || "");
+      if (!pid || option.hasAttribute("disabled")) return;
+      state.marketTradeBlockSelectedRosterPlayerId = pid;
+      renderTradeBlockRosterModalList(state.marketTradeBlockRosterRows || []);
+    });
+    els.marketTradeBlockRosterModalConfirm?.addEventListener("click", () => {
+      setLoading(true, "트레이드 블록에 등록하는 중...");
+      listPlayerToTradeBlock(state.marketTradeBlockSelectedRosterPlayerId)
+        .then(() => loadTradeBlockMineList())
+        .then(() => {
+          closeTradeBlockRosterModal();
+          alert("트레이드 블록 등록이 완료되었습니다.");
+        })
+        .catch((e) => alert(e.message || "트레이드 블록 등록에 실패했습니다."))
+        .finally(() => setLoading(false));
+    });
+    state.marketTradeBlockRosterModalBound = true;
+  }
 }
 
 export {
   switchMarketSubTab,
+  switchTradeBlockScope,
+  openTradeBlockScope,
   showMarketScreen,
   loadFaList,
   renderFaRows,

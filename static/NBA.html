@@ -184,34 +184,74 @@
       </section>
 
       <section id="market-panel-trade-block" class="market-panel" aria-hidden="true">
-        <section class="market-fa-overview" aria-label="트레이드 블록 개요">
-          <p id="market-trade-block-summary" class="subtitle">트레이드 블록 명단을 불러오는 중입니다.</p>
+        <div class="market-subtab-row" role="tablist" aria-label="트레이드 블록 하위 탭">
+          <button id="market-trade-block-scope-other" type="button" class="btn btn-secondary is-active" aria-selected="true">다른 팀</button>
+          <button id="market-trade-block-scope-mine" type="button" class="btn btn-secondary" aria-selected="false">내 팀</button>
+        </div>
+
+        <section id="market-trade-block-panel-other" class="market-trade-block-scope-panel active" aria-hidden="false">
+          <section class="market-fa-overview" aria-label="다른 팀 트레이드 블록 개요">
+            <p id="market-trade-block-summary" class="subtitle">트레이드 블록 명단을 불러오는 중입니다.</p>
+          </section>
+
+          <div class="roster-shell">
+            <div class="roster-table-wrap">
+              <table class="roster-table market-fa-table market-trade-block-table">
+                <thead>
+                  <tr>
+                    <th>팀</th>
+                    <th>선수명</th>
+                    <th>포지션</th>
+                    <th>OVR</th>
+                    <th>나이</th>
+                    <th>키</th>
+                    <th>몸무게</th>
+                    <th>샐러리</th>
+                    <th>PTS</th>
+                    <th>AST</th>
+                    <th>REB</th>
+                    <th>3PM</th>
+                    <th>액션</th>
+                  </tr>
+                </thead>
+                <tbody id="market-trade-block-body"></tbody>
+              </table>
+            </div>
+          </div>
         </section>
 
-        <div class="roster-shell">
-          <div class="roster-table-wrap">
-            <table class="roster-table market-fa-table market-trade-block-table">
-              <thead>
-                <tr>
-                  <th>팀</th>
-                  <th>선수명</th>
-                  <th>포지션</th>
-                  <th>OVR</th>
-                  <th>나이</th>
-                  <th>키</th>
-                  <th>몸무게</th>
-                  <th>샐러리</th>
-                  <th>PTS</th>
-                  <th>AST</th>
-                  <th>REB</th>
-                  <th>3PM</th>
-                  <th>액션</th>
-                </tr>
-              </thead>
-              <tbody id="market-trade-block-body"></tbody>
-            </table>
+        <section id="market-trade-block-panel-mine" class="market-trade-block-scope-panel" aria-hidden="true">
+          <section class="market-fa-overview market-trade-block-mine-overview" aria-label="내 팀 트레이드 블록 개요">
+            <p id="market-trade-block-mine-summary" class="subtitle">내 팀 트레이드 블록 명단을 확인하세요.</p>
+            <button id="market-trade-block-register-btn" type="button" class="btn btn-primary">등록</button>
+          </section>
+
+          <div class="roster-shell">
+            <div class="roster-table-wrap">
+              <table class="roster-table market-fa-table market-trade-block-table">
+                <thead>
+                  <tr>
+                    <th>선수명</th>
+                    <th>포지션</th>
+                    <th>OVR</th>
+                    <th>나이</th>
+                    <th>키</th>
+                    <th>몸무게</th>
+                    <th>샐러리</th>
+                    <th>PTS</th>
+                    <th>AST</th>
+                    <th>REB</th>
+                    <th>3PM</th>
+                    <th>액션</th>
+                  </tr>
+                </thead>
+                <tbody id="market-trade-block-mine-body">
+                  <tr><td class="schedule-empty" colspan="12">등록된 선수가 없습니다.</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        </section>
       </section>
 
       <section id="market-panel-trade-inbox" class="market-panel" aria-hidden="true">
@@ -1018,6 +1058,16 @@
     </article>
   </div>
 
+  <div id="market-trade-block-roster-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="market-trade-block-roster-modal-title">
+    <div id="market-trade-block-roster-modal-backdrop" class="confirm-modal-backdrop"></div>
+    <article class="confirm-modal-panel">
+      <p class="confirm-modal-eyebrow">TRADE BLOCK REGISTRATION</p>
+      <h3 id="market-trade-block-roster-modal-title" class="confirm-modal-title">선수 등록</h3>
+      <p id="market-trade-block-roster-modal-body" class="confirm-modal-body">등록할 선수를 선택하세요.</p>
+      <div id="market-trade-block-roster-list" class="college-scout-options-list"></div>
+      <div class="confirm-modal-actions">
+        <button id="market-trade-block-roster-modal-cancel" type="button" class="btn btn-secondary">닫기</button>
+        <button id="market-trade-block-roster-modal-confirm" type="button" class="btn btn-primary">등록</button>
   <div id="market-trade-deal-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="market-trade-deal-title">
     <div id="market-trade-deal-backdrop" class="confirm-modal-backdrop"></div>
     <article class="confirm-modal-panel market-trade-deal-panel">

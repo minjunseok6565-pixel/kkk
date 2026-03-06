@@ -266,6 +266,8 @@ def _extract_trade_block_box_stats(
     ws = workflow_state if isinstance(workflow_state, dict) else (state.export_workflow_state() or {})
     player_stats = ws.get("player_stats") if isinstance(ws.get("player_stats"), dict) else {}
     raw = player_stats.get(str(player_id)) if isinstance(player_stats, dict) else {}
+    if not isinstance(raw, dict):
+        raw = {}
     totals = raw.get("totals") if isinstance(raw, dict) and isinstance(raw.get("totals"), dict) else {}
     stats = raw.get("stats") if isinstance(raw, dict) and isinstance(raw.get("stats"), dict) else {}
 
