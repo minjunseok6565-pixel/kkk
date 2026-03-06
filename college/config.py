@@ -16,7 +16,7 @@ from typing import Dict, List, Tuple
 
 COLLEGE_TEAM_COUNT: int = 200
 COLLEGE_ROSTER_SIZE: int = 15  # per team (scholarship-like)
-COLLEGE_SEASON_GAMES_PER_TEAM: int = 34
+COLLEGE_SEASON_GAMES_PER_TEAM: int = 60
 
 # Team minutes per game in a 40-min NCAA-style game.
 COLLEGE_TEAM_MINUTES_PER_GAME: int = 200  # 40 * 5
@@ -155,15 +155,15 @@ COLLEGE_MONTHLY_CHECKPOINTS: List[Tuple[int, int]] = [
 # Team-level cumulative games played per checkpoint month (team schedule baseline).
 # NOTE: This is intentionally coarse; used to scale snapshot variance by sample size.
 COLLEGE_GAMES_BY_CHECKPOINT_MONTH: Dict[int, int] = {
-    10: 0,
-    11: 0,
-    12: 6,
-    1: 13,
-    2: 20,
-    3: 27,
-    4: 34,
-    5: 34,
-    6: 34,
+    10: 10,
+    11: 20,
+    12: 30,
+    1: 40,
+    2: 50,
+    3: 60,
+    4: 60,
+    5: 60,
+    6: 60,
 }
 
 # Per-stat noise stddev at very low sample size. Actual noise scales by 1/sqrt(max(games,1)).
