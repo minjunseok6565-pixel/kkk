@@ -290,6 +290,8 @@ async function showTacticsScreen() {
   const hasCachedDetail = hasTeamDetailCache(teamId);
   if (!hasCachedDetail) setLoading(true, "전술 데이터를 불러오는 중...");
   try {
+    let latestSavedTactics = { tactics: null };
+    const savedTacticsPromise = fetchJson(`/api/tactics/${encodeURIComponent(teamId)}`).catch(() => ({ tactics: null }));
     const [detail, savedTactics] = await Promise.all([
       fetchTeamDetail(teamId, {
         onRevalidated: (freshDetail) => {
@@ -297,11 +299,12 @@ async function showTacticsScreen() {
           if (String(state.selectedTeamId || "").trim() !== teamId) return;
           if (!els.tacticsScreen?.classList.contains("active")) return;
           if (state.tacticsDirty || state.tacticsSaving) return;
-          applyTacticsDetail(freshDetail, savedTactics, teamId);
+          applyTacticsDetail(freshDetail, latestSavedTactics, teamId);
         },
       }),
-      fetchJson(`/api/tactics/${encodeURIComponent(teamId)}`).catch(() => ({ tactics: null })),
+      savedTacticsPromise,
     ]);
+    latestSavedTactics = savedTactics;
     if (requestSeq !== tacticsRequestSeq) return;
 
     applyTacticsDetail(detail, savedTactics, teamId);
