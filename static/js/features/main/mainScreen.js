@@ -44,6 +44,7 @@ function invalidatePostGameViewCaches(teamId) {
   invalidateCachedValuesByPrefix(`medical:risk-calendar:${tid}`);
   invalidateCachedValuesByPrefix(`training:schedule:${tid}`);
   invalidateCachedValuesByPrefix(`training:sessions:${tid}:`);
+  invalidateCachedValuesByPrefix(`training:sessions-resolve:${tid}:`);
   invalidateCachedValuesByPrefix(`training:session:${tid}:`);
   invalidateCachedValuesByPrefix(`training:team-detail:${tid}`);
   invalidateCachedValuesByPrefix(`training:familiarity:${tid}:`);
