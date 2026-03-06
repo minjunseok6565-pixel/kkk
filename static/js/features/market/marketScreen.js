@@ -16,7 +16,6 @@ import { num } from "../../core/guards.js";
 import { formatHeightIn, formatMoney, formatWeightLb } from "../../core/format.js";
 import { TEAM_FULL_NAMES } from "../../core/constants/teams.js";
 import { loadPlayerDetail } from "../myteam/playerDetail.js";
-import { fetchTeamDetail } from "../team/teamDetailCache.js";
 import { fetchTeamDetail, invalidateTeamDetailCache } from "../team/teamDetailCache.js";
 
 const MARKET_TRADE_INBOX_CACHE_TTL_MS = 30 * 1000;
@@ -103,6 +102,8 @@ function switchTradeBlockScope(scope) {
     panel?.classList.toggle("active", active);
     panel?.setAttribute("aria-hidden", active ? "false" : "true");
   });
+}
+
 function setMarketTradeInboxLoading(loading) {
   state.marketTradeInboxLoading = !!loading;
   if (els.marketTradeInboxLoading) {
