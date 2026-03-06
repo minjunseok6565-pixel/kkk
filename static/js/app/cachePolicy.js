@@ -162,8 +162,8 @@ function getPrefetchPlanForEvent(eventType, context = {}) {
 
   if (type === CACHE_EVENT_TYPES.TRAINING_SAVE && tid) {
     const out = [
-      { key: keys.trainingSchedule, url: `/api/team-schedule/${encodeURIComponent(tid)}`, ttlMs: CACHE_TTL_MS.training },
-      { key: keys.trainingTeamDetail, url: `/api/team-detail/${encodeURIComponent(tid)}`, ttlMs: CACHE_TTL_MS.training },
+      { key: keys.trainingSchedule, url: `/api/team-schedule/${encodeURIComponent(tid)}?view=light`, ttlMs: CACHE_TTL_MS.training },
+      { key: keys.trainingTeamDetail, url: `/api/team-detail/${encodeURIComponent(tid)}?view=light`, ttlMs: CACHE_TTL_MS.training },
       { key: keys.medicalOverview, url: `/api/medical/team/${encodeURIComponent(tid)}/overview`, ttlMs: CACHE_TTL_MS.medical },
       { key: keys.medicalAlerts, url: `/api/medical/team/${encodeURIComponent(tid)}/alerts`, ttlMs: CACHE_TTL_MS.medical },
       { key: keys.medicalRiskCalendar, url: `/api/medical/team/${encodeURIComponent(tid)}/risk-calendar?days=14`, ttlMs: CACHE_TTL_MS.medical },
@@ -194,7 +194,7 @@ function getPrefetchPlanForEvent(eventType, context = {}) {
     return [
       { key: keys.teamDetail, url: `/api/team-detail/${encodeURIComponent(tid)}`, ttlMs: CACHE_TTL_MS.teamDetail },
       { key: keys.tactics, url: `/api/tactics/${encodeURIComponent(tid)}`, ttlMs: CACHE_TTL_MS.tactics },
-      { key: keys.trainingSchedule, url: `/api/team-schedule/${encodeURIComponent(tid)}`, ttlMs: CACHE_TTL_MS.training },
+      { key: keys.trainingSchedule, url: `/api/team-schedule/${encodeURIComponent(tid)}?view=light`, ttlMs: CACHE_TTL_MS.training },
       { key: keys.medicalOverview, url: `/api/medical/team/${encodeURIComponent(tid)}/overview`, ttlMs: CACHE_TTL_MS.medical },
     ];
   }

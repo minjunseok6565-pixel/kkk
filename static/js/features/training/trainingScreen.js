@@ -92,7 +92,7 @@ async function prefetchTrainingCoreData({
 
   const schedule = await fetchCachedJson({
     key: keys.trainingSchedule,
-    url: `/api/team-schedule/${encodeURIComponent(normalizedTeamId)}`,
+    url: `/api/team-schedule/${encodeURIComponent(normalizedTeamId)}?view=light`,
     ttlMs: CACHE_TTL_MS.training,
     staleWhileRevalidate: true,
   });
@@ -117,7 +117,7 @@ async function prefetchTrainingCoreData({
 
   const teamDetail = await fetchCachedJson({
     key: keys.trainingTeamDetail,
-    url: `/api/team-detail/${encodeURIComponent(normalizedTeamId)}`,
+    url: `/api/team-detail/${encodeURIComponent(normalizedTeamId)}?view=light`,
     ttlMs: CACHE_TTL_MS.training,
     staleWhileRevalidate: true,
   });
