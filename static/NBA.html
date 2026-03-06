@@ -182,10 +182,34 @@
       </section>
 
       <section id="market-panel-trade-block" class="market-panel" aria-hidden="true">
-        <article class="player-detail-panel">
-          <h3>트레이드 블록 준비중</h3>
-          <p>향후 트레이드 블록 선수 리스트와 제안 플로우가 이 영역에 추가됩니다.</p>
-        </article>
+        <section class="market-fa-overview" aria-label="트레이드 블록 개요">
+          <p id="market-trade-block-summary" class="subtitle">트레이드 블록 명단을 불러오는 중입니다.</p>
+        </section>
+
+        <div class="roster-shell">
+          <div class="roster-table-wrap">
+            <table class="roster-table market-fa-table market-trade-block-table">
+              <thead>
+                <tr>
+                  <th>팀</th>
+                  <th>선수명</th>
+                  <th>포지션</th>
+                  <th>OVR</th>
+                  <th>나이</th>
+                  <th>키</th>
+                  <th>몸무게</th>
+                  <th>샐러리</th>
+                  <th>PTS</th>
+                  <th>AST</th>
+                  <th>REB</th>
+                  <th>3PM</th>
+                  <th>액션</th>
+                </tr>
+              </thead>
+              <tbody id="market-trade-block-body"></tbody>
+            </table>
+          </div>
+        </div>
       </section>
     </section>
 
@@ -949,6 +973,19 @@
       <div class="confirm-modal-actions">
         <button id="confirm-modal-cancel" type="button" class="btn btn-secondary">취소</button>
         <button id="confirm-modal-ok" type="button" class="btn btn-primary">선택 확정</button>
+      </div>
+    </article>
+  </div>
+
+  <div id="market-trade-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="market-trade-modal-title">
+    <div id="market-trade-modal-backdrop" class="confirm-modal-backdrop"></div>
+    <article class="confirm-modal-panel">
+      <p class="confirm-modal-eyebrow">TRADE NEGOTIATION</p>
+      <h3 id="market-trade-modal-title" class="confirm-modal-title">트레이드 협상 시작</h3>
+      <p id="market-trade-modal-body" class="confirm-modal-body">선수 정보를 불러오는 중입니다.</p>
+      <div class="confirm-modal-actions">
+        <button id="market-trade-modal-cancel" type="button" class="btn btn-secondary">닫기</button>
+        <button id="market-trade-modal-start" type="button" class="btn btn-primary">협상 시작</button>
       </div>
     </article>
   </div>

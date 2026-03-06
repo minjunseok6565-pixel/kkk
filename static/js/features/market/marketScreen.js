@@ -4,6 +4,7 @@ import { activateScreen } from "../../app/router.js";
 import { fetchJson, setLoading } from "../../core/api.js";
 import { num } from "../../core/guards.js";
 import { formatHeightIn, formatMoney, formatWeightLb } from "../../core/format.js";
+import { TEAM_FULL_NAMES } from "../../core/constants/teams.js";
 import { loadPlayerDetail } from "../myteam/playerDetail.js";
 
 function toFriendlyRuleMessage(rawMessage) {
@@ -132,6 +133,136 @@ function renderFaRows(rows) {
   });
 }
 
+function getTradeBlockDisplayRows(rows) {
+  return [...(rows || [])].sort((a, b) => {
+    const pA = num(a?.listing?.priority, 0);
+    const pB = num(b?.listing?.priority, 0);
+    if (pA !== pB) return pB - pA;
+    return num(b?.overall, 0) - num(a?.overall, 0);
+  });
+}
+
+function renderTradeBlockSummary(rows) {
+  if (!els.marketTradeBlockSummary) return;
+  const count = rows.length;
+  const teamCount = new Set(rows.map((row) => String(row?.team_id || "").toUpperCase()).filter(Boolean)).size;
+  els.marketTradeBlockSummary.textContent = `총 ${count}명 · ${teamCount}개 팀`;
+}
+
+function closeTradeNegotiationModal() {
+  if (!els.marketTradeModal) return;
+  els.marketTradeModal.classList.add("hidden");
+  document.body.classList.remove("is-modal-open");
+}
+
+function openTradeNegotiationModal(row) {
+  if (!els.marketTradeModal) return;
+  const teamId = String(row?.team_id || "").toUpperCase();
+  const teamName = TEAM_FULL_NAMES[teamId] || teamId || "상대 팀";
+  state.marketTradeModalPlayerId = row?.player_id || null;
+  state.marketTradeModalOtherTeamId = teamId || null;
+
+  if (els.marketTradeModalTitle) {
+    els.marketTradeModalTitle.textContent = `${row?.name || "선수"} 트레이드 협상`;
+  }
+  if (els.marketTradeModalBody) {
+    els.marketTradeModalBody.textContent = `${teamName} (${teamId})과(와) ${row?.name || "선수"} 관련 트레이드 협상을 시작합니다.`;
+  }
+
+  els.marketTradeModal.classList.remove("hidden");
+  document.body.classList.add("is-modal-open");
+}
+
+async function startTradeNegotiationFromModal() {
+  const playerId = state.marketTradeModalPlayerId;
+  const otherTeamId = state.marketTradeModalOtherTeamId;
+  if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
+  if (!playerId || !otherTeamId) throw new Error("협상을 시작할 선수 정보를 찾을 수 없습니다.");
+
+  const out = await fetchJson("/api/trade/negotiation/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_team_id: state.selectedTeamId,
+      other_team_id: otherTeamId,
+      default_offer_privacy: "PRIVATE",
+    }),
+  });
+
+  state.marketTradeNegotiationSession = out?.session || null;
+  const sessionId = state.marketTradeNegotiationSession?.session_id || "-";
+  alert(`트레이드 협상이 시작되었습니다.\n세션 ID: ${sessionId}\n(다음 단계: 제안 패키지 작성 UI)`);
+  closeTradeNegotiationModal();
+}
+
+function renderTradeBlockRows(rows) {
+  if (!els.marketTradeBlockBody) return;
+  els.marketTradeBlockBody.innerHTML = "";
+
+  if (!rows.length) {
+    els.marketTradeBlockBody.innerHTML = '<tr><td class="schedule-empty" colspan="13">트레이드 블록 등록 선수가 없습니다.</td></tr>';
+    return;
+  }
+
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.className = "roster-row";
+    tr.dataset.playerId = row.player_id;
+    const teamId = String(row?.team_id || "").toUpperCase();
+    const teamName = TEAM_FULL_NAMES[teamId] || teamId || "-";
+    tr.innerHTML = `
+      <td>${teamName}</td>
+      <td><div class="myteam-name-cell"><strong>${row.name || "-"}</strong></div></td>
+      <td>${row.pos || "-"}</td>
+      <td><span class="myteam-ovr-pill">${Math.round(num(row.overall, 0))}</span></td>
+      <td>${num(row.age, 0)}</td>
+      <td>${formatHeightIn(row.height_in)}</td>
+      <td>${formatWeightLb(row.weight_lb)}</td>
+      <td>${formatMoney(row.salary ?? 0)}</td>
+      <td>${num(row.pts, 0).toFixed(1)}</td>
+      <td>${num(row.ast, 0).toFixed(1)}</td>
+      <td>${num(row.reb, 0).toFixed(1)}</td>
+      <td>${num(row.three_pm, 0).toFixed(1)}</td>
+      <td><button type="button" class="btn btn-primary market-trade-offer-btn" data-market-trade-offer="${row.player_id}">트레이드 제안</button></td>
+    `;
+
+    tr.addEventListener("click", (ev) => {
+      if (ev.target instanceof HTMLElement && ev.target.closest("[data-market-trade-offer]")) return;
+      state.marketSelectedPlayerId = row.player_id;
+      loadPlayerDetail(row.player_id, {
+        context: "market-trade-block",
+        backTarget: "market",
+      }).catch((e) => alert(e.message));
+    });
+
+    const offerBtn = tr.querySelector("[data-market-trade-offer]");
+    offerBtn?.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      openTradeNegotiationModal(row);
+    });
+
+    els.marketTradeBlockBody.appendChild(tr);
+  });
+}
+
+async function loadTradeBlockList() {
+  const payload = await fetchJson("/api/trade/block?active_only=true&visibility=PUBLIC&limit=300&sort=priority_desc");
+  const rows = (payload?.rows || []).map((row) => ({
+    ...row,
+    height_in: getFirstNumber(row?.height_in),
+    weight_lb: getFirstNumber(row?.weight_lb),
+    salary: getFirstNumber(row?.salary),
+    pts: getFirstNumber(row?.pts),
+    ast: getFirstNumber(row?.ast),
+    reb: getFirstNumber(row?.reb),
+    three_pm: getFirstNumber(row?.three_pm),
+  }));
+  state.marketTradeBlockRows = rows;
+  const displayRows = getTradeBlockDisplayRows(rows);
+  renderTradeBlockSummary(displayRows);
+  renderTradeBlockRows(displayRows);
+}
+
 async function loadFaList() {
   const payload = await fetchJson("/api/contracts/free-agents?limit=300");
   const rows = (payload?.players || []).map((row) => ({
@@ -172,10 +303,11 @@ async function loadFaList() {
 
 async function openMarketSubTab(tab) {
   switchMarketSubTab(tab);
-  if (state.marketSubTab !== "fa") return;
-  setLoading(true, "FA 명단을 불러오는 중...");
+  if (state.marketSubTab !== "fa" && state.marketSubTab !== "trade-block") return;
+  setLoading(true, state.marketSubTab === "fa" ? "FA 명단을 불러오는 중..." : "트레이드 블록 명단을 불러오는 중...");
   try {
-    await loadFaList();
+    if (state.marketSubTab === "fa") await loadFaList();
+    else await loadTradeBlockList();
   } finally {
     setLoading(false);
   }
@@ -444,6 +576,16 @@ async function showMarketScreen() {
   switchMarketSubTab(state.marketSubTab || "fa");
   activateScreen(els.marketScreen);
   await openMarketSubTab(state.marketSubTab || "fa");
+
+  if (!state.marketTradeModalBound) {
+    els.marketTradeModalCancel?.addEventListener("click", closeTradeNegotiationModal);
+    els.marketTradeModalBackdrop?.addEventListener("click", closeTradeNegotiationModal);
+    els.marketTradeModalStart?.addEventListener("click", () => {
+      setLoading(true, "트레이드 협상 세션을 생성하는 중...");
+      startTradeNegotiationFromModal().catch((e) => alert(e.message)).finally(() => setLoading(false));
+    });
+    state.marketTradeModalBound = true;
+  }
 }
 
 export {

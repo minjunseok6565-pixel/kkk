@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+
+import sqlite3
 
 from fastapi import APIRouter, HTTPException
 
 import state
+from config import ALL_TEAM_IDS
 from league_repo import LeagueRepo
 from trades import agreements, negotiation_store
 from trades.apply import apply_deal_to_db
@@ -29,6 +32,7 @@ from trades.orchestration.market_state import (
 )
 from app.schemas.trades import (
     TradeBlockListRequest,
+    TradeBlockAggregateQuery,
     TradeBlockUnlistRequest,
     TradeEvaluateRequest,
     TradeNegotiationCommitRequest,
@@ -155,6 +159,319 @@ def _clamp_int(v: Any, *, lo: int, hi: int, default: int) -> int:
     if x > hi:
         return hi
     return x
+
+
+def _normalize_trade_block_visibility(raw: Any, *, default: str = "PUBLIC") -> str:
+    v = str(raw or default).upper().strip()
+    if v in {"PUBLIC", "PRIVATE", "ALL"}:
+        return v
+    return str(default).upper()
+
+
+def _normalize_trade_block_sort(raw: Any, *, default: str = "priority_desc") -> str:
+    v = str(raw or default).lower().strip()
+    allowed = {"priority_desc", "ovr_desc", "updated_desc", "age_asc", "age_desc"}
+    if v in allowed:
+        return v
+    return str(default).lower()
+
+
+def _parse_trade_block_aggregate_query(
+    *,
+    active_only: Any = True,
+    visibility: Any = "PUBLIC",
+    team_id: Any = None,
+    limit: Any = 300,
+    offset: Any = 0,
+    sort: Any = "priority_desc",
+) -> TradeBlockAggregateQuery:
+    tid = str(team_id or "").upper().strip() or None
+    return TradeBlockAggregateQuery(
+        active_only=bool(active_only),
+        visibility=_normalize_trade_block_visibility(visibility, default="PUBLIC"),
+        team_id=tid,
+        limit=_clamp_int(limit, lo=1, hi=500, default=300),
+        offset=_clamp_int(offset, lo=0, hi=1_000_000, default=0),
+        sort=_normalize_trade_block_sort(sort, default="priority_desc"),
+    )
+
+
+def _first_number(*values: Any, default: float = 0.0) -> float:
+    for v in values:
+        try:
+            n = float(v)
+        except Exception:
+            continue
+        if n == n:  # NaN guard
+            return n
+    return float(default)
+
+
+def _hydrate_trade_block_player_snapshots(player_ids: List[str], *, db_path: str) -> Dict[str, Dict[str, Any]]:
+    pids = [str(pid) for pid in (player_ids or []) if str(pid)]
+    uniq = list(dict.fromkeys(pids))
+    if not uniq:
+        return {}
+
+    placeholders = ",".join("?" for _ in uniq)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT
+                p.player_id,
+                p.name,
+                p.pos,
+                p.age,
+                p.ovr,
+                p.height_in,
+                p.weight_lb,
+                p.attrs_json,
+                r.team_id,
+                r.salary_amount
+            FROM players p
+            LEFT JOIN roster r
+              ON r.player_id = p.player_id
+             AND r.status = 'active'
+            WHERE p.player_id IN ({placeholders})
+            """,
+            tuple(uniq),
+        ).fetchall()
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        pid = str(r["player_id"])
+        out[pid] = {
+            "player_id": pid,
+            "team_id": str(r["team_id"] or "").upper() or None,
+            "name": str(r["name"] or ""),
+            "pos": str(r["pos"] or ""),
+            "age": int(_first_number(r["age"], default=0)),
+            "overall": int(_first_number(r["ovr"], default=0)),
+            "height_in": _first_number(r["height_in"], default=0),
+            "weight_lb": _first_number(r["weight_lb"], default=0),
+            "salary": _first_number(r["salary_amount"], default=0),
+        }
+    return out
+
+
+def _extract_trade_block_box_stats(
+    *,
+    player_id: str,
+    workflow_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, float]:
+    ws = workflow_state if isinstance(workflow_state, dict) else (state.export_workflow_state() or {})
+    player_stats = ws.get("player_stats") if isinstance(ws.get("player_stats"), dict) else {}
+    raw = player_stats.get(str(player_id)) if isinstance(player_stats, dict) else {}
+    totals = raw.get("totals") if isinstance(raw, dict) and isinstance(raw.get("totals"), dict) else {}
+    stats = raw.get("stats") if isinstance(raw, dict) and isinstance(raw.get("stats"), dict) else {}
+
+    return {
+        "pts": _first_number(raw.get("pts"), totals.get("PTS"), stats.get("pts"), default=0),
+        "ast": _first_number(raw.get("ast"), totals.get("AST"), stats.get("ast"), default=0),
+        "reb": _first_number(raw.get("reb"), totals.get("REB"), stats.get("reb"), default=0),
+        "three_pm": _first_number(
+            raw.get("three_pm"),
+            totals.get("3PM"),
+            stats.get("three_pm"),
+            stats.get("fg3m"),
+            default=0,
+        ),
+    }
+
+
+def _build_trade_block_row(
+    listing: Dict[str, Any],
+    *,
+    player_snapshots: Dict[str, Dict[str, Any]],
+    workflow_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    pid = str(listing.get("player_id") or "")
+    snap = player_snapshots.get(pid) or {}
+    box = _extract_trade_block_box_stats(player_id=pid, workflow_state=workflow_state)
+    return {
+        "player_id": pid,
+        "team_id": str(listing.get("team_id") or "").upper(),
+        "name": snap.get("name") or "-",
+        "pos": snap.get("pos") or "-",
+        "overall": int(_first_number(snap.get("overall"), default=0)),
+        "age": int(_first_number(snap.get("age"), default=0)),
+        "height_in": _first_number(snap.get("height_in"), default=0),
+        "weight_lb": _first_number(snap.get("weight_lb"), default=0),
+        "salary": _first_number(snap.get("salary"), default=0),
+        "pts": _first_number(box.get("pts"), default=0),
+        "ast": _first_number(box.get("ast"), default=0),
+        "reb": _first_number(box.get("reb"), default=0),
+        "three_pm": _first_number(box.get("three_pm"), default=0),
+        "listing": {
+            "status": str(listing.get("status") or "").upper() or "ACTIVE",
+            "visibility": str(listing.get("visibility") or "").upper() or "PUBLIC",
+            "priority": _first_number(listing.get("priority"), default=0.5),
+            "reason_code": str(listing.get("reason_code") or "MANUAL").upper(),
+            "listed_by": str(listing.get("listed_by") or "USER").upper(),
+            "created_at": listing.get("created_at"),
+            "updated_at": listing.get("updated_at"),
+            "expires_on": listing.get("expires_on"),
+        },
+    }
+
+
+def _iter_trade_block_listings(
+    *,
+    market: Dict[str, Any],
+    today: date,
+    team_id: Optional[str],
+    active_only: bool,
+) -> List[Dict[str, Any]]:
+    if team_id:
+        return list_team_trade_listings(
+            market,
+            team_id=team_id,
+            active_only=bool(active_only),
+            today=today,
+        )
+
+    rows: List[Dict[str, Any]] = []
+    for tid in ALL_TEAM_IDS:
+        rows.extend(
+            list_team_trade_listings(
+                market,
+                team_id=tid,
+                active_only=bool(active_only),
+                today=today,
+            )
+        )
+    return rows
+
+
+def _apply_trade_block_visibility_filter(rows: List[Dict[str, Any]], *, visibility: str) -> List[Dict[str, Any]]:
+    vis = _normalize_trade_block_visibility(visibility, default="PUBLIC")
+    if vis == "ALL":
+        return list(rows or [])
+    return [
+        row
+        for row in (rows or [])
+        if str((row or {}).get("visibility") or "PUBLIC").upper() == vis
+    ]
+
+
+def _sort_trade_block_rows(rows: List[Dict[str, Any]], *, sort_key: str) -> List[Dict[str, Any]]:
+    key = _normalize_trade_block_sort(sort_key)
+    data = list(rows or [])
+
+    if key == "ovr_desc":
+        data.sort(
+            key=lambda r: (
+                -int(_first_number(r.get("overall"), default=0)),
+                -float(_first_number(((r.get("listing") or {}).get("priority")), default=0.0)),
+                str(((r.get("listing") or {}).get("updated_at") or "")),
+                str(r.get("player_id") or ""),
+            )
+        )
+        return data
+
+    if key == "updated_desc":
+        data.sort(
+            key=lambda r: (
+                str(((r.get("listing") or {}).get("updated_at") or "")),
+                -int(_first_number(r.get("overall"), default=0)),
+                -float(_first_number(((r.get("listing") or {}).get("priority")), default=0.0)),
+                str(r.get("player_id") or ""),
+            ),
+            reverse=True,
+        )
+        return data
+
+    if key == "age_asc":
+        data.sort(
+            key=lambda r: (
+                int(_first_number(r.get("age"), default=0)),
+                -int(_first_number(r.get("overall"), default=0)),
+                str(r.get("player_id") or ""),
+            )
+        )
+        return data
+
+    if key == "age_desc":
+        data.sort(
+            key=lambda r: (
+                -int(_first_number(r.get("age"), default=0)),
+                -int(_first_number(r.get("overall"), default=0)),
+                str(r.get("player_id") or ""),
+            )
+        )
+        return data
+
+    # default: priority_desc
+    data.sort(
+        key=lambda r: (
+            -float(_first_number(((r.get("listing") or {}).get("priority")), default=0.0)),
+            -int(_first_number(r.get("overall"), default=0)),
+            str(((r.get("listing") or {}).get("updated_at") or "")),
+            str(r.get("player_id") or ""),
+        )
+    )
+    return data
+
+
+@router.get("/api/trade/block")
+async def api_trade_block_aggregate(
+    active_only: bool = True,
+    visibility: str = "PUBLIC",
+    team_id: Optional[str] = None,
+    limit: int = 300,
+    offset: int = 0,
+    sort: str = "priority_desc",
+):
+    try:
+        q = _parse_trade_block_aggregate_query(
+            active_only=active_only,
+            visibility=visibility,
+            team_id=team_id,
+            limit=limit,
+            offset=offset,
+            sort=sort,
+        )
+
+        today = state.get_current_date_as_date()
+        db_path = state.get_db_path()
+        market = load_trade_market()
+
+        listings = _iter_trade_block_listings(
+            market=market,
+            today=today,
+            team_id=q.team_id,
+            active_only=q.active_only,
+        )
+        listings = _apply_trade_block_visibility_filter(listings, visibility=q.visibility)
+
+        pids = [str(r.get("player_id") or "") for r in listings if str(r.get("player_id") or "")]
+        snapshots = _hydrate_trade_block_player_snapshots(pids, db_path=db_path)
+        workflow_state = state.export_workflow_state() or {}
+
+        rows = [
+            _build_trade_block_row(row, player_snapshots=snapshots, workflow_state=workflow_state)
+            for row in listings
+        ]
+        rows = _sort_trade_block_rows(rows, sort_key=q.sort)
+
+        total = len(rows)
+        paged = rows[q.offset:q.offset + q.limit]
+        return {
+            "ok": True,
+            "filters": {
+                "active_only": q.active_only,
+                "visibility": q.visibility,
+                "team_id": q.team_id,
+                "limit": q.limit,
+                "offset": q.offset,
+                "sort": q.sort,
+            },
+            "total": total,
+            "rows": paged,
+        }
+    except TradeError as exc:
+        return _trade_error_response(exc)
 
 
 @router.post("/api/trade/block/list")
