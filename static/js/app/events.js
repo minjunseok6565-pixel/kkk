@@ -14,7 +14,7 @@ import { showTacticsScreen, toggleTacticsOptions, saveTacticsDraft, hasUnsavedTa
 import { showScheduleScreen } from "../features/schedule/scheduleScreen.js";
 import { showTrainingScreen } from "../features/training/trainingScreen.js";
 import { showStandingsScreen } from "../features/standings/standingsScreen.js";
-import { showCollegeScreen, switchCollegeTab } from "../features/college/collegeScreen.js";
+import { showCollegeScreen, switchCollegeTab, ensureCollegeTabData } from "../features/college/collegeScreen.js";
 import { loadCollegeLeaders } from "../features/college/leaders.js";
 import { closeCollegeBigboardDetailScreen } from "../features/college/bigboard.js";
 import {
@@ -27,11 +27,17 @@ import {
   searchScoutingPlayers,
   queueScoutingPlayerSearch,
   loadCollegeScouting,
+  invalidateCollegeScoutingCache,
 } from "../features/college/scouting.js";
 import { showMedicalScreen } from "../features/medical/medicalScreen.js";
 import { renderTrainingDetail } from "../features/training/trainingDetail.js";
 
 function bindEvents() {
+  const onCollegeTabClick = (tab) => {
+    switchCollegeTab(tab);
+    ensureCollegeTabData(tab).catch((e) => alert(e.message));
+  };
+
   els.newGameBtn.addEventListener("click", () => createNewGame().catch((e) => alert(e.message)));
   els.continueBtn.addEventListener("click", () => continueGame().catch((e) => alert(e.message)));
   els.myTeamBtn.addEventListener("click", () => showMyTeamScreen().catch((e) => alert(e.message)));
@@ -72,10 +78,10 @@ function bindEvents() {
   els.medicalBackBtn.addEventListener("click", () => showMainScreen());
   els.standingsBackBtn.addEventListener("click", () => showMainScreen());
   els.collegeBackBtn.addEventListener("click", () => showMainScreen());
-  els.collegeTabTeams.addEventListener("click", () => switchCollegeTab("teams"));
-  els.collegeTabLeaders.addEventListener("click", () => switchCollegeTab("leaders"));
-  els.collegeTabBigboard.addEventListener("click", () => switchCollegeTab("bigboard"));
-  els.collegeTabScouting.addEventListener("click", () => switchCollegeTab("scouting"));
+  els.collegeTabTeams.addEventListener("click", () => onCollegeTabClick("teams"));
+  els.collegeTabLeaders.addEventListener("click", () => onCollegeTabClick("leaders"));
+  els.collegeTabBigboard.addEventListener("click", () => onCollegeTabClick("bigboard"));
+  els.collegeTabScouting.addEventListener("click", () => onCollegeTabClick("scouting"));
   els.collegeLeaderSort.addEventListener("change", () => {
     state.collegeLeadersSort = els.collegeLeaderSort.value || "pts";
     loadCollegeLeaders().catch((e) => alert(e.message));
@@ -185,7 +191,8 @@ function bindEvents() {
         body: JSON.stringify({ team_id: state.selectedTeamId, scout_id: scoutId, player_id: playerId, target_kind: "COLLEGE" })
       });
       if (player && playerId) state.scoutingPlayerLookup[playerId] = player;
-      await loadCollegeScouting();
+      invalidateCollegeScoutingCache(state.selectedTeamId);
+      await loadCollegeScouting({ force: true });
       setCollegeScoutingFeedback(`${scout?.display_name || scoutId} → ${player?.name || playerId} 배정 완료`, "ok");
       closeScoutPlayerModal();
     } catch (error) {

@@ -40,6 +40,8 @@ const state = {
   collegeBigboardLastTriggerExpertId: null,
   collegeBigboardOverview: [],
   collegeBigboardByExpert: {},
+  collegeTabLoaded: { leaders: false, bigboard: false, scouting: false },
+  collegeTabLoading: { leaders: false, bigboard: false, scouting: false },
   scoutingScouts: [],
   scoutingReports: [],
   scoutingPlayers: [],
