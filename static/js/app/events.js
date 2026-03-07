@@ -8,6 +8,7 @@ import {
   continueGame,
   progressNextGameFromHome,
   autoAdvanceToNextGameDayFromHome,
+  progressTenGamesFromHome,
 } from "../features/main/mainScreen.js";
 import { showMyTeamScreen, rerenderMyTeamBoard } from "../features/myteam/myTeamScreen.js";
 import { showTacticsScreen, toggleTacticsOptions, saveTacticsDraft, hasUnsavedTacticsChanges } from "../features/tactics/tacticsScreen.js";
@@ -55,6 +56,7 @@ function bindEvents() {
   els.nextGameTacticsBtn.addEventListener("click", () => showTacticsScreen().catch((e) => alert(e.message)));
   els.nextGamePlayBtn.addEventListener("click", () => progressNextGameFromHome().catch((e) => alert(e.message)));
   els.nextGameQuickBtn.addEventListener("click", () => autoAdvanceToNextGameDayFromHome().catch((e) => alert(e.message)));
+  els.nextGameDev10Btn?.addEventListener("click", () => progressTenGamesFromHome().catch((e) => alert(e.message)));
   els.scheduleBtn.addEventListener("click", () => showScheduleScreen().catch((e) => alert(e.message)));
   els.scheduleBackBtn.addEventListener("click", () => showMainScreen());
   els.gameResultBackBtn?.addEventListener("click", () => showMainScreen());

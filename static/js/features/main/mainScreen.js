@@ -310,6 +310,54 @@ async function autoAdvanceToNextGameDayFromHome() {
   }
 }
 
+
+async function progressTenGamesFromHome() {
+  if (!state.selectedTeamId) {
+    alert("먼저 팀을 선택해주세요.");
+    return;
+  }
+
+  const confirmed = await showConfirmModal({
+    title: "개발용 10경기 진행",
+    body: "다음 10번의 유저 경기를 실제 시뮬레이션합니다. 경기 결과 화면은 표시하지 않고 날짜만 진행됩니다.",
+    okLabel: "진행",
+    cancelLabel: "취소",
+  });
+  if (!confirmed) return;
+
+  setLoading(true, "10경기 진행 중...");
+  try {
+    const result = await fetchJson("/api/game/progress-user-games-batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_team_id: state.selectedTeamId,
+        games_to_play: 10,
+      }),
+    });
+
+    invalidatePostGameViewCaches(state.selectedTeamId);
+    queuePostGamePrefetch(state.selectedTeamId);
+    await refreshMainDashboard();
+
+    const played = Number(result?.played_games || 0);
+    const requested = Number(result?.requested_games || 10);
+    const currentDateAfter = String(result?.current_date_after || "-");
+    const stoppedReason = String(result?.stopped_reason || "");
+
+    if (played < requested && stoppedReason.startsWith("NO_NEXT_USER_GAME")) {
+      alert(`시즌에 남은 유저 경기가 부족하여 ${played}경기만 진행했습니다. 현재 날짜: ${currentDateAfter}`);
+      return;
+    }
+
+    alert(`${played}경기 진행 완료. 현재 날짜: ${currentDateAfter}`);
+  } catch (e) {
+    alert(`10경기 진행 실패: ${e.message}`);
+  } finally {
+    setLoading(false);
+  }
+}
+
 async function loadSavesStatus() {
   try {
     const saveResult = await fetchJson("/api/game/saves");
@@ -480,6 +528,7 @@ export {
   refreshMainDashboard,
   progressNextGameFromHome,
   autoAdvanceToNextGameDayFromHome,
+  progressTenGamesFromHome,
   loadSavesStatus,
   renderTeams,
   createNewGame,

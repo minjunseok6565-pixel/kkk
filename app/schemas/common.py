@@ -44,6 +44,13 @@ class AutoAdvanceToNextUserGameDayRequest(BaseModel):
     idempotency_key: Optional[str] = None
 
 
+class ProgressUserGamesBatchRequest(BaseModel):
+    user_team_id: str
+    games_to_play: int = Field(default=10, ge=1, le=100)
+    apiKey: Optional[str] = None
+    idempotency_key: Optional[str] = None
+
+
 class PostseasonSetupRequest(BaseModel):
     my_team_id: str
     use_random_field: bool = False

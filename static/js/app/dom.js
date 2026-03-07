@@ -21,6 +21,7 @@ const els = {
   nextGameDatetime: document.getElementById("next-game-datetime"),
   nextGamePlayBtn: document.getElementById("next-game-play-btn"),
   nextGameQuickBtn: document.getElementById("next-game-quick-btn"),
+  nextGameDev10Btn: document.getElementById("next-game-dev10-btn"),
   gameResultTitle: document.getElementById("game-result-title"),
   gameResultSubtitle: document.getElementById("game-result-subtitle"),
   gameResultBackBtn: document.getElementById("game-result-back-btn"),
