@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any, Dict, Iterable
 
 from fastapi import APIRouter, HTTPException
@@ -12,6 +13,7 @@ from sim.league_sim import (
     progress_next_user_game_day,
     simulate_single_game,
 )
+from trades.orchestration import run_trade_orchestration_tick
 from state_modules.state_standings import apply_final_game, create_empty_standings_cache
 from app.schemas.common import (
     AdvanceLeagueRequest,
@@ -75,6 +77,99 @@ def _apply_standings_cache_incremental_updates(*, game_ids: Iterable[Any]) -> Di
     return {"candidates": len(target_ids), "applied": int(applied), "missing": int(missing)}
 
 
+def _run_trade_orchestration_for_date(*, user_team_id: str, tick_date: date) -> Dict[str, Any]:
+    """Run trade orchestration for a specific in-game date and summarize outcome."""
+    user_tid = str(user_team_id or "").upper().strip()
+    if not user_tid:
+        return {
+            "ok": False,
+            "error": "MISSING_USER_TEAM_ID",
+            "tick_date": tick_date.isoformat(),
+            "message": "user_team_id is required for daily trade orchestration",
+        }
+
+    try:
+        report = run_trade_orchestration_tick(
+            current_date=tick_date,
+            user_team_id=user_tid,
+            dry_run=False,
+            validate_integrity=False,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": type(exc).__name__,
+            "tick_date": tick_date.isoformat(),
+            "message": "daily trade orchestration failed",
+        }
+
+    promo = getattr(report, "promotion", None)
+    return {
+        "ok": True,
+        "tick_date": str(getattr(report, "tick_date", tick_date.isoformat())),
+        "skipped": bool(getattr(report, "skipped", False)),
+        "skip_reason": str(getattr(report, "skip_reason", "") or ""),
+        "active_teams_count": len(getattr(report, "active_teams", []) or []),
+        "user_offer_sessions_created": len(getattr(promo, "user_offer_sessions", []) or []) if promo is not None else 0,
+        "executed_trade_events": len(getattr(promo, "executed_trade_events", []) or []) if promo is not None else 0,
+        "errors": list(getattr(promo, "errors", []) or []) if promo is not None else [],
+    }
+
+
+def _iter_dates_exclusive_to_inclusive(*, from_exclusive: str, to_inclusive: str) -> list[date]:
+    """Return dates in (from_exclusive, to_inclusive], with same-day fallback to [to_inclusive]."""
+    start = date.fromisoformat(str(from_exclusive)[:10])
+    end = date.fromisoformat(str(to_inclusive)[:10])
+
+    if start >= end:
+        return [end]
+
+    out: list[date] = []
+    d = start + timedelta(days=1)
+    while d <= end:
+        out.append(d)
+        d += timedelta(days=1)
+    return out
+
+
+def _run_trade_orchestration_catchup(*, user_team_id: str, from_exclusive: str, to_inclusive: str) -> Dict[str, Any]:
+    """Run orchestration once per in-game date in the requested range."""
+    try:
+        days = _iter_dates_exclusive_to_inclusive(from_exclusive=from_exclusive, to_inclusive=to_inclusive)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "from_exclusive": str(from_exclusive),
+            "to_inclusive": str(to_inclusive),
+            "error": type(exc).__name__,
+            "message": "invalid orchestration date range",
+            "runs": [],
+            "summary": {
+                "requested_days": 0,
+                "executed_days": 0,
+                "skipped_days": 0,
+                "error_days": 1,
+            },
+        }
+
+    runs = [
+        _run_trade_orchestration_for_date(user_team_id=user_team_id, tick_date=d)
+        for d in days
+    ]
+    return {
+        "ok": all(bool(r.get("ok")) for r in runs),
+        "from_exclusive": str(from_exclusive),
+        "to_inclusive": str(to_inclusive),
+        "runs": runs,
+        "summary": {
+            "requested_days": len(days),
+            "executed_days": sum(1 for r in runs if bool(r.get("ok")) and not bool(r.get("skipped"))),
+            "skipped_days": sum(1 for r in runs if bool(r.get("skipped"))),
+            "error_days": sum(1 for r in runs if not bool(r.get("ok"))),
+        },
+    }
+
+
 
 
 
@@ -135,6 +230,11 @@ async def api_advance_league(req: AdvanceLeagueRequest):
         "simulated_games": simulated,
         "college_checkpoints": college_checkpoints,
         "scouting_checkpoints": scouting_checkpoints,
+        "trade_orchestration": _run_trade_orchestration_catchup(
+            user_team_id=req.user_team_id,
+            from_exclusive=prev_date,
+            to_inclusive=req.target_date,
+        ),
     }
 
 
@@ -210,6 +310,11 @@ async def api_progress_next_user_game_day(req: ProgressNextUserGameDayRequest):
     )
     result["college_checkpoints"] = college_checkpoints
     result["scouting_checkpoints"] = scouting_checkpoints
+    result["trade_orchestration"] = _run_trade_orchestration_catchup(
+        user_team_id=req.user_team_id,
+        from_exclusive=prev_date,
+        to_inclusive=current_after,
+    )
     return result
 
 
@@ -237,4 +342,9 @@ async def api_auto_advance_to_next_user_game_day(req: AutoAdvanceToNextUserGameD
     )
     result["college_checkpoints"] = college_checkpoints
     result["scouting_checkpoints"] = scouting_checkpoints
+    result["trade_orchestration"] = _run_trade_orchestration_catchup(
+        user_team_id=req.user_team_id,
+        from_exclusive=prev_date,
+        to_inclusive=current_after,
+    )
     return result
