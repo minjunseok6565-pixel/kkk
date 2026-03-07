@@ -38,6 +38,9 @@ function toFriendlyRuleMessage(rawMessage) {
   if (msg.includes("NEGOTIATION_MODE_MISMATCH")) {
     return "협상 모드가 맞지 않습니다. 협상을 다시 시작해주세요.";
   }
+  if (msg.includes("NEGOTIATION_ENDED_BY_AI")) {
+    return "상대 팀이 협상을 종료했습니다. 제안이 인박스에서 제거됩니다.";
+  }
   if (msg.includes("NEGOTIATION_NOT_ACTIVE") || msg.includes("Negotiation session is closed")) {
     return "협상이 이미 종료되었습니다. 새 협상을 시작해주세요.";
   }
@@ -535,8 +538,10 @@ async function openTradeDealEditorFromSession(session, fallback = {}) {
   }
   if (els.marketTradeDealMeta) {
     const teamName = TEAM_FULL_NAMES[otherTeamId] || otherTeamId || "-";
-    const expiresAt = activeSession?.expires_at || activeSession?.valid_until || "-";
-    els.marketTradeDealMeta.textContent = `상대팀: ${teamName} / 만료일: ${expiresAt}`;
+    const autoEnd = activeSession?.auto_end || null;
+    const autoEnded = String(autoEnd?.status || "").toUpperCase() === "ENDED";
+    const statusText = autoEnded ? "AI가 협상 종료" : "협상 가능";
+    els.marketTradeDealMeta.textContent = `상대팀: ${teamName} / 상태: ${statusText}`;
   }
   setTradeDealSubmitPending(false);
   setTradeDealEditorMessage("");
@@ -683,6 +688,17 @@ async function openTradeInboxSession(row) {
       otherTeamId: row?.other_team_id,
     });
     loadMarketTradeInbox({ force: true }).catch(() => {});
+  } catch (error) {
+    const msg = String(error?.message || "");
+    if (msg.includes("NEGOTIATION_ENDED_BY_AI")) {
+      const currentRows = Array.isArray(state.marketTradeInboxRows) ? state.marketTradeInboxRows : [];
+      state.marketTradeInboxRows = currentRows.filter((item) => String(item?.session_id || "") !== String(sessionId));
+      state.marketTradeInboxGrouped = groupInboxRowsByOtherTeam(state.marketTradeInboxRows);
+      renderMarketTradeInbox();
+      state.marketTradeInboxLastLoadedAt = Date.now();
+      loadMarketTradeInbox({ force: true }).catch(() => {});
+    }
+    throw error;
   } finally {
     setLoading(false);
   }

@@ -18,7 +18,6 @@ from ..negotiation_store import (
     set_committed,
     set_valid_until,
     set_market_context_offer_meta,
-    set_status,
 )
 from ..valuation.types import DealVerdict
 
@@ -213,25 +212,6 @@ def _count_active_user_sessions(negotiations_snapshot: Dict[str, Any], user_team
             if str(sess.get("status", "")).upper() != "ACTIVE":
                 continue
 
-            # Expire sessions that are past valid_until (in-game date), so they don't
-            # permanently consume the active-session cap.
-            vu = sess.get("valid_until")
-            if isinstance(vu, str) and vu:
-                try:
-                    vu_d = date.fromisoformat(vu[:10])
-                except Exception:
-                    vu_d = None
-                if vu_d is not None and today > vu_d:
-                    try:
-                        set_status(str(sid), "EXPIRED")
-                    except Exception:
-                        pass
-                    try:
-                        sess["status"] = "EXPIRED"
-                    except Exception:
-                        pass
-                    continue
-
             if str(sess.get("user_team_id", "")).upper() == u or str(sess.get("other_team_id", "")).upper() == u:
                 n += 1
         except Exception:
@@ -253,23 +233,6 @@ def _find_reusable_session_id(
             if str(sess.get("status", "")).upper() != "ACTIVE":
                 continue
 
-            vu = sess.get("valid_until")
-            if isinstance(vu, str) and vu:
-                try:
-                    vu_d = date.fromisoformat(vu[:10])
-                except Exception:
-                    vu_d = None
-                if vu_d is not None and today > vu_d:
-                    try:
-                        set_status(str(sid), "EXPIRED")
-                    except Exception:
-                        pass
-                    try:
-                        sess["status"] = "EXPIRED"
-                    except Exception:
-                        pass
-                    continue
-            
             if str(sess.get("user_team_id", "")).upper() == u and str(sess.get("other_team_id", "")).upper() == o:
                 return str(sid)
         except Exception:

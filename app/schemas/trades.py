@@ -56,6 +56,15 @@ class TradeBlockAggregateQuery(BaseModel):
 
 
 class TradeNegotiationInboxQuery(BaseModel):
+    """Query params for trade negotiation inbox listing.
+
+    NOTE:
+    - This request schema remains unchanged for backward compatibility.
+    - Inbox API response rows now include AI auto-end context fields:
+      - `ai_end_risk` (dict): snapshot of probability/risk signals for the row.
+      - `auto_end` (dict): session-level AI auto-end metadata (status/reason/score/detail).
+    """
+
     team_id: str
     status: str = "ACTIVE"
     phase: str = "OPEN"

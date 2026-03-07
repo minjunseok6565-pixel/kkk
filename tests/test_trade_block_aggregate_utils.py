@@ -269,7 +269,7 @@ def test_open_inbox_session_transitions_and_idempotent(monkeypatch) -> None:
     assert out2["idempotent"] is True
 
 
-def test_api_trade_negotiation_open_expired_session(monkeypatch) -> None:
+def test_api_trade_negotiation_open_ai_ended_session(monkeypatch) -> None:
     async def _run() -> None:
         req = trades.TradeNegotiationOpenRequest(session_id="s1", team_id="LAL")
 
@@ -285,6 +285,11 @@ def test_api_trade_negotiation_open_expired_session(monkeypatch) -> None:
             },
         )
         monkeypatch.setattr(trades.state, "get_current_date_as_date", lambda: date(2026, 1, 3))
+        monkeypatch.setattr(
+            trades,
+            "evaluate_and_maybe_end",
+            lambda _sid, today, seed_context=None: {"ended": True, "reason_code": "NO_RESPONSE_TIMEOUT", "probability": 0.7, "roll": 0.2},
+        )
 
         out = await trades.api_trade_negotiation_open(req)
         assert out.status_code == 400
@@ -313,13 +318,13 @@ def test_ensure_session_ready_for_commit_guards() -> None:
             today=today,
         )
 
-    # expired
-    with pytest.raises(trades.TradeError):
-        trades._ensure_session_ready_for_commit(
-            {"status": "ACTIVE", "phase": "NEGOTIATING", "valid_until": "2026-01-01"},
-            session_id="s3",
-            today=today,
-        )
+    # valid_until is no longer a hard commit guard
+    out2 = trades._ensure_session_ready_for_commit(
+        {"status": "ACTIVE", "phase": "NEGOTIATING", "valid_until": "2026-01-01"},
+        session_id="s3",
+        today=today,
+    )
+    assert out2 is None
 
 
 def test_mark_committed_and_close_transitions_and_idempotent(monkeypatch) -> None:
