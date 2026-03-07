@@ -16,6 +16,7 @@ from trades.errors import TradeError
 from trades.models import canonicalize_deal, parse_deal, serialize_deal
 from trades.validator import validate_deal
 from trades.orchestration.types import OrchestrationConfig
+from trades.orchestration.ai_end_policy import evaluate_and_maybe_end
 from trades.orchestration.market_state import (
     load_trade_market,
     save_trade_market,
@@ -511,14 +512,6 @@ def _ensure_session_ready_for_commit(
             {"session_id": str(session_id), "phase": phase},
         )
 
-    expires_on = _iso_date(session.get("valid_until"))
-    if expires_on is not None and today > expires_on:
-        raise TradeError(
-            "NEGOTIATION_EXPIRED",
-            "Negotiation session has expired",
-            {"session_id": str(session_id), "valid_until": session.get("valid_until"), "today": today.isoformat()},
-        )
-
     return None
 
 
@@ -584,8 +577,8 @@ def _build_trade_negotiation_inbox_row(session: Dict[str, Any], *, today: date) 
     market_context = session.get("market_context") if isinstance(session.get("market_context"), dict) else {}
     offer_meta = market_context.get("offer_meta") if isinstance(market_context.get("offer_meta"), dict) else {}
 
-    expires = _iso_date(session.get("valid_until"))
-    is_expired = bool(expires and today > expires)
+    auto_end = session.get("auto_end") if isinstance(session.get("auto_end"), dict) else {}
+    is_expired = str(auto_end.get("status") or "").upper() == "ENDED"
 
     return {
         "session_id": str(session.get("session_id") or ""),
@@ -925,10 +918,8 @@ async def api_trade_negotiation_start(req: TradeNegotiationStartRequest):
         session = negotiation_store.create_session(
             user_team_id=req.user_team_id, other_team_id=req.other_team_id
         )
-        # Ensure sessions naturally expire even if the user ignores them,
-        # so they don't permanently consume the active-session cap.
-        valid_until = (in_game_date + timedelta(days=2)).isoformat()
-        negotiation_store.set_valid_until(session["session_id"], valid_until)
+        # AI-driven auto-end policy is now the primary mechanism for stale sessions.
+        negotiation_store.touch_ai_action(session["session_id"])
         # default privacy metadata (backward-compatible)
         default_privacy = _normalize_offer_privacy(getattr(req, "default_offer_privacy", None), default="PRIVATE")
         negotiation_store.set_market_context_offer_meta(
@@ -936,7 +927,7 @@ async def api_trade_negotiation_start(req: TradeNegotiationStartRequest):
             {"offer_privacy": default_privacy, "leak_status": "NONE"},
         )
         # Keep response consistent with stored session
-        session["valid_until"] = valid_until
+        session = negotiation_store.get_session(session["session_id"])
         session.setdefault("market_context", {})
         if isinstance(session["market_context"], dict):
             session["market_context"]["offer_meta"] = {"offer_privacy": default_privacy, "leak_status": "NONE"}
@@ -971,12 +962,25 @@ async def api_trade_negotiation_open(req: TradeNegotiationOpenRequest):
             )
 
         today = state.get_current_date_as_date()
-        expires_on = _iso_date(session.get("valid_until"))
-        if expires_on is not None and today > expires_on:
+        auto_eval = evaluate_and_maybe_end(
+            req.session_id,
+            today=today,
+            seed_context={
+                "seed_salt": str(getattr(OrchestrationConfig(), "seed_salt", "trade_orchestration_v2")),
+                "deadline_pressure": 0.0,
+            },
+        )
+        if bool(auto_eval.get("ended")):
             raise TradeError(
-                "NEGOTIATION_EXPIRED",
-                "Negotiation session has expired",
-                {"session_id": str(req.session_id), "valid_until": session.get("valid_until"), "today": today.isoformat()},
+                "NEGOTIATION_ENDED_BY_AI",
+                "Negotiation session has been ended by AI",
+                {
+                    "session_id": str(req.session_id),
+                    "today": today.isoformat(),
+                    "reason_code": auto_eval.get("reason_code"),
+                    "probability": auto_eval.get("probability"),
+                    "roll": auto_eval.get("roll"),
+                },
             )
 
         result = negotiation_store.open_inbox_session(req.session_id)

@@ -49,6 +49,37 @@ def _ensure_session_schema(session: Dict[str, Any]) -> Dict[str, Any]:
     if valid_until is not None and not isinstance(valid_until, str):
         session["valid_until"] = None
 
+    session.setdefault("auto_end", {"status": "PENDING", "ended_at": None, "reason": None, "score": None, "detail": None})
+    auto_end = session.get("auto_end")
+    if not isinstance(auto_end, dict):
+        auto_end = {"status": "PENDING", "ended_at": None, "reason": None, "score": None, "detail": None}
+        session["auto_end"] = auto_end
+    status = auto_end.get("status")
+    auto_end["status"] = str(status).upper() if isinstance(status, str) and status else "PENDING"
+    auto_end.setdefault("ended_at", None)
+    if auto_end.get("ended_at") is not None and not isinstance(auto_end.get("ended_at"), str):
+        auto_end["ended_at"] = None
+    auto_end.setdefault("reason", None)
+    if auto_end.get("reason") is not None and not isinstance(auto_end.get("reason"), str):
+        auto_end["reason"] = None
+    auto_end.setdefault("score", None)
+    try:
+        if auto_end.get("score") is not None:
+            auto_end["score"] = float(auto_end.get("score"))
+    except Exception:
+        auto_end["score"] = None
+    auto_end.setdefault("detail", None)
+    if auto_end.get("detail") is not None and not isinstance(auto_end.get("detail"), dict):
+        auto_end["detail"] = None
+
+    session.setdefault("last_user_action_at", None)
+    if session.get("last_user_action_at") is not None and not isinstance(session.get("last_user_action_at"), str):
+        session["last_user_action_at"] = None
+
+    session.setdefault("last_ai_action_at", None)
+    if session.get("last_ai_action_at") is not None and not isinstance(session.get("last_ai_action_at"), str):
+        session["last_ai_action_at"] = None
+
     session.setdefault("summary", dict(default_summary))
     summary = session.get("summary")
     if not isinstance(summary, dict):
@@ -119,6 +150,9 @@ def create_session(user_team_id: str, other_team_id: str) -> Dict[str, Any]:
         "last_counter": None,  # last counter-offer payload
         "constraints": {},  # negotiation constraints metadata
         "valid_until": None,  # ISO expiry or None
+        "auto_end": {"status": "PENDING", "ended_at": None, "reason": None, "score": None, "detail": None},
+        "last_user_action_at": None,
+        "last_ai_action_at": None,
         "summary": {"text": "", "updated_at": None},  # session summary metadata
         "relationship": {"trust": 0, "fatigue": 0, "promises_broken": 0},
         "market_context": {},  # trade market context snapshot
@@ -137,6 +171,24 @@ def append_message(session_id: str, speaker: str, text: str) -> None:
 
     def _patch(session: Dict[str, Any]) -> None:
         session["messages"].append(msg)
+
+    _atomic_update(session_id, _patch)
+
+
+def touch_user_action(session_id: str, at_iso: Optional[str] = None) -> None:
+    at = str(at_iso).strip() if isinstance(at_iso, str) and at_iso.strip() else _now_iso()
+
+    def _patch(session: Dict[str, Any]) -> None:
+        session["last_user_action_at"] = at
+
+    _atomic_update(session_id, _patch)
+
+
+def touch_ai_action(session_id: str, at_iso: Optional[str] = None) -> None:
+    at = str(at_iso).strip() if isinstance(at_iso, str) and at_iso.strip() else _now_iso()
+
+    def _patch(session: Dict[str, Any]) -> None:
+        session["last_ai_action_at"] = at
 
     _atomic_update(session_id, _patch)
 
@@ -307,6 +359,56 @@ def close_as_rejected(session_id: str, reason: Optional[str] = None) -> Dict[str
             messages.append({
                 "speaker": "USER_GM",
                 "text": f"REJECTED: {reason_text}",
+                "at": _now_iso(),
+            })
+
+    updated = _atomic_update(session_id, _patch)
+    return {"session": updated, "idempotent": bool(idempotent)}
+
+
+def mark_auto_ended(
+    session_id: str,
+    reason: str,
+    score: Optional[float] = None,
+    detail: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    reason_text = str(reason or "").strip().upper() or "AI_DECISION"
+    detail_payload = dict(detail) if isinstance(detail, dict) else None
+    score_value: Optional[float]
+    try:
+        score_value = None if score is None else float(score)
+    except Exception:
+        score_value = None
+
+    idempotent = False
+
+    def _patch(session: Dict[str, Any]) -> None:
+        nonlocal idempotent
+        current_status = str(session.get("status") or "").upper()
+        current_phase = str(session.get("phase") or "").upper()
+        auto_end = session.get("auto_end") if isinstance(session.get("auto_end"), dict) else {}
+        if str(auto_end.get("status") or "").upper() == "ENDED" and current_status == "CLOSED":
+            idempotent = True
+            return
+
+        session["status"] = "CLOSED"
+        session["phase"] = "EXPIRED_BY_AI"
+        session["auto_end"] = {
+            "status": "ENDED",
+            "ended_at": _now_iso(),
+            "reason": reason_text,
+            "score": score_value,
+            "detail": detail_payload,
+        }
+
+        if current_phase != "EXPIRED_BY_AI" or current_status != "CLOSED":
+            messages = session.get("messages")
+            if not isinstance(messages, list):
+                messages = []
+                session["messages"] = messages
+            messages.append({
+                "speaker": "OTHER_GM",
+                "text": f"AUTO_ENDED_BY_AI: {reason_text}",
                 "at": _now_iso(),
             })
 

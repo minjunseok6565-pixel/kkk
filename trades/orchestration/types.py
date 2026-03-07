@@ -109,7 +109,35 @@ class OrchestrationConfig:
 
     # --- 유저 오퍼 보호(agreement+asset lock)
     lock_user_offers: bool = True
-    user_offer_valid_days: int = 2
+    user_offer_valid_days: int = 2  # Deprecated: user offer expiry should migrate to AI auto-end policy.
+
+    # --- AI-driven auto-end policy for user offer negotiations
+    enable_ai_auto_end_user_offers: bool = True
+    ai_auto_end_grace_days: int = 5
+    ai_auto_end_probability_min: float = 0.01
+    ai_auto_end_probability_cap: float = 0.88
+    ai_auto_end_probability_cap_serious_offer: float = 0.75
+    ai_auto_end_early_days_penalty_until: int = 2
+    ai_auto_end_early_days_multiplier: float = 0.35
+
+    # time response curve
+    ai_auto_end_time_slope_pre5: float = 0.06
+    ai_auto_end_time_post5_max_add: float = 0.55
+    ai_auto_end_time_post5_half_life: float = 6.0
+
+    # logistic equation base / feature weights
+    ai_auto_end_logit_base: float = -2.35
+    ai_auto_end_weight_time: float = 1.55
+    ai_auto_end_weight_low_trust: float = 0.90
+    ai_auto_end_weight_fatigue: float = 0.55
+    ai_auto_end_weight_promises_broken: float = 1.05
+    ai_auto_end_weight_deadline_pressure: float = 0.45
+
+    # tone & leak bias
+    ai_auto_end_tone_bias_serious: float = 0.00
+    ai_auto_end_tone_bias_probe: float = 0.18
+    ai_auto_end_tone_bias_lowball: float = 0.30
+    ai_auto_end_leak_bias: float = 0.20
 
     # --- UI cache refresh (AI↔AI 체결 직후 이적 선수 UI 반영)
     refresh_ui_cache_after_execute: bool = True
