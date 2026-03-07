@@ -13,8 +13,9 @@ import {
   setLoading,
 } from "../../core/api.js";
 import { num } from "../../core/guards.js";
-import { formatHeightIn, formatMoney, formatWeightLb, formatPickLabel, formatProtectionSummary, formatSwapAssetLabel, formatFixedAssetLabel } from "../../core/format.js";
+import { formatHeightIn, formatMoney, formatWeightLb, strictFormatPickLabel, formatProtectionSummary, formatSwapAssetLabel, formatFixedAssetLabel } from "../../core/format.js";
 import { TEAM_FULL_NAMES, applyTeamLogo, getTeamDisplayName } from "../../core/constants/teams.js";
+import { reportTradeContractViolation } from "../../core/telemetry.js";
 import { loadPlayerDetail } from "../myteam/playerDetail.js";
 import { fetchTeamDetail, invalidateTeamDetailCache } from "../team/teamDetailCache.js";
 
@@ -676,6 +677,30 @@ function normalizeTeamIdUpper(value) {
   return String(value || "").toUpperCase();
 }
 
+function pushTradeContractViolation(violation) {
+  const payload = violation && typeof violation === "object" ? { ...violation } : {};
+  if (!Array.isArray(state.marketTradeContractViolations)) {
+    state.marketTradeContractViolations = [];
+  }
+  const record = {
+    ...payload,
+    detected_at: new Date().toISOString(),
+    screen: "market_trade_inbox",
+  };
+  state.marketTradeContractViolations.push(record);
+  try {
+    reportTradeContractViolation(record);
+  } catch {
+    // no-op
+  }
+}
+
+function buildContractViolationBadge(message, violation) {
+  pushTradeContractViolation(violation);
+  const text = String(message || "계약 필수 필드 누락").trim() || "계약 필수 필드 누락";
+  return `<span class="market-trade-asset-contract-violation">[계약오류] ${text}</span>`;
+}
+
 function getInboxPlayerDirectory() {
   if (!state.marketTradeInboxPlayerDirectory || typeof state.marketTradeInboxPlayerDirectory !== "object") {
     state.marketTradeInboxPlayerDirectory = {};
@@ -708,7 +733,7 @@ async function hydrateMarketTradeInboxPlayerDirectory(rows) {
           };
         });
       } catch {
-        // no-op: keep graceful fallback labels
+        // no-op: directory is optional auxiliary cache only.
       }
     }));
 }
@@ -736,8 +761,8 @@ function splitDealAssetsForInbox(deal, userTeamId, otherTeamId) {
       const kind = String(asset?.kind || "").toLowerCase();
       if (!kind) return;
 
-      if (fromTeamId === userTeamId || receiver === otherTeamId) outgoing.push(asset);
-      if (fromTeamId === otherTeamId || receiver === userTeamId) incoming.push(asset);
+      if (fromTeamId === userTeamId || receiver === otherTeamId) outgoing.push({ ...asset, direction: "outgoing" });
+      if (fromTeamId === otherTeamId || receiver === userTeamId) incoming.push({ ...asset, direction: "incoming" });
     });
   });
 
@@ -749,17 +774,60 @@ function formatInboxAssetText(asset, { teamNameById = {}, playerDirectory = {} }
   if (kind === "player") {
     const pid = String(asset?.player_id || "");
     const player = playerDirectory[pid] || {};
-    const name = String(player?.name || "").trim() || `Unknown Player`;
-    const pos = String(player?.pos || "").trim();
+    const dtoName = String(asset?.display_name || "").trim();
+    const dtoPos = String(asset?.pos || "").trim();
+    const fallbackName = String(player?.name || "").trim();
+    const fallbackPos = String(player?.pos || "").trim();
+    const name = dtoName || fallbackName;
+    const pos = dtoPos || fallbackPos;
+    if (!dtoName || !dtoPos) {
+      const missing = [];
+      if (!dtoName) missing.push("display_name");
+      if (!dtoPos) missing.push("pos");
+      const badge = buildContractViolationBadge("선수 스냅샷 필드 누락", {
+        endpoint: "market.render.asset.player",
+        session_id: String(state.marketTradeActiveSession?.session_id || ""),
+        asset_kind: "player",
+        asset_ref: pid,
+        missing_fields: missing,
+        direction: String(asset?.direction || ""),
+      });
+      return `[선수] ${badge}`;
+    }
     const salary = player?.salary != null ? ` · ${formatMoney(player.salary)}` : "";
     return `[선수] ${name}${pos ? ` (${pos})` : ""}${salary}`;
   }
   if (kind === "pick") {
-    const teamName = teamNameById[normalizeTeamIdUpper(asset?.to_team)] || "";
-    const pickText = formatPickLabel({ year: asset?.year, round: asset?.round, teamName, includeTeam: Boolean(teamName) });
+    const pickId = String(asset?.pick_id || "").trim();
+    const missing = [];
+    const yearNum = Number(asset?.year);
+    const roundNum = Number(asset?.round);
+    const originalTeam = normalizeTeamIdUpper(asset?.original_team);
+    const ownerTeam = normalizeTeamIdUpper(asset?.owner_team);
+    if (!pickId) missing.push("pick_id");
+    if (!Number.isFinite(yearNum)) missing.push("year");
+    if (!Number.isFinite(roundNum) || roundNum <= 0) missing.push("round");
+    if (!originalTeam) missing.push("original_team");
+    if (!ownerTeam) missing.push("owner_team");
+    if (missing.length) {
+      const badge = buildContractViolationBadge("픽 스냅샷 필드 누락", {
+        endpoint: "market.render.asset.pick",
+        session_id: String(state.marketTradeActiveSession?.session_id || ""),
+        asset_kind: "pick",
+        asset_ref: pickId,
+        missing_fields: missing,
+        direction: String(asset?.direction || ""),
+      });
+      return `[픽] ${badge}`;
+    }
+    const ownerTeamName = teamNameById[ownerTeam] || ownerTeam;
+    const pickText = strictFormatPickLabel({ year: yearNum, round: roundNum, teamName: ownerTeamName, includeTeam: Boolean(ownerTeamName) });
+    const originText = originalTeam && ownerTeam && originalTeam !== ownerTeam
+      ? ` · ORG ${teamNameById[originalTeam] || originalTeam}`
+      : "";
     const protectionText = formatProtectionSummary(asset?.protection);
     const protectedBadge = protectionText && protectionText !== "Unprotected" ? ` · ${protectionText}` : "";
-    return `[픽] ${pickText}${protectedBadge}`;
+    return `[픽] ${pickText}${originText}${protectedBadge}`;
   }
   if (kind === "swap") {
     return `[스왑] ${formatSwapAssetLabel({ year: asset?.year, round: asset?.round, pickA: asset?.pick_id_a, pickB: asset?.pick_id_b })}`;
@@ -778,7 +846,7 @@ function getModalPlayerDirectory() {
     const pid = String(player?.player_id || "");
     if (!pid) return;
     directory[pid] = {
-      name: String(player?.name || "").trim() || pid,
+      name: String(player?.display_name || player?.name || "").trim() || pid,
       pos: String(player?.pos || "").trim(),
       salary: player?.salary,
     };
@@ -986,10 +1054,16 @@ function buildTabRowsForTeam(kind, pool, teamId, teamNameById, playerDirectory, 
       const pid = String(player?.player_id || "");
       if (!pid) return;
       const selected = hasAsset(teamId, { kind: "player", player_id: pid });
+      const playerAsset = {
+        kind: "player",
+        player_id: pid,
+        display_name: String(player?.display_name || player?.name || "").trim(),
+        pos: String(player?.pos || "").trim(),
+      };
       rows.push({
         id: pid,
         raw: player,
-        html: `<span>${formatInboxAssetText({ kind: "player", player_id: pid }, { teamNameById, playerDirectory })}</span><button type="button" class="btn btn-secondary" data-deal-toggle-kind="player" data-deal-id="${pid}">${selected ? "제거" : "추가"}</button>`,
+        html: `<span>${formatInboxAssetText(playerAsset, { teamNameById, playerDirectory })}</span><button type="button" class="btn btn-secondary" data-deal-toggle-kind="player" data-deal-id="${pid}">${selected ? "제거" : "추가"}</button>`,
       });
     });
   }
@@ -1002,7 +1076,19 @@ function buildTabRowsForTeam(kind, pool, teamId, teamNameById, playerDirectory, 
       const selected = hasAsset(teamId, { kind: "pick", pick_id: pickId });
       const protectionText = formatProtectionSummary(pick?.protection);
       const canEditProtection = normalizeTeamIdUpper(pick?.owner_team) === normalizeTeamIdUpper(pick?.original_team);
-      const label = formatPickLabel({ year: pick?.year, round: pick?.round, teamName: teamNameById[teamU], includeTeam: true });
+      let label = "";
+      try {
+        label = strictFormatPickLabel({ year: pick?.year, round: pick?.round, teamName: teamNameById[teamU], includeTeam: true });
+      } catch {
+        label = buildContractViolationBadge("픽 스냅샷 필드 누락", {
+          endpoint: "market.render.dealTab.pick",
+          session_id: String(state.marketTradeActiveSession?.session_id || ""),
+          asset_kind: "pick",
+          asset_ref: pickId,
+          missing_fields: ["year", "round"],
+          direction: "editor",
+        });
+      }
       const protectionValue = pick?.protection ? JSON.stringify(pick.protection) : "";
       const protectionBadge = protectionText && protectionText !== "Unprotected"
         ? `<span class="market-trade-asset-badge market-trade-asset-badge-protected">보호픽</span>`
@@ -1296,6 +1382,7 @@ async function loadMarketTradeInbox({ force = false } = {}) {
 
   const previousRows = Array.isArray(state.marketTradeInboxRows) ? [...state.marketTradeInboxRows] : [];
   const previousGroups = Array.isArray(state.marketTradeInboxGrouped) ? [...state.marketTradeInboxGrouped] : [];
+  const previousViolations = Array.isArray(state.marketTradeContractViolations) ? [...state.marketTradeContractViolations] : [];
 
   setMarketTradeInboxLoading(true);
   renderMarketTradeInbox();
@@ -1310,7 +1397,20 @@ async function loadMarketTradeInbox({ force = false } = {}) {
       : Array.isArray(payload?.sessions)
         ? payload.sessions
         : [];
-    await hydrateMarketTradeInboxPlayerDirectory(rows);
+    const responseViolations = Array.isArray(payload?.contract_violations) ? payload.contract_violations : [];
+    responseViolations.forEach((violation) => pushTradeContractViolation({
+      ...violation,
+      endpoint: String(violation?.endpoint || "/api/trade/negotiation/inbox"),
+    }));
+    rows.forEach((row) => {
+      const rowViolations = Array.isArray(row?.contract_violations) ? row.contract_violations : [];
+      rowViolations.forEach((violation) => pushTradeContractViolation({
+        ...violation,
+        session_id: String(violation?.session_id || row?.session_id || ""),
+        endpoint: String(violation?.endpoint || "/api/trade/negotiation/inbox"),
+      }));
+    });
+    hydrateMarketTradeInboxPlayerDirectory(rows).catch(() => {});
     state.marketTradeInboxRows = rows;
     state.marketTradeInboxGrouped = groupInboxRowsByOtherTeam(rows);
     state.marketTradeInboxLastLoadedAt = Date.now();
@@ -1318,6 +1418,7 @@ async function loadMarketTradeInbox({ force = false } = {}) {
   } catch (error) {
     state.marketTradeInboxRows = previousRows;
     state.marketTradeInboxGrouped = previousGroups;
+    state.marketTradeContractViolations = previousViolations;
     renderMarketTradeInbox();
     if (els.marketTradeInboxSummary) {
       els.marketTradeInboxSummary.textContent = toFriendlyRuleMessage(error?.message || "제안 목록을 불러오지 못했습니다.");
