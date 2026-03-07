@@ -10,7 +10,8 @@ import {
   commitTradeNegotiationSession,
   submitCommittedTradeDeal,
   fetchStateSummary,
-  setLoading,
+  beginTask,
+  endTask,
 } from "../../core/api.js";
 import { num } from "../../core/guards.js";
 import { formatHeightIn, formatMoney, formatWeightLb, formatPickLabel, formatProtectionSummary, formatSwapAssetLabel, formatFixedAssetLabel } from "../../core/format.js";
@@ -119,11 +120,31 @@ function switchTradeBlockScope(scope) {
   });
 }
 
-function setMarketTradeInboxLoading(loading) {
-  state.marketTradeInboxLoading = !!loading;
+function syncMarketTradeInboxLoadingUi() {
+  const loading = !!state.marketTradeInboxLoading;
+  const loadingMessage = String(state.marketTradeInboxLoadingMessage || "").trim();
   if (els.marketTradeInboxLoading) {
     els.marketTradeInboxLoading.classList.toggle("hidden", !loading);
+    if (loading) {
+      const textEl = els.marketTradeInboxLoading.querySelector("span:last-child");
+      if (textEl) {
+        textEl.textContent = loadingMessage || "협상 inbox를 불러오는 중입니다...";
+      } else {
+        els.marketTradeInboxLoading.textContent = loadingMessage || "협상 inbox를 불러오는 중입니다...";
+      }
+    }
   }
+}
+
+function getMarketLoadingFallbackMessage() {
+  if (state.marketSubTab === "fa") return "FA 명단을 불러오는 중...";
+  if (state.marketSubTab === "trade-block") return "트레이드 블록 명단을 불러오는 중...";
+  return "목록을 불러오는 중...";
+}
+
+function getActiveMarketLoadingMessage() {
+  const message = String(state.marketLoadingMessage || "").trim();
+  return message || getMarketLoadingFallbackMessage();
 }
 
 function createEmptyTradeDealDraft(userTeamId, otherTeamId) {
@@ -429,6 +450,29 @@ function renderTradeDealEditor() {
   renderTradeDealTopPackage();
   renderTradeDealAssetTabs();
   renderMarketTradeDealDraftPreview();
+
+  const modalLoading = !!state.marketTradeDealModalLoading;
+  const modalLoadingMessage = String(state.marketTradeDealModalLoadingMessage || "").trim();
+  if (els.marketTradeDealLoading) {
+    els.marketTradeDealLoading.classList.toggle("hidden", !modalLoading);
+    const loadingTextEl = els.marketTradeDealLoading.querySelector("span:last-child");
+    const nextMessage = modalLoadingMessage || "협상을 처리하는 중입니다...";
+    if (loadingTextEl) loadingTextEl.textContent = nextMessage;
+    else els.marketTradeDealLoading.textContent = nextMessage;
+  }
+  if (modalLoading) {
+    setTradeDealEditorMessage(modalLoadingMessage || "협상을 처리하는 중입니다...");
+  }
+
+  if (els.marketTradeDealReject) {
+    els.marketTradeDealReject.disabled = modalLoading;
+    els.marketTradeDealReject.setAttribute("aria-busy", modalLoading ? "true" : "false");
+  }
+
+  const submitPending = !!state.marketTradeUi?.submitPending;
+  if (els.marketTradeDealSubmit) {
+    els.marketTradeDealSubmit.disabled = modalLoading || submitPending;
+  }
 }
 
 function extractTeamTradeAssets(summaryPayload, ownerTeamId) {
@@ -1146,6 +1190,7 @@ function renderMarketTradeInbox() {
 
   const grouped = Array.isArray(state.marketTradeInboxGrouped) ? state.marketTradeInboxGrouped : [];
   const totalRows = Array.isArray(state.marketTradeInboxRows) ? state.marketTradeInboxRows.length : 0;
+  syncMarketTradeInboxLoadingUi();
 
   summaryEl.textContent = `총 ${totalRows}건 · ${grouped.length}개 팀`;
   groupsEl.innerHTML = "";
@@ -1297,7 +1342,7 @@ async function loadMarketTradeInbox({ force = false } = {}) {
   const previousRows = Array.isArray(state.marketTradeInboxRows) ? [...state.marketTradeInboxRows] : [];
   const previousGroups = Array.isArray(state.marketTradeInboxGrouped) ? [...state.marketTradeInboxGrouped] : [];
 
-  setMarketTradeInboxLoading(true);
+  const taskId = beginTask("tradeInbox", "협상 inbox를 불러오는 중...");
   renderMarketTradeInbox();
   try {
     const payload = await fetchTradeNegotiationInbox({
@@ -1324,7 +1369,8 @@ async function loadMarketTradeInbox({ force = false } = {}) {
     }
     throw new Error(toFriendlyRuleMessage(error?.message || "제안 목록을 불러오지 못했습니다."));
   } finally {
-    setMarketTradeInboxLoading(false);
+    endTask(taskId);
+    renderMarketTradeInbox();
   }
 }
 
@@ -1333,7 +1379,7 @@ async function openTradeInboxSession(row) {
   if (!sessionId) throw new Error("협상을 열 세션 ID가 없습니다.");
   if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
 
-  setLoading(true, "협상 세션을 여는 중...");
+  const taskId = beginTask("tradeInbox", "협상 세션을 여는 중...");
   try {
     const result = await openTradeNegotiationSession({
       sessionId,
@@ -1356,7 +1402,8 @@ async function openTradeInboxSession(row) {
     }
     throw new Error(toFriendlyRuleMessage(msg || "협상 세션을 열지 못했습니다."));
   } finally {
-    setLoading(false);
+    endTask(taskId);
+    renderMarketTradeInbox();
   }
 }
 
@@ -1373,7 +1420,7 @@ async function rejectTradeInboxSession(row) {
   state.marketTradeInboxGrouped = groupInboxRowsByOtherTeam(state.marketTradeInboxRows);
   renderMarketTradeInbox();
 
-  setLoading(true, "제안을 거절하는 중...");
+  const taskId = beginTask("tradeInbox", "제안을 거절하는 중...");
   try {
     await rejectTradeNegotiationSession({
       sessionId,
@@ -1389,7 +1436,8 @@ async function rejectTradeInboxSession(row) {
     renderMarketTradeInbox();
     throw error;
   } finally {
-    setLoading(false);
+    endTask(taskId);
+    renderMarketTradeInbox();
   }
 }
 
@@ -1407,6 +1455,10 @@ function getFirstNumber(...values) {
 
 function renderFaSummary(rows) {
   if (!els.marketFaSummary) return;
+  if (state.marketSubTab === "fa" && state.marketLoadingMessage) {
+    els.marketFaSummary.textContent = getActiveMarketLoadingMessage();
+    return;
+  }
   const count = rows.length;
   const avgOvr = count ? Math.round(rows.reduce((acc, row) => acc + num(row?.overall, 0), 0) / count) : 0;
   els.marketFaSummary.textContent = `총 ${count}명 · 평균 OVR ${avgOvr}`;
@@ -1465,6 +1517,10 @@ function getTradeBlockDisplayRows(rows) {
 
 function renderTradeBlockSummary(rows) {
   if (!els.marketTradeBlockSummary) return;
+  if (state.marketSubTab === "trade-block" && state.marketLoadingMessage) {
+    els.marketTradeBlockSummary.textContent = getActiveMarketLoadingMessage();
+    return;
+  }
   const count = rows.length;
   const teamCount = new Set(rows.map((row) => String(row?.team_id || "").toUpperCase()).filter(Boolean)).size;
   els.marketTradeBlockSummary.textContent = `총 ${count}명 · ${teamCount}개 팀`;
@@ -1472,6 +1528,10 @@ function renderTradeBlockSummary(rows) {
 
 function renderTradeBlockMineSummary(rows) {
   if (!els.marketTradeBlockMineSummary) return;
+  if (state.marketSubTab === "trade-block" && state.marketLoadingMessage) {
+    els.marketTradeBlockMineSummary.textContent = getActiveMarketLoadingMessage();
+    return;
+  }
   const count = rows.length;
   els.marketTradeBlockMineSummary.textContent = count
     ? `내 팀 등록 선수 ${count}명`
@@ -1639,7 +1699,7 @@ function renderTradeBlockMineRows(rows) {
     const unlistBtn = tr.querySelector("[data-market-trade-unlist]");
     unlistBtn?.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      setLoading(true, "트레이드 블록에서 해제하는 중...");
+      const taskId = beginTask("market", "트레이드 블록에서 해제하는 중...");
       unlistPlayerFromTradeBlock(row.player_id)
         .then((out) => {
           if (out?.removed === false) {
@@ -1648,7 +1708,10 @@ function renderTradeBlockMineRows(rows) {
           return loadTradeBlockMineList();
         })
         .catch((e) => alert(e.message || "트레이드 블록 해제에 실패했습니다."))
-        .finally(() => setLoading(false));
+        .finally(() => {
+          endTask(taskId);
+          renderTradeBlockMineSummary(getTradeBlockDisplayRows(state.marketTradeBlockMyRows || []));
+        });
     });
 
     els.marketTradeBlockMineBody.appendChild(tr);
@@ -1760,11 +1823,13 @@ async function openTradeBlockScope(scope) {
   switchTradeBlockScope(scope);
   if (state.marketSubTab !== "trade-block") return;
   if (state.marketTradeBlockScope === "mine") {
-    setLoading(true, "내 팀 트레이드 블록 명단을 불러오는 중...");
+    const taskId = beginTask("market", "내 팀 트레이드 블록 명단을 불러오는 중...");
     try {
+      renderTradeBlockMineSummary(getTradeBlockDisplayRows(state.marketTradeBlockMyRows || []));
       await loadTradeBlockMineList();
     } finally {
-      setLoading(false);
+      endTask(taskId);
+      renderTradeBlockMineSummary(getTradeBlockDisplayRows(state.marketTradeBlockMyRows || []));
     }
   }
 }
@@ -1836,8 +1901,17 @@ async function openMarketSubTab(tab) {
     return;
   }
 
-  setLoading(true, state.marketSubTab === "fa" ? "FA 명단을 불러오는 중..." : "트레이드 블록 명단을 불러오는 중...");
+  const loadingMessage = state.marketSubTab === "fa" ? "FA 명단을 불러오는 중..." : "트레이드 블록 명단을 불러오는 중...";
+  const taskId = beginTask("market", loadingMessage);
   try {
+    if (state.marketSubTab === "fa") renderFaSummary(state.marketFaRows || []);
+    else {
+      if ((state.marketTradeBlockScope || "other") === "mine") {
+        renderTradeBlockMineSummary(getTradeBlockDisplayRows(state.marketTradeBlockMyRows || []));
+      } else {
+        renderTradeBlockSummary(getTradeBlockDisplayRows(state.marketTradeBlockRows || []));
+      }
+    }
     if (state.marketSubTab === "fa") await loadFaList();
     else {
       switchTradeBlockScope(state.marketTradeBlockScope || "other");
@@ -1845,7 +1919,15 @@ async function openMarketSubTab(tab) {
       else await loadTradeBlockList();
     }
   } finally {
-    setLoading(false);
+    endTask(taskId);
+    if (state.marketSubTab === "fa") renderFaSummary(getFaDisplayRows(state.marketFaRows || []));
+    else {
+      if ((state.marketTradeBlockScope || "other") === "mine") {
+        renderTradeBlockMineSummary(getTradeBlockDisplayRows(state.marketTradeBlockMyRows || []));
+      } else {
+        renderTradeBlockSummary(getTradeBlockDisplayRows(state.marketTradeBlockRows || []));
+      }
+    }
   }
 }
 
@@ -2054,7 +2136,7 @@ async function performMarketNegotiationAction(action) {
   const playerId = state.marketSelectedPlayerId;
   if (!playerId) throw new Error("먼저 FA 선수를 선택해주세요.");
 
-  setLoading(true, "협상 진행 중...");
+  const taskId = beginTask("global", "협상 진행 중...", { priority: 50 });
   try {
     const flags = getNegotiationUiFlags(state.marketNegotiation || {});
 
@@ -2083,7 +2165,7 @@ async function performMarketNegotiationAction(action) {
 
     await refreshSelectedMarketPlayerDetail();
   } finally {
-    setLoading(false);
+    endTask(taskId);
   }
 }
 
@@ -2118,8 +2200,14 @@ async function showMarketScreen() {
     els.marketTradeModalCancel?.addEventListener("click", closeTradeNegotiationModal);
     els.marketTradeModalBackdrop?.addEventListener("click", closeTradeNegotiationModal);
     els.marketTradeModalStart?.addEventListener("click", () => {
-      setLoading(true, "트레이드 협상 세션을 생성하는 중...");
-      startTradeNegotiationFromModal().catch((e) => alert(e.message)).finally(() => setLoading(false));
+      const taskId = beginTask("tradeDealModal", "트레이드 협상 세션을 생성하는 중...");
+      renderTradeDealEditor();
+      startTradeNegotiationFromModal()
+        .catch((e) => alert(e.message))
+        .finally(() => {
+          endTask(taskId);
+          renderTradeDealEditor();
+        });
     });
 
     els.marketTradeDealBackdrop?.addEventListener("click", closeTradeDealEditorModal);
@@ -2128,7 +2216,8 @@ async function showMarketScreen() {
     els.marketTradeDealSubmit?.addEventListener("click", () => {
       if (state.marketTradeUi?.submitPending) return;
       setTradeDealSubmitPending(true);
-      setLoading(true, "제안을 제출하는 중...");
+      const taskId = beginTask("tradeDealModal", "제안을 제출하는 중...");
+      renderTradeDealEditor();
       submitTradeDealDraft()
         .catch((e) => {
           const friendly = toFriendlyCommitErrorMessage(e?.message || "");
@@ -2137,7 +2226,8 @@ async function showMarketScreen() {
         })
         .finally(() => {
           setTradeDealSubmitPending(false);
-          setLoading(false);
+          endTask(taskId);
+          renderTradeDealEditor();
         });
     });
 
@@ -2146,8 +2236,14 @@ async function showMarketScreen() {
 
   if (!state.marketTradeBlockRosterModalBound) {
     els.marketTradeBlockRegisterBtn?.addEventListener("click", () => {
-      setLoading(true, "로스터를 불러오는 중...");
-      openTradeBlockRosterModal().catch((e) => alert(e.message)).finally(() => setLoading(false));
+      const taskId = beginTask("market", "로스터를 불러오는 중...");
+      renderTradeBlockMineSummary(getTradeBlockDisplayRows(state.marketTradeBlockMyRows || []));
+      openTradeBlockRosterModal()
+        .catch((e) => alert(e.message))
+        .finally(() => {
+          endTask(taskId);
+          renderTradeBlockMineSummary(getTradeBlockDisplayRows(state.marketTradeBlockMyRows || []));
+        });
     });
     els.marketTradeBlockRosterModalCancel?.addEventListener("click", closeTradeBlockRosterModal);
     els.marketTradeBlockRosterModalBackdrop?.addEventListener("click", closeTradeBlockRosterModal);
@@ -2160,7 +2256,8 @@ async function showMarketScreen() {
       renderTradeBlockRosterModalList(state.marketTradeBlockRosterRows || []);
     });
     els.marketTradeBlockRosterModalConfirm?.addEventListener("click", () => {
-      setLoading(true, "트레이드 블록에 등록하는 중...");
+      const taskId = beginTask("market", "트레이드 블록에 등록하는 중...");
+      renderTradeBlockMineSummary(getTradeBlockDisplayRows(state.marketTradeBlockMyRows || []));
       listPlayerToTradeBlock(state.marketTradeBlockSelectedRosterPlayerId)
         .then(() => loadTradeBlockMineList())
         .then(() => {
@@ -2168,7 +2265,10 @@ async function showMarketScreen() {
           alert("트레이드 블록 등록이 완료되었습니다.");
         })
         .catch((e) => alert(e.message || "트레이드 블록 등록에 실패했습니다."))
-        .finally(() => setLoading(false));
+        .finally(() => {
+          endTask(taskId);
+          renderTradeBlockMineSummary(getTradeBlockDisplayRows(state.marketTradeBlockMyRows || []));
+        });
     });
     state.marketTradeBlockRosterModalBound = true;
   }

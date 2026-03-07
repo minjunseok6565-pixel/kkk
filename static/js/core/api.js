@@ -445,9 +445,158 @@ async function prefetchCachedJson(params = {}) {
   }
 }
 
+const LOADING_TASK_SCOPES = ["global", "market", "tradeDealModal", "tradeInbox"];
+
+function normalizeTaskScope(scope) {
+  const normalized = String(scope || "").trim();
+  return LOADING_TASK_SCOPES.includes(normalized) ? normalized : "global";
+}
+
+function ensureLoadingTaskState() {
+  if (!state.loadingTasks || typeof state.loadingTasks !== "object") {
+    state.loadingTasks = {
+      nextTaskId: 1,
+      byScope: {
+        global: [],
+        market: [],
+        tradeDealModal: [],
+        tradeInbox: [],
+      },
+    };
+  }
+
+  if (!state.loadingTasks.byScope || typeof state.loadingTasks.byScope !== "object") {
+    state.loadingTasks.byScope = {};
+  }
+
+  LOADING_TASK_SCOPES.forEach((scope) => {
+    if (!Array.isArray(state.loadingTasks.byScope[scope])) {
+      state.loadingTasks.byScope[scope] = [];
+    }
+  });
+
+  const nextTaskId = Number(state.loadingTasks.nextTaskId);
+  state.loadingTasks.nextTaskId = Number.isFinite(nextTaskId) && nextTaskId > 0 ? nextTaskId : 1;
+  return state.loadingTasks;
+}
+
+function getActiveTasks(scope = "global") {
+  const loadingTasks = ensureLoadingTaskState();
+  const normalizedScope = normalizeTaskScope(scope);
+  return loadingTasks.byScope[normalizedScope];
+}
+
+function getTopTask(scope = "global") {
+  const tasks = getActiveTasks(scope);
+  if (!tasks.length) return null;
+  return tasks.reduce((best, task) => {
+    if (!best) return task;
+    const bestPriority = Number(best?.priority) || 0;
+    const taskPriority = Number(task?.priority) || 0;
+    if (taskPriority > bestPriority) return task;
+    if (taskPriority < bestPriority) return best;
+    const bestStartedAt = Number(best?.startedAt) || 0;
+    const taskStartedAt = Number(task?.startedAt) || 0;
+    return taskStartedAt >= bestStartedAt ? task : best;
+  }, null);
+}
+
+function applyLoadingPresentation(scope = "global") {
+  const normalizedScope = normalizeTaskScope(scope);
+  const tasks = getActiveTasks(normalizedScope);
+  const topTask = getTopTask(normalizedScope);
+  const activeCount = tasks.length;
+
+  if (normalizedScope === "global") {
+    if (els.loadingOverlay) {
+      els.loadingOverlay.classList.toggle("hidden", activeCount <= 0);
+    }
+    if (els.loadingText) {
+      const nextMessage = topTask?.message || "";
+      if (nextMessage) els.loadingText.textContent = nextMessage;
+    }
+    return;
+  }
+
+  if (normalizedScope === "tradeInbox") {
+    state.marketTradeInboxLoading = activeCount > 0;
+    state.marketTradeInboxLoadingMessage = topTask?.message || "";
+    return;
+  }
+
+  if (normalizedScope === "tradeDealModal") {
+    state.marketTradeDealModalLoading = activeCount > 0;
+    state.marketTradeDealModalLoadingMessage = topTask?.message || "";
+    return;
+  }
+
+  if (normalizedScope === "market") {
+    state.marketLoadingMessage = topTask?.message || "";
+  }
+}
+
+function beginTask(scope = "global", message = "", options = {}) {
+  const loadingTasks = ensureLoadingTaskState();
+  const normalizedScope = normalizeTaskScope(scope);
+  const sequence = loadingTasks.nextTaskId;
+  loadingTasks.nextTaskId += 1;
+  const task = {
+    id: `${normalizedScope}:${sequence}`,
+    scope: normalizedScope,
+    message: String(message || ""),
+    priority: Number(options?.priority) || 0,
+    startedAt: Date.now(),
+  };
+  if (options?.meta && typeof options.meta === "object") {
+    task.meta = options.meta;
+  }
+  loadingTasks.byScope[normalizedScope].push(task);
+  applyLoadingPresentation(normalizedScope);
+  return task.id;
+}
+
+function endTask(taskId) {
+  const targetId = String(taskId || "").trim();
+  if (!targetId) return false;
+  const loadingTasks = ensureLoadingTaskState();
+  for (const scope of LOADING_TASK_SCOPES) {
+    const tasks = loadingTasks.byScope[scope];
+    const nextTasks = tasks.filter((task) => String(task?.id || "") !== targetId);
+    if (nextTasks.length !== tasks.length) {
+      loadingTasks.byScope[scope] = nextTasks;
+      applyLoadingPresentation(scope);
+      return true;
+    }
+  }
+  return false;
+}
+
+function endTasksByScope(scope = "global") {
+  const normalizedScope = normalizeTaskScope(scope);
+  const loadingTasks = ensureLoadingTaskState();
+  if (!loadingTasks.byScope[normalizedScope].length) return 0;
+  const removed = loadingTasks.byScope[normalizedScope].length;
+  loadingTasks.byScope[normalizedScope] = [];
+  applyLoadingPresentation(normalizedScope);
+  return removed;
+}
+
+// TODO(bundle-2): remove compatibility shim once all callsites migrate to beginTask/endTask.
 function setLoading(show, msg = "") {
-  els.loadingOverlay.classList.toggle("hidden", !show);
-  if (msg) els.loadingText.textContent = msg;
+  if (show) {
+    if (state.__legacyGlobalLoadingTaskId) {
+      endTask(state.__legacyGlobalLoadingTaskId);
+      state.__legacyGlobalLoadingTaskId = null;
+    }
+    state.__legacyGlobalLoadingTaskId = beginTask("global", msg || "", { priority: 0, meta: { legacy: true } });
+    return;
+  }
+  if (state.__legacyGlobalLoadingTaskId) {
+    endTask(state.__legacyGlobalLoadingTaskId);
+    state.__legacyGlobalLoadingTaskId = null;
+    return;
+  }
+  endTasksByScope("global");
 }
 
 function showConfirmModal({ title, body, okLabel = "확인", cancelLabel = "취소" }) {
@@ -507,6 +656,12 @@ export {
   invalidateCacheKeys,
   clearAllCachedValues,
   prefetchCachedJson,
+  beginTask,
+  endTask,
+  endTasksByScope,
+  getActiveTasks,
+  getTopTask,
+  applyLoadingPresentation,
   setLoading,
   showConfirmModal,
 };

@@ -262,7 +262,10 @@
 
         <div class="roster-shell">
           <div class="roster-table-wrap">
-            <div id="market-trade-inbox-loading" class="subtitle">협상 inbox를 불러오는 중입니다...</div>
+            <div id="market-trade-inbox-loading" class="subtitle market-inline-loading" aria-live="polite">
+              <span class="market-inline-loading-spinner" aria-hidden="true"></span>
+              <span>협상 inbox를 불러오는 중입니다...</span>
+            </div>
             <p id="market-trade-inbox-empty" class="subtitle hidden">현재 확인할 제안/협상 내역이 없습니다.</p>
 
             <div id="market-trade-inbox-groups" class="market-trade-inbox-groups" aria-live="polite"></div>
@@ -1187,6 +1190,10 @@
           <div>
             <h4>협상 상태</h4>
             <div id="market-trade-deal-status" class="market-trade-deal-list"></div>
+            <div id="market-trade-deal-loading" class="subtitle market-inline-loading hidden" aria-live="polite">
+              <span class="market-inline-loading-spinner" aria-hidden="true"></span>
+              <span>협상을 처리하는 중입니다...</span>
+            </div>
             <div id="market-trade-deal-messages" class="market-trade-deal-list"></div>
           </div>
         </section>

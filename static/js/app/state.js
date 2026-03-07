@@ -32,7 +32,12 @@ const state = {
   marketTradeInboxRows: [],
   marketTradeInboxGrouped: [],
   marketTradeInboxLoading: false,
+  marketTradeInboxLoadingMessage: "",
   marketTradeInboxLastLoadedAt: 0,
+  marketTradeDealModalLoading: false,
+  marketTradeDealModalLoadingMessage: "",
+  marketLoadingMessage: "",
+  loadingTasks: createInitialLoadingTasks(),
   marketTradeActiveSession: null,
   marketTradeInitialOfferSnapshot: null,
   marketTradeLatestOfferSnapshot: null,
@@ -100,6 +105,18 @@ const state = {
   scoutingActiveScoutId: "",
 };
 
+function createInitialLoadingTasks() {
+  return {
+    nextTaskId: 1,
+    byScope: {
+      global: [],
+      market: [],
+      tradeDealModal: [],
+      tradeInbox: [],
+    },
+  };
+}
+
 function createEmptyMarketTradeDealDraft() {
   return {
     sessionId: null,
@@ -144,6 +161,7 @@ function resetMarketTradeInboxState() {
   state.marketTradeInboxRows = [];
   state.marketTradeInboxGrouped = [];
   state.marketTradeInboxLoading = false;
+  state.marketTradeInboxLoadingMessage = "";
   state.marketTradeInboxLastLoadedAt = 0;
 }
 
@@ -155,6 +173,13 @@ function resetMarketTradeDealState() {
   state.marketTradeDealTabs = createDefaultMarketTradeDealTabs();
   state.marketTradeAssetPool = createEmptyMarketTradeAssetPool();
   state.marketTradeUi = createEmptyMarketTradeUi();
+  state.marketTradeDealModalLoading = false;
+  state.marketTradeDealModalLoadingMessage = "";
+  state.marketLoadingMessage = "";
+}
+
+function resetLoadingTasks() {
+  state.loadingTasks = createInitialLoadingTasks();
 }
 
 function syncMarketTradeModalSessionState(sessionId, { keepTabsOnReopen = true } = {}) {
@@ -183,6 +208,7 @@ function syncMarketTradeModalSessionState(sessionId, { keepTabsOnReopen = true }
 function resetMarketTradeState() {
   resetMarketTradeInboxState();
   resetMarketTradeDealState();
+  resetLoadingTasks();
 }
 
 resetMarketTradeDealState();
@@ -194,8 +220,10 @@ export {
   createEmptyMarketTradeUi,
   createDefaultMarketTradeDealTabs,
   createEmptyMarketTradeOfferSnapshot,
+  createInitialLoadingTasks,
   resetMarketTradeInboxState,
   resetMarketTradeDealState,
+  resetLoadingTasks,
   resetMarketTradeState,
   syncMarketTradeModalSessionState,
 };

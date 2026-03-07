@@ -143,6 +143,7 @@ const els = {
   marketTradeDealAssetsOtherTeam: document.getElementById("market-trade-deal-assets-other-team"),
   marketTradeDealLegsPreview: document.getElementById("market-trade-deal-legs-preview"),
   marketTradeDealStatus: document.getElementById("market-trade-deal-status"),
+  marketTradeDealLoading: document.getElementById("market-trade-deal-loading"),
   marketTradeDealMessages: document.getElementById("market-trade-deal-messages"),
   marketTradeDealCancel: document.getElementById("market-trade-deal-cancel"),
   marketTradeDealReject: document.getElementById("market-trade-deal-reject"),
