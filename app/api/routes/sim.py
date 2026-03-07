@@ -12,6 +12,7 @@ from sim.league_sim import (
     progress_next_user_game_day,
     simulate_single_game,
 )
+from trades.orchestration import run_trade_orchestration_tick
 from state_modules.state_standings import apply_final_game, create_empty_standings_cache
 from app.schemas.common import (
     AdvanceLeagueRequest,
@@ -75,6 +76,45 @@ def _apply_standings_cache_incremental_updates(*, game_ids: Iterable[Any]) -> Di
     return {"candidates": len(target_ids), "applied": int(applied), "missing": int(missing)}
 
 
+def _run_daily_trade_orchestration(*, user_team_id: str) -> Dict[str, Any]:
+    """Run trade orchestration for the current in-game date and summarize outcome."""
+    user_tid = str(user_team_id or "").upper().strip()
+    if not user_tid:
+        return {
+            "ok": False,
+            "error": "MISSING_USER_TEAM_ID",
+            "message": "user_team_id is required for daily trade orchestration",
+        }
+
+    current = state.get_current_date_as_date()
+    try:
+        report = run_trade_orchestration_tick(
+            current_date=current,
+            user_team_id=user_tid,
+            dry_run=False,
+            validate_integrity=False,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": type(exc).__name__,
+            "tick_date": current.isoformat(),
+            "message": "daily trade orchestration failed",
+        }
+
+    promo = getattr(report, "promotion", None)
+    return {
+        "ok": True,
+        "tick_date": str(getattr(report, "tick_date", current.isoformat())),
+        "skipped": bool(getattr(report, "skipped", False)),
+        "skip_reason": str(getattr(report, "skip_reason", "") or ""),
+        "active_teams_count": len(getattr(report, "active_teams", []) or []),
+        "user_offer_sessions_created": len(getattr(promo, "user_offer_sessions", []) or []) if promo is not None else 0,
+        "executed_trade_events": len(getattr(promo, "executed_trade_events", []) or []) if promo is not None else 0,
+        "errors": list(getattr(promo, "errors", []) or []) if promo is not None else [],
+    }
+
+
 
 
 
@@ -135,6 +175,7 @@ async def api_advance_league(req: AdvanceLeagueRequest):
         "simulated_games": simulated,
         "college_checkpoints": college_checkpoints,
         "scouting_checkpoints": scouting_checkpoints,
+        "trade_orchestration": _run_daily_trade_orchestration(user_team_id=req.user_team_id),
     }
 
 
@@ -210,6 +251,7 @@ async def api_progress_next_user_game_day(req: ProgressNextUserGameDayRequest):
     )
     result["college_checkpoints"] = college_checkpoints
     result["scouting_checkpoints"] = scouting_checkpoints
+    result["trade_orchestration"] = _run_daily_trade_orchestration(user_team_id=req.user_team_id)
     return result
 
 
@@ -237,4 +279,5 @@ async def api_auto_advance_to_next_user_game_day(req: AutoAdvanceToNextUserGameD
     )
     result["college_checkpoints"] = college_checkpoints
     result["scouting_checkpoints"] = scouting_checkpoints
+    result["trade_orchestration"] = _run_daily_trade_orchestration(user_team_id=req.user_team_id)
     return result
