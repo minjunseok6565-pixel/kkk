@@ -192,8 +192,6 @@ def apply_ai_proactive_listings(
             continue
 
         buckets = {str(b).upper() for b in (getattr(player, "buckets", None) or tuple())}
-        if "CORE" in buckets:
-            continue
 
         lock = getattr(player, "lock", None)
         if bool(getattr(lock, "is_locked", False)):

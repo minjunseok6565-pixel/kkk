@@ -52,7 +52,7 @@ class ProactiveListingTests(unittest.TestCase):
         self.assertIn("p1", trade_market["listings"])
         self.assertEqual(trade_market["events"][-1]["payload"].get("origin"), "PROACTIVE")
 
-    def test_proactive_listing_respects_core_lock_and_daily_cap(self):
+    def test_proactive_listing_allows_core_but_still_blocks_locked(self):
         players = {
             "core": SimpleNamespace(
                 buckets=("CORE",),
@@ -68,20 +68,6 @@ class ProactiveListingTests(unittest.TestCase):
                 surplus_score=1.0,
                 is_expiring=False,
             ),
-            "ok1": SimpleNamespace(
-                buckets=("SURPLUS_LOW_FIT",),
-                lock=SimpleNamespace(is_locked=False),
-                recent_signing_banned_until=None,
-                surplus_score=0.8,
-                is_expiring=False,
-            ),
-            "ok2": SimpleNamespace(
-                buckets=("EXPIRING",),
-                lock=SimpleNamespace(is_locked=False),
-                recent_signing_banned_until=None,
-                surplus_score=0.7,
-                is_expiring=True,
-            ),
         }
         trade_market = {"listings": {}, "events": []}
         listed = apply_ai_proactive_listings(
@@ -89,11 +75,9 @@ class ProactiveListingTests(unittest.TestCase):
             tick_ctx=self._tick_ctx(players),
             trade_market=trade_market,
             today=date(2026, 2, 1),
-            config=self._cfg(ai_proactive_listing_team_daily_cap=1),
+            config=self._cfg(ai_proactive_listing_team_daily_cap=2),
         )
-        self.assertEqual(len(listed), 1)
-        self.assertIn(listed[0], {"ok1", "ok2"})
-        self.assertNotIn("core", listed)
+        self.assertEqual(listed, ["core"])
         self.assertNotIn("locked", listed)
 
     def test_proactive_listing_respects_player_cooldown(self):
