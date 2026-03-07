@@ -19,6 +19,7 @@ from app.schemas.common import (
     AdvanceLeagueRequest,
     AutoAdvanceToNextUserGameDayRequest,
     ProgressNextUserGameDayRequest,
+    ProgressUserGamesBatchRequest,
     SimGameRequest,
 )
 
@@ -283,6 +284,23 @@ def _run_monthly_checkpoints(*, db_path: str, from_date: str, to_date: str, api_
     return college_checkpoints, scouting_checkpoints
 
 
+def _collect_progress_game_ids(result: Dict[str, Any]) -> list[str]:
+    game_ids: list[str] = []
+    auto_ids = ((result.get("auto_advance") or {}).get("simulated_game_ids") or []) if isinstance(result, dict) else []
+    if isinstance(auto_ids, list):
+        game_ids.extend([str(x) for x in auto_ids])
+
+    user_gid = (((result.get("game_day") or {}).get("user_game") or {}).get("game_id")) if isinstance(result, dict) else None
+    if user_gid:
+        game_ids.append(str(user_gid))
+
+    other_ids = ((result.get("game_day") or {}).get("other_game_ids") or []) if isinstance(result, dict) else []
+    if isinstance(other_ids, list):
+        game_ids.extend([str(x) for x in other_ids])
+
+    return _iter_unique_game_ids(game_ids)
+
+
 @router.post("/api/game/progress-next-user-game-day")
 async def api_progress_next_user_game_day(req: ProgressNextUserGameDayRequest):
     prev_date = state.get_current_date_as_date().isoformat()
@@ -300,16 +318,7 @@ async def api_progress_next_user_game_day(req: ProgressNextUserGameDayRequest):
             raise HTTPException(status_code=409, detail=msg)
         raise HTTPException(status_code=400, detail=msg)
 
-    game_ids: list[str] = []
-    auto_ids = ((result.get("auto_advance") or {}).get("simulated_game_ids") or []) if isinstance(result, dict) else []
-    if isinstance(auto_ids, list):
-        game_ids.extend([str(x) for x in auto_ids])
-    user_gid = (((result.get("game_day") or {}).get("user_game") or {}).get("game_id")) if isinstance(result, dict) else None
-    if user_gid:
-        game_ids.append(str(user_gid))
-    other_ids = ((result.get("game_day") or {}).get("other_game_ids") or []) if isinstance(result, dict) else []
-    if isinstance(other_ids, list):
-        game_ids.extend([str(x) for x in other_ids])
+    game_ids = _collect_progress_game_ids(result if isinstance(result, dict) else {})
     _apply_standings_cache_incremental_updates(game_ids=game_ids)
 
     current_after = state.get_current_date_as_date().isoformat()
@@ -328,6 +337,100 @@ async def api_progress_next_user_game_day(req: ProgressNextUserGameDayRequest):
         to_inclusive=current_after,
     )
     return result
+
+
+@router.post("/api/game/progress-user-games-batch")
+async def api_progress_user_games_batch(req: ProgressUserGamesBatchRequest):
+    requested_games = int(req.games_to_play)
+    iterations: list[dict[str, Any]] = []
+
+    all_simulated_game_ids: list[str] = []
+    user_game_ids: list[str] = []
+    other_game_ids: list[str] = []
+    auto_advanced_game_ids: list[str] = []
+
+    stopped_reason: str | None = None
+
+    for idx in range(1, requested_games + 1):
+        prev_date = state.get_current_date_as_date().isoformat()
+
+        try:
+            result = progress_next_user_game_day(req.user_team_id, mode="auto_if_needed")
+        except ValueError as e:
+            msg = str(e)
+            if msg.startswith("NO_NEXT_USER_GAME"):
+                stopped_reason = msg
+                break
+            if msg.startswith("INVALID_MODE"):
+                raise HTTPException(status_code=400, detail=msg)
+            if msg.startswith("USER_GAME_NOT_TODAY"):
+                raise HTTPException(status_code=409, detail=msg)
+            if msg.startswith("USER_GAME_ALREADY_FINAL"):
+                raise HTTPException(status_code=409, detail=msg)
+            raise HTTPException(status_code=400, detail=msg)
+
+        game_ids = _collect_progress_game_ids(result if isinstance(result, dict) else {})
+        _apply_standings_cache_incremental_updates(game_ids=game_ids)
+
+        current_after = state.get_current_date_as_date().isoformat()
+        db_path = state.get_db_path()
+        college_checkpoints, scouting_checkpoints = _run_monthly_checkpoints(
+            db_path=str(db_path),
+            from_date=str(prev_date),
+            to_date=str(current_after),
+            api_key=req.apiKey,
+        )
+        trade_orchestration = _run_trade_orchestration_catchup(
+            user_team_id=req.user_team_id,
+            from_exclusive=prev_date,
+            to_inclusive=current_after,
+        )
+
+        auto_ids = ((result.get("auto_advance") or {}).get("simulated_game_ids") or []) if isinstance(result, dict) else []
+        auto_ids = [str(gid) for gid in auto_ids if gid]
+        user_gid = (((result.get("game_day") or {}).get("user_game") or {}).get("game_id")) if isinstance(result, dict) else None
+        other_ids = ((result.get("game_day") or {}).get("other_game_ids") or []) if isinstance(result, dict) else []
+        other_ids = [str(gid) for gid in other_ids if gid]
+
+        auto_advanced_game_ids.extend(auto_ids)
+        if user_gid:
+            user_game_ids.append(str(user_gid))
+        other_game_ids.extend(other_ids)
+        all_simulated_game_ids.extend(game_ids)
+
+        iterations.append({
+            "index": idx,
+            "current_date_before": prev_date,
+            "current_date_after": current_after,
+            "target_user_game_date": (result.get("target_user_game_date") if isinstance(result, dict) else None),
+            "mode": (result.get("mode") if isinstance(result, dict) else None),
+            "simulated_game_ids": game_ids,
+            "simulated_count": len(game_ids),
+            "user_game_id": str(user_gid) if user_gid else None,
+            "college_checkpoints": college_checkpoints,
+            "scouting_checkpoints": scouting_checkpoints,
+            "trade_orchestration": trade_orchestration,
+        })
+
+    current_after_all = state.get_current_date_as_date().isoformat()
+    played_games = len(user_game_ids)
+
+    return {
+        "ok": True,
+        "user_team_id": str(req.user_team_id or "").upper(),
+        "requested_games": requested_games,
+        "played_games": played_games,
+        "stopped_reason": stopped_reason,
+        "current_date_after": current_after_all,
+        "iterations": iterations,
+        "totals": {
+            "simulated_game_count": len(all_simulated_game_ids),
+            "all_simulated_game_ids": _iter_unique_game_ids(all_simulated_game_ids),
+            "user_game_ids": _iter_unique_game_ids(user_game_ids),
+            "other_game_ids": _iter_unique_game_ids(other_game_ids),
+            "auto_advanced_game_ids": _iter_unique_game_ids(auto_advanced_game_ids),
+        },
+    }
 
 
 @router.post("/api/game/auto-advance-to-next-user-game-day")
