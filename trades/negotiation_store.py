@@ -101,7 +101,37 @@ def _ensure_session_schema(session: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(session.get("market_context"), dict):
         session["market_context"] = {}
 
+    last_request_keys = session.get("last_request_keys")
+    if not isinstance(last_request_keys, dict):
+        last_request_keys = {}
+        session["last_request_keys"] = last_request_keys
+
     return session
+
+
+def _normalize_idempotency_key(raw: Optional[str]) -> str:
+    return str(raw or "").strip()
+
+
+def _is_already_processed_key(session: Dict[str, Any], scope: str, key: str) -> bool:
+    scope_key = str(scope or "").strip()
+    idem_key = _normalize_idempotency_key(key)
+    if not scope_key or not idem_key:
+        return False
+    last_request_keys = session.get("last_request_keys") if isinstance(session.get("last_request_keys"), dict) else {}
+    return str(last_request_keys.get(scope_key) or "") == idem_key
+
+
+def _remember_processed_key(session: Dict[str, Any], scope: str, key: str) -> None:
+    scope_key = str(scope or "").strip()
+    idem_key = _normalize_idempotency_key(key)
+    if not scope_key or not idem_key:
+        return
+    last_request_keys = session.get("last_request_keys")
+    if not isinstance(last_request_keys, dict):
+        last_request_keys = {}
+        session["last_request_keys"] = last_request_keys
+    last_request_keys[scope_key] = idem_key
 
 
 def _load_session_or_404(session_id: str) -> Dict[str, Any]:
@@ -336,14 +366,18 @@ def set_last_counter(session_id: str, payload: Any) -> None:
     _atomic_update(session_id, _patch)
 
 
-def close_as_rejected(session_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
+def close_as_rejected(session_id: str, reason: Optional[str] = None, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
     reason_text = str(reason or "").strip()
+    idem_key = _normalize_idempotency_key(idempotency_key)
     idempotent = False
 
     def _patch(session: Dict[str, Any]) -> None:
         nonlocal idempotent
         current_phase = str(session.get("phase") or "").upper()
         current_status = str(session.get("status") or "").upper()
+        if _is_already_processed_key(session, "reject", idem_key):
+            idempotent = True
+            return
         if current_phase == "REJECTED" and current_status == "CLOSED":
             idempotent = True
             return
@@ -361,6 +395,7 @@ def close_as_rejected(session_id: str, reason: Optional[str] = None) -> Dict[str
                 "text": f"REJECTED: {reason_text}",
                 "at": _now_iso(),
             })
+        _remember_processed_key(session, "reject", idem_key)
 
     updated = _atomic_update(session_id, _patch)
     return {"session": updated, "idempotent": bool(idempotent)}
@@ -416,13 +451,18 @@ def mark_auto_ended(
     return {"session": updated, "idempotent": bool(idempotent)}
 
 
-def open_inbox_session(session_id: str) -> Dict[str, Any]:
+def open_inbox_session(session_id: str, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
+    idem_key = _normalize_idempotency_key(idempotency_key)
     idempotent = False
 
     def _patch(session: Dict[str, Any]) -> None:
         nonlocal idempotent
         phase = str(session.get("phase") or "INIT").upper()
         status = str(session.get("status") or "ACTIVE").upper()
+
+        if _is_already_processed_key(session, "open", idem_key):
+            idempotent = True
+            return
 
         if status != "ACTIVE":
             raise TradeError(
@@ -433,10 +473,12 @@ def open_inbox_session(session_id: str) -> Dict[str, Any]:
 
         if phase in {"NEGOTIATING", "COUNTER_PENDING"}:
             idempotent = True
+            _remember_processed_key(session, "open", idem_key)
             return
 
         if phase in {"INIT", "INBOX_PENDING"}:
             session["phase"] = "NEGOTIATING"
+            _remember_processed_key(session, "open", idem_key)
             return
 
         raise TradeError(
@@ -454,12 +496,14 @@ def mark_committed_and_close(
     *,
     deal_id: str,
     expires_at: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     deal_id_s = str(deal_id or "").strip()
     if not deal_id_s:
         raise TradeError("DEAL_INVALIDATED", "deal_id is required", {"session_id": session_id})
 
     expires_value = expires_at if isinstance(expires_at, str) else None
+    idem_key = _normalize_idempotency_key(idempotency_key)
     idempotent = False
 
     def _patch(session: Dict[str, Any]) -> None:
@@ -467,6 +511,10 @@ def mark_committed_and_close(
         status = str(session.get("status") or "").upper()
         phase = str(session.get("phase") or "").upper()
         cur_deal = str(session.get("committed_deal_id") or "").strip()
+
+        if _is_already_processed_key(session, "commit", idem_key):
+            idempotent = True
+            return
 
         if status == "CLOSED" and phase == "ACCEPTED" and cur_deal == deal_id_s:
             idempotent = True
@@ -490,6 +538,7 @@ def mark_committed_and_close(
         session["status"] = "CLOSED"
         session["phase"] = "ACCEPTED"
         session["valid_until"] = expires_value
+        _remember_processed_key(session, "commit", idem_key)
 
     updated = _atomic_update(session_id, _patch)
     return {"session": updated, "idempotent": bool(idempotent)}

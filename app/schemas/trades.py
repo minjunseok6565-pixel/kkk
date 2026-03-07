@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from pydantic import BaseModel
+from pydantic import BaseModel, constr
+
+IdempotencyKey = constr(pattern=r"^[A-Za-z0-9_-]{8,128}$")
 
 
 class TradeSubmitRequest(BaseModel):
@@ -11,6 +13,7 @@ class TradeSubmitRequest(BaseModel):
 
 class TradeSubmitCommittedRequest(BaseModel):
     deal_id: str
+    idempotency_key: IdempotencyKey | None = None
 
 
 class TradeNegotiationStartRequest(BaseModel):
@@ -24,6 +27,7 @@ class TradeNegotiationCommitRequest(BaseModel):
     deal: Dict[str, Any]
     offer_privacy: str = "PRIVATE"
     expose_to_media: bool = False
+    idempotency_key: IdempotencyKey | None = None
 
 
 class TradeBlockListRequest(BaseModel):
@@ -78,8 +82,10 @@ class TradeNegotiationRejectRequest(BaseModel):
     session_id: str
     team_id: str
     reason: str = ""
+    idempotency_key: IdempotencyKey | None = None
 
 
 class TradeNegotiationOpenRequest(BaseModel):
     session_id: str
     team_id: str
+    idempotency_key: IdempotencyKey | None = None

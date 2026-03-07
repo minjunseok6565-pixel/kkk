@@ -33,7 +33,19 @@ const state = {
   marketTradeInboxGrouped: [],
   marketTradeInboxLoading: false,
   marketTradeInboxLastLoadedAt: 0,
+  marketScreenActive: false,
+  tradeDealModalOpen: false,
   marketTradeActiveSession: null,
+  marketTradeSessionFsm: {
+    status: "idle",
+    sessionId: null,
+    updatedAt: null,
+    reason: "",
+  },
+  marketTradeRequestSeq: 0,
+  marketTradeRequestScopes: {},
+  marketTradePendingActions: {},
+  marketTaskQueueByScope: {},
   marketTradeInitialOfferSnapshot: null,
   marketTradeLatestOfferSnapshot: null,
   marketTradeDealDraft: null,
@@ -140,6 +152,70 @@ function createEmptyMarketTradeOfferSnapshot() {
   };
 }
 
+function getInitialMarketTradeSessionFsm() {
+  return {
+    status: "idle",
+    sessionId: null,
+    updatedAt: null,
+    reason: "",
+  };
+}
+
+function canTransitionMarketTradeSessionFsm(fromStatus, toStatus) {
+  const from = String(fromStatus || "idle");
+  const to = String(toStatus || "");
+  if (!to) return false;
+
+  const allowedMap = {
+    idle: new Set(["opening"]),
+    opening: new Set(["ready", "closed"]),
+    ready: new Set(["submitting", "closed"]),
+    submitting: new Set(["ready", "closed"]),
+    closed: new Set(["opening", "idle"]),
+  };
+
+  return Boolean(allowedMap[from]?.has(to));
+}
+
+function transitionMarketTradeSessionFsm(nextStatus, { sessionId = null, reason = "", strict = true } = {}) {
+  const current = state.marketTradeSessionFsm || getInitialMarketTradeSessionFsm();
+  const from = String(current?.status || "idle");
+  const to = String(nextStatus || "");
+  const valid = canTransitionMarketTradeSessionFsm(from, to);
+
+  if (!valid && strict) {
+    console.warn("[trade-fsm] ignored invalid transition", {
+      from,
+      to,
+      currentSessionId: current?.sessionId ?? null,
+      nextSessionId: sessionId == null ? null : String(sessionId),
+      reason: String(reason || ""),
+    });
+    return {
+      ok: false,
+      ignored: true,
+      from,
+      to,
+      current: state.marketTradeSessionFsm,
+    };
+  }
+
+  const next = {
+    status: to || from,
+    sessionId: sessionId == null ? null : String(sessionId),
+    updatedAt: new Date().toISOString(),
+    reason: String(reason || ""),
+  };
+  state.marketTradeSessionFsm = next;
+  return {
+    ok: true,
+    ignored: false,
+    from,
+    to: next.status,
+    current: next,
+  };
+}
+
 function resetMarketTradeInboxState() {
   state.marketTradeInboxRows = [];
   state.marketTradeInboxGrouped = [];
@@ -149,6 +225,11 @@ function resetMarketTradeInboxState() {
 
 function resetMarketTradeDealState() {
   state.marketTradeActiveSession = null;
+  state.tradeDealModalOpen = false;
+  state.marketTradeSessionFsm = getInitialMarketTradeSessionFsm();
+  state.marketTradeRequestScopes = {};
+  state.marketTradePendingActions = {};
+  state.marketTaskQueueByScope = {};
   state.marketTradeInitialOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
   state.marketTradeLatestOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
   state.marketTradeDealDraft = createEmptyMarketTradeDealDraft();
@@ -159,25 +240,39 @@ function resetMarketTradeDealState() {
 
 function syncMarketTradeModalSessionState(sessionId, { keepTabsOnReopen = true } = {}) {
   const nextSessionId = sessionId == null ? null : String(sessionId);
-  const currentSessionId = state.marketTradeActiveSession?.session_id
+  const prevSessionId = state.marketTradeActiveSession?.session_id
     ? String(state.marketTradeActiveSession.session_id)
     : null;
-  const isSameSession = Boolean(nextSessionId) && Boolean(currentSessionId) && nextSessionId === currentSessionId;
+  const isSameSession = Boolean(nextSessionId) && Boolean(prevSessionId) && nextSessionId === prevSessionId;
 
-  // 세션이 바뀌면 스냅샷/탭/UI 상태를 reset한다.
+  // 세션이 바뀌면 협상 모달 컨텍스트를 reset한다.
   if (!isSameSession) {
+    state.marketTradeActiveSession = null;
+    state.marketTradeDealDraft = createEmptyMarketTradeDealDraft();
+    state.marketTradeAssetPool = createEmptyMarketTradeAssetPool();
     state.marketTradeInitialOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
     state.marketTradeLatestOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
     state.marketTradeDealTabs = createDefaultMarketTradeDealTabs();
     state.marketTradeUi = createEmptyMarketTradeUi();
-    return { isSameSession: false, didReset: true };
+    state.marketTradeSessionFsm = getInitialMarketTradeSessionFsm();
+    return {
+      isSameSession: false,
+      didReset: true,
+      prevSessionId,
+      nextSessionId,
+    };
   }
 
   // 동일 세션 재오픈 시 탭 유지 정책을 선택적으로 적용한다.
   if (!keepTabsOnReopen) {
     state.marketTradeDealTabs = createDefaultMarketTradeDealTabs();
   }
-  return { isSameSession: true, didReset: false };
+  return {
+    isSameSession: true,
+    didReset: false,
+    prevSessionId,
+    nextSessionId,
+  };
 }
 
 function resetMarketTradeState() {
@@ -194,6 +289,9 @@ export {
   createEmptyMarketTradeUi,
   createDefaultMarketTradeDealTabs,
   createEmptyMarketTradeOfferSnapshot,
+  getInitialMarketTradeSessionFsm,
+  canTransitionMarketTradeSessionFsm,
+  transitionMarketTradeSessionFsm,
   resetMarketTradeInboxState,
   resetMarketTradeDealState,
   resetMarketTradeState,

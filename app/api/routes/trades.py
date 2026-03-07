@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import date, timedelta, datetime
 from typing import Any, Dict, List, Optional
 
+import hashlib
+import json
 import sqlite3
+import time
 
 from fastapi import APIRouter, HTTPException
 
@@ -51,10 +54,107 @@ from agency.service import apply_trade_offer_grievances
 
 router = APIRouter()
 
+_IDEMPOTENCY_CACHE_TTL_S = 120
+_idempotency_result_cache: Dict[str, Dict[str, Any]] = {}
+
 
 def _normalize_offer_privacy(raw: Any, *, default: str = "PRIVATE") -> str:
     v = str(raw or default).upper()
     return "PUBLIC" if v == "PUBLIC" else "PRIVATE"
+
+
+def _normalize_idempotency_key(raw: Any) -> str:
+    return str(raw or "").strip()
+
+
+def _hash_payload(payload: Any) -> str:
+    try:
+        serialized = str(payload) if isinstance(payload, str) else json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    except Exception:
+        serialized = str(payload)
+    return hashlib.sha1(serialized.encode("utf-8")).hexdigest()
+
+
+def _make_idempotency_cache_key(*, scope: str, session_id: str, team_id: str, key: str) -> str:
+    return "::".join([
+        str(scope or "").strip() or "unknown",
+        str(session_id or "").strip() or "none",
+        str(team_id or "").strip().upper() or "none",
+        _normalize_idempotency_key(key),
+    ])
+
+
+def _gc_idempotency_cache(now_ts: Optional[float] = None) -> None:
+    now = float(now_ts or time.time())
+    stale_keys = [
+        cache_key
+        for cache_key, entry in _idempotency_result_cache.items()
+        if now - float(entry.get("created_at") or 0.0) > _IDEMPOTENCY_CACHE_TTL_S
+    ]
+    for cache_key in stale_keys:
+        _idempotency_result_cache.pop(cache_key, None)
+
+
+def _idempotency_replay_guard(
+    *,
+    scope: str,
+    session_id: str,
+    team_id: str,
+    key: str,
+    payload_hash: str,
+) -> Optional[Dict[str, Any]]:
+    idem_key = _normalize_idempotency_key(key)
+    if not idem_key:
+        return None
+
+    _gc_idempotency_cache()
+    cache_key = _make_idempotency_cache_key(
+        scope=scope,
+        session_id=session_id,
+        team_id=team_id,
+        key=idem_key,
+    )
+    cached = _idempotency_result_cache.get(cache_key)
+    if not cached:
+        return None
+
+    if str(cached.get("payload_hash") or "") != str(payload_hash or ""):
+        raise TradeError(
+            "NEGOTIATION_IDEMPOTENCY_CONFLICT",
+            "idempotency_key already used with a different payload",
+            {"scope": scope, "session_id": session_id, "team_id": team_id},
+        )
+
+    out = dict(cached.get("response") or {})
+    out["idempotent"] = True
+    out["idempotency_key"] = idem_key
+    return out
+
+
+def _store_idempotency_response(
+    *,
+    scope: str,
+    session_id: str,
+    team_id: str,
+    key: str,
+    payload_hash: str,
+    response_payload: Dict[str, Any],
+) -> None:
+    idem_key = _normalize_idempotency_key(key)
+    if not idem_key:
+        return
+    _gc_idempotency_cache()
+    cache_key = _make_idempotency_cache_key(
+        scope=scope,
+        session_id=session_id,
+        team_id=team_id,
+        key=idem_key,
+    )
+    _idempotency_result_cache[cache_key] = {
+        "created_at": time.time(),
+        "payload_hash": str(payload_hash or ""),
+        "response": dict(response_payload or {}),
+    }
 
 
 def _extract_outgoing_player_ids_for_team(deal_payload: Dict[str, Any], *, from_team_id: str) -> List[str]:
@@ -880,6 +980,19 @@ async def api_trade_submit(req: TradeSubmitRequest):
 @router.post("/api/trade/submit-committed")
 async def api_trade_submit_committed(req: TradeSubmitCommittedRequest):
     try:
+        idem_key = _normalize_idempotency_key(getattr(req, "idempotency_key", None))
+        scope = "submit-committed"
+        payload_hash = _hash_payload({"deal_id": req.deal_id})
+        replay = _idempotency_replay_guard(
+            scope=scope,
+            session_id=str(req.deal_id),
+            team_id="",
+            key=idem_key,
+            payload_hash=payload_hash,
+        )
+        if isinstance(replay, dict):
+            return replay
+
         in_game_date = state.get_current_date_as_date()
         db_path = state.get_db_path()
         agreements.gc_expired_agreements(current_date=in_game_date)
@@ -906,7 +1019,23 @@ async def api_trade_submit_committed(req: TradeSubmitCommittedRequest):
                 if pid:
                     moved_ids.append(str(pid))
         _try_ui_cache_refresh_players(moved_ids, context="trade.submit_committed")
-        return {"ok": True, "deal_id": req.deal_id, "transaction": transaction}
+        response = {
+            "ok": True,
+            "deal_id": req.deal_id,
+            "transaction": transaction,
+            "idempotent": False,
+        }
+        if idem_key:
+            response["idempotency_key"] = idem_key
+            _store_idempotency_response(
+                scope=scope,
+                session_id=str(req.deal_id),
+                team_id="",
+                key=idem_key,
+                payload_hash=payload_hash,
+                response_payload=response,
+            )
+        return response
     except TradeError as exc:
         return _trade_error_response(exc)
 
@@ -939,9 +1068,22 @@ async def api_trade_negotiation_start(req: TradeNegotiationStartRequest):
 @router.post("/api/trade/negotiation/open")
 async def api_trade_negotiation_open(req: TradeNegotiationOpenRequest):
     try:
+        idem_key = _normalize_idempotency_key(getattr(req, "idempotency_key", None))
         team_id = str(req.team_id or "").upper().strip()
         if not team_id:
             raise TradeError("NEGOTIATION_BAD_QUERY", "team_id is required")
+
+        scope = "negotiation-open"
+        payload_hash = _hash_payload({"session_id": req.session_id, "team_id": team_id})
+        replay = _idempotency_replay_guard(
+            scope=scope,
+            session_id=str(req.session_id),
+            team_id=team_id,
+            key=idem_key,
+            payload_hash=payload_hash,
+        )
+        if isinstance(replay, dict):
+            return replay
 
         session = negotiation_store.get_session(req.session_id)
         owner_team_id = str(session.get("user_team_id") or "").upper().strip()
@@ -983,17 +1125,28 @@ async def api_trade_negotiation_open(req: TradeNegotiationOpenRequest):
                 },
             )
 
-        result = negotiation_store.open_inbox_session(req.session_id)
+        result = negotiation_store.open_inbox_session(req.session_id, idempotency_key=idem_key)
         updated = result.get("session") if isinstance(result, dict) else None
         if not isinstance(updated, dict):
             updated = negotiation_store.get_session(req.session_id)
 
-        return {
+        response = {
             "ok": True,
             "session": updated,
             "opened": True,
             "idempotent": bool((result or {}).get("idempotent")) if isinstance(result, dict) else False,
         }
+        if idem_key:
+            response["idempotency_key"] = idem_key
+            _store_idempotency_response(
+                scope=scope,
+                session_id=str(req.session_id),
+                team_id=team_id,
+                key=idem_key,
+                payload_hash=payload_hash,
+                response_payload=response,
+            )
+        return response
     except TradeError as exc:
         return _trade_error_response(exc)
 
@@ -1001,9 +1154,22 @@ async def api_trade_negotiation_open(req: TradeNegotiationOpenRequest):
 @router.post("/api/trade/negotiation/reject")
 async def api_trade_negotiation_reject(req: TradeNegotiationRejectRequest):
     try:
+        idem_key = _normalize_idempotency_key(getattr(req, "idempotency_key", None))
         team_id = str(req.team_id or "").upper().strip()
         if not team_id:
             raise TradeError("NEGOTIATION_BAD_QUERY", "team_id is required")
+
+        scope = "negotiation-reject"
+        payload_hash = _hash_payload({"session_id": req.session_id, "team_id": team_id, "reason": req.reason})
+        replay = _idempotency_replay_guard(
+            scope=scope,
+            session_id=str(req.session_id),
+            team_id=team_id,
+            key=idem_key,
+            payload_hash=payload_hash,
+        )
+        if isinstance(replay, dict):
+            return replay
 
         session = negotiation_store.get_session(req.session_id)
         owner_team_id = str(session.get("user_team_id") or "").upper().strip()
@@ -1014,12 +1180,12 @@ async def api_trade_negotiation_reject(req: TradeNegotiationRejectRequest):
                 {"session_id": str(req.session_id), "team_id": team_id, "owner_team_id": owner_team_id or None},
             )
 
-        result = negotiation_store.close_as_rejected(req.session_id, reason=req.reason)
+        result = negotiation_store.close_as_rejected(req.session_id, reason=req.reason, idempotency_key=idem_key)
         updated = result.get("session") if isinstance(result, dict) else None
         if not isinstance(updated, dict):
             updated = negotiation_store.get_session(req.session_id)
 
-        return {
+        response = {
             "ok": True,
             "session_id": str(updated.get("session_id") or req.session_id),
             "status": str(updated.get("status") or "CLOSED").upper(),
@@ -1027,6 +1193,17 @@ async def api_trade_negotiation_reject(req: TradeNegotiationRejectRequest):
             "rejected": True,
             "idempotent": bool((result or {}).get("idempotent")) if isinstance(result, dict) else False,
         }
+        if idem_key:
+            response["idempotency_key"] = idem_key
+            _store_idempotency_response(
+                scope=scope,
+                session_id=str(req.session_id),
+                team_id=team_id,
+                key=idem_key,
+                payload_hash=payload_hash,
+                response_payload=response,
+            )
+        return response
     except TradeError as exc:
         return _trade_error_response(exc)
 
@@ -1034,9 +1211,43 @@ async def api_trade_negotiation_reject(req: TradeNegotiationRejectRequest):
 @router.post("/api/trade/negotiation/commit")
 async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
     try:
+        idem_key = _normalize_idempotency_key(getattr(req, "idempotency_key", None))
+        scope = "negotiation-commit"
+        payload_hash = _hash_payload({
+            "session_id": req.session_id,
+            "deal": req.deal,
+            "offer_privacy": getattr(req, "offer_privacy", None),
+            "expose_to_media": bool(getattr(req, "expose_to_media", False)),
+        })
         in_game_date = state.get_current_date_as_date()
         db_path = state.get_db_path()
         session = negotiation_store.get_session(req.session_id)
+        owner_team_id = str(session.get("user_team_id") or "").upper().strip()
+
+        replay = _idempotency_replay_guard(
+            scope=scope,
+            session_id=str(req.session_id),
+            team_id=owner_team_id,
+            key=idem_key,
+            payload_hash=payload_hash,
+        )
+        if isinstance(replay, dict):
+            return replay
+
+        def _finalize_commit_response(payload: Dict[str, Any]) -> Dict[str, Any]:
+            out = dict(payload or {})
+            out.setdefault("idempotent", False)
+            if idem_key:
+                out["idempotency_key"] = idem_key
+                _store_idempotency_response(
+                    scope=scope,
+                    session_id=str(req.session_id),
+                    team_id=owner_team_id,
+                    key=idem_key,
+                    payload_hash=payload_hash,
+                    response_payload=out,
+                )
+            return out
 
         idempotent_payload = _ensure_session_ready_for_commit(
             session,
@@ -1044,7 +1255,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
             today=in_game_date,
         )
         if isinstance(idempotent_payload, dict):
-            return idempotent_payload
+            return _finalize_commit_response(idempotent_payload)
 
         deal = canonicalize_deal(parse_deal(req.deal))
         team_ids = {session["user_team_id"].upper(), session["other_team_id"].upper()}
@@ -1101,6 +1312,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                         req.session_id,
                         deal_id=str(committed["deal_id"]),
                         expires_at=committed.get("expires_at"),
+                        idempotency_key=idem_key,
                     )
 
                     fast_decision = DealDecision(
@@ -1143,7 +1355,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                     except Exception:
                         pass
 
-                    return {
+                    return _finalize_commit_response({
                         "ok": True,
                         "accepted": True,
                         "fast_accept": True,
@@ -1155,7 +1367,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                         "ai_evaluation": fast_eval,
                         "offer_privacy": offer_privacy,
                         "leak_status": leak_status,
-                    }
+                    })
         except Exception:
             # Fast-accept should never crash the commit flow.
             pass
@@ -1439,8 +1651,9 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                 req.session_id,
                 deal_id=str(committed["deal_id"]),
                 expires_at=committed.get("expires_at"),
+                idempotency_key=idem_key,
             )
-            return {
+            return _finalize_commit_response({
                 "ok": True,
                 "accepted": True,
                 "deal_id": committed["deal_id"],
@@ -1451,7 +1664,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                 "ai_evaluation": eval_summary,
                 "offer_privacy": offer_privacy,
                 "leak_status": leak_status,
-            }
+            })
 
         # ------------------------------------------------------------------
         # COUNTER: build an actual counter proposal (NBA-like minimal edits)
@@ -1527,7 +1740,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
 
                 # Response: counter details are embedded in ai_decision.counter (SSOT).
 
-                return {
+                return _finalize_commit_response({
                     "ok": True,
                     "accepted": False,
                     "counter_unimplemented": False,
@@ -1537,7 +1750,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                     "ai_evaluation": eval_summary,
                     "offer_privacy": offer_privacy,
                     "leak_status": leak_status,
-                }
+                })
 
             # If we couldn't build a legal/acceptable counter, fall back conservatively to REJECT.
             decision = DealDecision(
@@ -1583,7 +1796,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
         except Exception:
             pass
 
-        return {
+        return _finalize_commit_response({
             "ok": True,
             "accepted": False,
             "counter_unimplemented": False,
@@ -1591,9 +1804,9 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
             "ai_verdict": to_jsonable(decision.verdict),
             "ai_decision": to_jsonable(decision),
             "ai_evaluation": eval_summary,
-                        "offer_privacy": offer_privacy,
-                        "leak_status": leak_status,
-        }
+            "offer_privacy": offer_privacy,
+            "leak_status": leak_status,
+        })
     except TradeError as exc:
         return _trade_error_response(exc)
 
