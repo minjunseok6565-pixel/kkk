@@ -740,12 +740,7 @@ def build_trade_asset_catalog(
             and not (c.recent_signing_banned_until and _parse_iso_date(c.recent_signing_banned_until) and current_date < _parse_iso_date(c.recent_signing_banned_until))  # type: ignore[arg-type]
         ]
 
-        # CORE (kept for potential "big swing" mode; not included in outgoing selection by default)
-        core_sorted = sorted(
-            eligible_for_outgoing,
-            key=lambda c: (-c.market.total, (c.snap.age if c.snap.age is not None else 99.0), c.player_id),
-        )
-        core_ids = tuple([c.player_id for c in core_sorted[:2]])
+        core_ids: Tuple[str, ...] = tuple()
 
         # Precompute redundant score (supply * (1 - need))
         def redundancy_score(c: PlayerTradeCandidate) -> float:
@@ -827,7 +822,7 @@ def build_trade_asset_catalog(
                 lo = int(len(ranked) * 0.30)
                 hi = int(len(ranked) * 0.70)
                 hi = max(hi, lo)
-                mid = [c for i, c in enumerate(ranked) if lo <= i <= hi and c.player_id not in core_ids]
+                mid = [c for i, c in enumerate(ranked) if lo <= i <= hi]
                 mid.sort(key=lambda c: (-c.market.total, -c.salary_m, c.player_id))
                 consolidate_ids = [c.player_id for c in mid[: max(0, caps.get("CONSOLIDATE", 0))]]
 
@@ -884,7 +879,7 @@ def build_trade_asset_catalog(
                 out.append(pid)
                 selected.add(pid)
             outgoing_player_ids_by_bucket[b] = tuple(out)
-        # CORE kept but excluded from outgoing pool in normal mode (stored separately if needed)
+        # Keep key for schema compatibility.
         outgoing_player_ids_by_bucket["CORE"] = tuple(core_ids)
 
         # --- Picks (movable, locks + max_years + Stepien "safe alone")
