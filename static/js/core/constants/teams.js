@@ -82,6 +82,27 @@ function renderTeamLogoMark(teamId, extraClass = "") {
   return `<span class="${classes}" aria-hidden="true"${style}></span>`;
 }
 
+
+function getTeamDisplayName(teamId, { fallbackToId = true } = {}) {
+  const id = String(teamId || "").toUpperCase();
+  const name = TEAM_FULL_NAMES[id];
+  if (name) return name;
+  return fallbackToId ? (id || "-") : "";
+}
+
+function renderTeamLogoWithName(teamId, {
+  logoClass = "",
+  nameClass = "",
+  wrapperClass = "",
+  showCodeFallback = true,
+} = {}) {
+  const id = String(teamId || "").toUpperCase();
+  const teamName = getTeamDisplayName(id, { fallbackToId: showCodeFallback });
+  const logo = renderTeamLogoMark(id, logoClass);
+  const classes = ["team-logo-name", wrapperClass].filter(Boolean).join(" ");
+  const labelClass = ["team-logo-name-label", nameClass].filter(Boolean).join(" ");
+  return `<span class="${classes}">${logo}<span class="${labelClass}">${teamName}</span></span>`;
+}
 function getScheduleVenueText(game) {
   const label = String(game?.opponent_label || "").trim().toLowerCase();
   const isAwayGame = label.startsWith("@");
@@ -91,4 +112,4 @@ function getScheduleVenueText(game) {
   return getTeamBranding(venueTeamId).arenaName || game?.opponent_team_name || game?.opponent_team_id || "";
 }
 
-export { TEAM_FULL_NAMES, TEAM_LOGO_BASE_PATH, TEAM_BRANDING, getTeamBranding, applyTeamLogo, renderTeamLogoMark, getScheduleVenueText };
+export { TEAM_FULL_NAMES, TEAM_LOGO_BASE_PATH, TEAM_BRANDING, getTeamBranding, applyTeamLogo, renderTeamLogoMark, renderTeamLogoWithName, getTeamDisplayName, getScheduleVenueText };

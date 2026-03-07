@@ -59,3 +59,317 @@
 .market-trade-offer-btn {
   min-width: 110px;
 }
+
+/* --- Trade Inbox: commercial card layout --- */
+.market-trade-inbox-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.market-trade-inbox-group {
+  display: grid;
+  gap: 10px;
+}
+
+.market-trade-inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.market-trade-inbox-item,
+.market-trade-inbox-card {
+  display: grid;
+  grid-template-columns: 84px minmax(420px, 1fr) 172px;
+  gap: 12px;
+  align-items: stretch;
+  border: 1px solid rgba(108, 165, 255, 0.25);
+  border-radius: 14px;
+  background: linear-gradient(120deg, rgba(13, 25, 54, 0.92), rgba(11, 18, 38, 0.92));
+  padding: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
+}
+
+.market-trade-inbox-card-left,
+.market-trade-inbox-item-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.market-trade-inbox-card-logo {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  border: 1px solid rgba(168, 199, 255, 0.3);
+  background-color: rgba(12, 27, 59, 0.6);
+}
+
+.market-trade-inbox-card-center {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.market-trade-inbox-card-package {
+  min-height: 86px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(151, 194, 255, 0.22);
+  background: rgba(8, 16, 34, 0.68);
+}
+
+.market-trade-inbox-card-package h5 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: rgba(232, 238, 251, 0.95);
+}
+
+.market-trade-inbox-card-package ul {
+  margin: 0;
+  padding: 0 0 0 16px;
+  display: grid;
+  gap: 6px;
+  color: rgba(214, 226, 248, 0.9);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.market-trade-inbox-card-right,
+.market-trade-inbox-item-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 8px;
+}
+
+.market-trade-inbox-card-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.market-trade-inbox-item .btn,
+.market-trade-inbox-card .btn {
+  min-height: 38px;
+}
+
+.market-trade-inbox-card .subtitle {
+  text-align: right;
+}
+
+/* --- Trade Deal Modal: top package + bottom tabs --- */
+.market-trade-deal-panel {
+  width: min(1320px, calc(100vw - 36px));
+  max-height: min(90vh, 980px);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+}
+
+.market-trade-deal-layout {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.market-trade-deal-top {
+  border: 1px solid rgba(108, 165, 255, 0.3);
+  border-radius: 14px;
+  padding: 12px;
+  background: linear-gradient(150deg, rgba(8, 16, 34, 0.85), rgba(9, 24, 48, 0.8));
+}
+
+.market-trade-deal-top-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.market-trade-deal-team-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.market-trade-deal-team-logo {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid rgba(168, 199, 255, 0.3);
+}
+
+.market-trade-deal-package-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.market-trade-deal-package {
+  border: 1px solid rgba(151, 194, 255, 0.22);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(7, 16, 31, 0.72);
+}
+
+.market-trade-deal-package h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.market-trade-deal-package ul {
+  margin: 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: rgba(216, 228, 250, 0.94);
+}
+
+.market-trade-deal-bottom {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.market-trade-deal-team-assets {
+  border: 1px solid rgba(108, 165, 255, 0.25);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(8, 16, 34, 0.75);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 260px;
+}
+
+.market-trade-deal-team-assets-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.market-trade-deal-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.market-trade-deal-tabs .btn[role="tab"] {
+  min-height: 36px;
+  padding: 6px 10px;
+}
+
+.market-trade-deal-tabs .btn[role="tab"][aria-selected="true"] {
+  border-color: rgba(126, 179, 255, 0.85);
+  background: linear-gradient(120deg, rgba(53, 96, 169, 0.95), rgba(40, 76, 141, 0.95));
+}
+
+.market-trade-deal-tab-panel {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid rgba(133, 178, 246, 0.2);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(9, 16, 31, 0.62);
+}
+
+.market-trade-deal-bottom-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.market-trade-deal-bottom-meta > div {
+  border: 1px solid rgba(108, 165, 255, 0.24);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(9, 18, 36, 0.66);
+}
+
+.market-trade-deal-bottom-meta h4 {
+  margin: 0 0 8px;
+}
+
+.market-trade-inbox-card:focus-within,
+.market-trade-deal-tabs .btn[role="tab"]:focus-visible,
+.market-trade-deal-tab-panel:focus-visible {
+  outline: 2px solid rgba(136, 187, 255, 0.9);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1366px) {
+  .market-trade-inbox-item,
+  .market-trade-inbox-card {
+    grid-template-columns: 74px minmax(320px, 1fr) 160px;
+  }
+
+  .market-trade-deal-panel {
+    width: min(1220px, calc(100vw - 26px));
+  }
+}
+
+@media (max-width: 1024px) {
+  .market-trade-inbox-item,
+  .market-trade-inbox-card {
+    grid-template-columns: 64px 1fr;
+  }
+
+  .market-trade-inbox-card-right,
+  .market-trade-inbox-item-actions {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .market-trade-inbox-card-center {
+    grid-template-columns: 1fr;
+  }
+
+  .market-trade-deal-panel {
+    width: min(1040px, calc(100vw - 20px));
+  }
+
+  .market-trade-deal-bottom,
+  .market-trade-deal-bottom-meta,
+  .market-trade-deal-package-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .market-trade-inbox-item,
+  .market-trade-inbox-card {
+    padding: 10px;
+  }
+
+  .market-trade-inbox-card-logo {
+    width: 48px;
+    height: 48px;
+  }
+
+  .market-trade-deal-top-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .market-trade-deal-team-head-my {
+    align-self: stretch;
+    justify-content: space-between;
+  }
+
+  .market-trade-deal-team-assets {
+    min-height: 220px;
+  }
+
+  .market-trade-deal-tabs .btn[role="tab"] {
+    flex: 1 1 calc(50% - 6px);
+  }
+}

@@ -34,7 +34,13 @@ const state = {
   marketTradeInboxLoading: false,
   marketTradeInboxLastLoadedAt: 0,
   marketTradeActiveSession: null,
+  marketTradeInitialOfferSnapshot: null,
+  marketTradeLatestOfferSnapshot: null,
   marketTradeDealDraft: null,
+  marketTradeDealTabs: {
+    myTeamAssetTab: "player",
+    otherTeamAssetTab: "player",
+  },
   marketTradeAssetPool: {
     myTeam: { players: [], picks: [], swaps: [], fixedAssets: [] },
     otherTeam: { players: [], picks: [], swaps: [], fixedAssets: [] },
@@ -119,6 +125,21 @@ function createEmptyMarketTradeUi() {
   };
 }
 
+function createDefaultMarketTradeDealTabs() {
+  return {
+    myTeamAssetTab: "player",
+    otherTeamAssetTab: "player",
+  };
+}
+
+function createEmptyMarketTradeOfferSnapshot() {
+  return {
+    sessionId: null,
+    deal: null,
+    capturedAt: null,
+  };
+}
+
 function resetMarketTradeInboxState() {
   state.marketTradeInboxRows = [];
   state.marketTradeInboxGrouped = [];
@@ -128,9 +149,35 @@ function resetMarketTradeInboxState() {
 
 function resetMarketTradeDealState() {
   state.marketTradeActiveSession = null;
+  state.marketTradeInitialOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
+  state.marketTradeLatestOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
   state.marketTradeDealDraft = createEmptyMarketTradeDealDraft();
+  state.marketTradeDealTabs = createDefaultMarketTradeDealTabs();
   state.marketTradeAssetPool = createEmptyMarketTradeAssetPool();
   state.marketTradeUi = createEmptyMarketTradeUi();
+}
+
+function syncMarketTradeModalSessionState(sessionId, { keepTabsOnReopen = true } = {}) {
+  const nextSessionId = sessionId == null ? null : String(sessionId);
+  const currentSessionId = state.marketTradeActiveSession?.session_id
+    ? String(state.marketTradeActiveSession.session_id)
+    : null;
+  const isSameSession = Boolean(nextSessionId) && Boolean(currentSessionId) && nextSessionId === currentSessionId;
+
+  // 세션이 바뀌면 스냅샷/탭/UI 상태를 reset한다.
+  if (!isSameSession) {
+    state.marketTradeInitialOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
+    state.marketTradeLatestOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
+    state.marketTradeDealTabs = createDefaultMarketTradeDealTabs();
+    state.marketTradeUi = createEmptyMarketTradeUi();
+    return { isSameSession: false, didReset: true };
+  }
+
+  // 동일 세션 재오픈 시 탭 유지 정책을 선택적으로 적용한다.
+  if (!keepTabsOnReopen) {
+    state.marketTradeDealTabs = createDefaultMarketTradeDealTabs();
+  }
+  return { isSameSession: true, didReset: false };
 }
 
 function resetMarketTradeState() {
@@ -145,7 +192,10 @@ export {
   createEmptyMarketTradeDealDraft,
   createEmptyMarketTradeAssetPool,
   createEmptyMarketTradeUi,
+  createDefaultMarketTradeDealTabs,
+  createEmptyMarketTradeOfferSnapshot,
   resetMarketTradeInboxState,
   resetMarketTradeDealState,
   resetMarketTradeState,
+  syncMarketTradeModalSessionState,
 };

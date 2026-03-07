@@ -263,7 +263,34 @@
           <div class="roster-table-wrap">
             <div id="market-trade-inbox-loading" class="subtitle">협상 inbox를 불러오는 중입니다...</div>
             <p id="market-trade-inbox-empty" class="subtitle hidden">현재 확인할 제안/협상 내역이 없습니다.</p>
-            <div id="market-trade-inbox-groups" class="market-trade-inbox-groups"></div>
+
+            <div id="market-trade-inbox-groups" class="market-trade-inbox-groups" aria-live="polite"></div>
+
+            <!-- Inbox card skeleton template (rendered via JS) -->
+            <template id="market-trade-inbox-card-template">
+              <article class="market-trade-inbox-card" data-market-trade-role="card">
+                <div class="market-trade-inbox-card-left" id="market-trade-inbox-card-logo-wrap">
+                  <div class="team-logo-placeholder market-trade-inbox-card-logo" id="market-trade-inbox-card-logo" aria-hidden="true"></div>
+                </div>
+                <div class="market-trade-inbox-card-center" id="market-trade-inbox-card-package-wrap">
+                  <section class="market-trade-inbox-card-package" id="market-trade-inbox-card-outgoing-wrap" aria-label="상대가 원하는 우리 팀 에셋">
+                    <h5>상대가 원하는 우리 팀 에셋</h5>
+                    <ul id="market-trade-inbox-card-outgoing-list"></ul>
+                  </section>
+                  <section class="market-trade-inbox-card-package" id="market-trade-inbox-card-incoming-wrap" aria-label="상대가 제안한 상대 팀 에셋">
+                    <h5>상대가 주는 에셋</h5>
+                    <ul id="market-trade-inbox-card-incoming-list"></ul>
+                  </section>
+                </div>
+                <div class="market-trade-inbox-card-right" id="market-trade-inbox-card-actions-wrap">
+                  <p id="market-trade-inbox-card-date" class="subtitle">--/--</p>
+                  <div class="market-trade-inbox-card-actions">
+                    <button type="button" id="market-trade-inbox-card-open" class="btn btn-secondary">협상</button>
+                    <button type="button" id="market-trade-inbox-card-reject" class="btn btn-secondary">거절</button>
+                  </div>
+                </div>
+              </article>
+            </template>
           </div>
         </div>
       </section>
@@ -1080,26 +1107,87 @@
         <div>
           <h3 id="market-trade-deal-title" class="confirm-modal-title">제안/협상 딜 편집기</h3>
           <p id="market-trade-deal-session" class="confirm-modal-body">세션: -</p>
-          <p id="market-trade-deal-meta" class="confirm-modal-body">상대팀: - / 만료일: -</p>
+          <p id="market-trade-deal-meta" class="confirm-modal-body">상대팀: - / 상태: -</p>
         </div>
       </div>
 
-      <div class="market-trade-deal-layout">
-        <section class="market-trade-deal-column" aria-label="자산 선택 패널">
-          <h4>자산 선택</h4>
-          <div id="market-trade-deal-assets-my-team" class="market-trade-deal-list" aria-label="우리팀 자산"></div>
-          <div id="market-trade-deal-assets-other-team" class="market-trade-deal-list" aria-label="상대팀 자산"></div>
+      <div class="market-trade-deal-layout" id="market-trade-deal-layout">
+        <section class="market-trade-deal-top" id="market-trade-deal-top" aria-label="협상 패키지 개요">
+          <header class="market-trade-deal-top-head">
+            <div class="market-trade-deal-team-head market-trade-deal-team-head-other" id="market-trade-deal-team-head-other">
+              <div class="team-logo-placeholder market-trade-deal-team-logo" id="market-trade-deal-other-team-logo" aria-hidden="true"></div>
+              <div>
+                <strong id="market-trade-deal-other-team-name">상대팀</strong>
+                <p class="subtitle">제안 팀</p>
+              </div>
+            </div>
+            <div class="market-trade-deal-team-head market-trade-deal-team-head-my" id="market-trade-deal-team-head-my">
+              <div>
+                <strong id="market-trade-deal-my-team-name">우리팀</strong>
+                <p class="subtitle">수신 팀</p>
+              </div>
+              <div class="team-logo-placeholder market-trade-deal-team-logo" id="market-trade-deal-my-team-logo" aria-hidden="true"></div>
+            </div>
+          </header>
+
+          <div class="market-trade-deal-package-grid" id="market-trade-deal-package-grid">
+            <section class="market-trade-deal-package" id="market-trade-deal-package-other" aria-label="상대팀 패키지">
+              <h4>상대팀이 주는 패키지</h4>
+              <ul id="market-trade-deal-package-other-list"></ul>
+            </section>
+            <section class="market-trade-deal-package" id="market-trade-deal-package-my" aria-label="우리팀 패키지">
+              <h4>우리팀이 주는 패키지</h4>
+              <ul id="market-trade-deal-package-my-list"></ul>
+            </section>
+          </div>
         </section>
 
-        <section class="market-trade-deal-column" aria-label="현재 제안 구성">
-          <h4>현재 제안(legs)</h4>
-          <div id="market-trade-deal-legs-preview" class="market-trade-deal-list"></div>
+        <section class="market-trade-deal-bottom" id="market-trade-deal-bottom" aria-label="팀별 에셋 선택 패널">
+          <section class="market-trade-deal-team-assets" id="market-trade-deal-team-assets-other" aria-label="상대팀 에셋">
+            <header class="market-trade-deal-team-assets-head">
+              <h4>상대팀 에셋</h4>
+              <div id="market-trade-deal-tabs-other" class="market-trade-deal-tabs" role="tablist" aria-label="상대팀 에셋 분류">
+                <button id="market-trade-deal-tab-other-player" type="button" class="btn btn-secondary" role="tab" aria-selected="true" aria-controls="market-trade-deal-panel-other-player">선수</button>
+                <button id="market-trade-deal-tab-other-pick" type="button" class="btn btn-secondary" role="tab" aria-selected="false" aria-controls="market-trade-deal-panel-other-pick">픽</button>
+                <button id="market-trade-deal-tab-other-swap" type="button" class="btn btn-secondary" role="tab" aria-selected="false" aria-controls="market-trade-deal-panel-other-swap">스왑</button>
+                <button id="market-trade-deal-tab-other-fixed-asset" type="button" class="btn btn-secondary" role="tab" aria-selected="false" aria-controls="market-trade-deal-panel-other-fixed-asset">고정 자산</button>
+              </div>
+            </header>
+            <div id="market-trade-deal-panel-other-player" class="market-trade-deal-tab-panel" role="tabpanel"></div>
+            <div id="market-trade-deal-panel-other-pick" class="market-trade-deal-tab-panel hidden" role="tabpanel"></div>
+            <div id="market-trade-deal-panel-other-swap" class="market-trade-deal-tab-panel hidden" role="tabpanel"></div>
+            <div id="market-trade-deal-panel-other-fixed-asset" class="market-trade-deal-tab-panel hidden" role="tabpanel"></div>
+            <div id="market-trade-deal-assets-other-team" class="market-trade-deal-list hidden" aria-label="상대팀 자산(legacy)"></div>
+          </section>
+
+          <section class="market-trade-deal-team-assets" id="market-trade-deal-team-assets-my" aria-label="우리팀 에셋">
+            <header class="market-trade-deal-team-assets-head">
+              <h4>우리팀 에셋</h4>
+              <div id="market-trade-deal-tabs-my" class="market-trade-deal-tabs" role="tablist" aria-label="우리팀 에셋 분류">
+                <button id="market-trade-deal-tab-my-player" type="button" class="btn btn-secondary" role="tab" aria-selected="true" aria-controls="market-trade-deal-panel-my-player">선수</button>
+                <button id="market-trade-deal-tab-my-pick" type="button" class="btn btn-secondary" role="tab" aria-selected="false" aria-controls="market-trade-deal-panel-my-pick">픽</button>
+                <button id="market-trade-deal-tab-my-swap" type="button" class="btn btn-secondary" role="tab" aria-selected="false" aria-controls="market-trade-deal-panel-my-swap">스왑</button>
+                <button id="market-trade-deal-tab-my-fixed-asset" type="button" class="btn btn-secondary" role="tab" aria-selected="false" aria-controls="market-trade-deal-panel-my-fixed-asset">고정 자산</button>
+              </div>
+            </header>
+            <div id="market-trade-deal-panel-my-player" class="market-trade-deal-tab-panel" role="tabpanel"></div>
+            <div id="market-trade-deal-panel-my-pick" class="market-trade-deal-tab-panel hidden" role="tabpanel"></div>
+            <div id="market-trade-deal-panel-my-swap" class="market-trade-deal-tab-panel hidden" role="tabpanel"></div>
+            <div id="market-trade-deal-panel-my-fixed-asset" class="market-trade-deal-tab-panel hidden" role="tabpanel"></div>
+            <div id="market-trade-deal-assets-my-team" class="market-trade-deal-list hidden" aria-label="우리팀 자산(legacy)"></div>
+          </section>
         </section>
 
-        <section class="market-trade-deal-column" aria-label="협상 상태">
-          <h4>협상 상태</h4>
-          <div id="market-trade-deal-status" class="market-trade-deal-list"></div>
-          <div id="market-trade-deal-messages" class="market-trade-deal-list"></div>
+        <section class="market-trade-deal-bottom-meta" aria-label="현재 제안과 협상 상태">
+          <div>
+            <h4>현재 제안(legs)</h4>
+            <div id="market-trade-deal-legs-preview" class="market-trade-deal-list"></div>
+          </div>
+          <div>
+            <h4>협상 상태</h4>
+            <div id="market-trade-deal-status" class="market-trade-deal-list"></div>
+            <div id="market-trade-deal-messages" class="market-trade-deal-list"></div>
+          </div>
         </section>
       </div>
 
