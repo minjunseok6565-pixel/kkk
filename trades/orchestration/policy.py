@@ -831,14 +831,6 @@ def allow_second_trade_today(*, tick_ctx: Any, team_id: str, traded_count_today:
     meta["reason"] = "ALLOWED" if allow else "BERNOULLI_REJECT"
     return allow, meta
 
-def should_offer_to_user(prop: Any, *, config: OrchestrationConfig) -> bool:
-    try:
-        return float(getattr(prop, "score", 0.0) or 0.0) >= float(config.user_offer_min_score)
-    except Exception:
-        return False
-
-
-
 def user_reject_offer_probability(*, tone: str, pressure: float, config: OrchestrationConfig) -> float:
     """
     Probability of sending a REJECT-based user offer (PROBE / LOWBALL).

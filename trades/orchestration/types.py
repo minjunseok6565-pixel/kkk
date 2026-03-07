@@ -103,8 +103,6 @@ class OrchestrationConfig:
     pressure_tier_max_results_bonus_high: int = 1
     pressure_tier_max_results_bonus_rush: int = 2
 
-    # --- 유저 오퍼 상한(스팸 방지)
-    max_user_offers_per_tick: int = 3
     max_active_user_sessions: int = 4  # ACTIVE 협상 세션이 너무 많으면 신규 오퍼 억제
 
     # --- 유저 오퍼 보호(agreement+asset lock)
@@ -216,9 +214,6 @@ class OrchestrationConfig:
     fail_closed_if_human_ids_missing: bool = True
     exclude_human_teams_from_initiators: bool = True
 
-    # --- 유저에게 보내는 오퍼 quality gate (DealGenerator score만 사용)
-    user_offer_min_score: float = 0.15
-
     # --- 유저 REJECT 기반 "탐색(PROBE)/로우볼(LOWBALL)" 오퍼
     # 목적: NBA 시장의 "떠보기/로우볼" 현실감을 주되, 스팸/불쾌감은 구조적으로 차단한다.
     #
@@ -237,9 +232,6 @@ class OrchestrationConfig:
 
     # SERIOUS(uv!=REJECT) 오퍼를 이미 보냈으면, 같은 tick에서 PROBE/LOWBALL은 기본적으로 금지
     disable_reject_offers_if_any_serious_sent: bool = True
-
-    # REJECT 오퍼에서도 최소한의 "딜 생성기 score" 하한을 둔다(완전 쓰레기 방지).
-    user_reject_offer_min_score: float = 0.10
 
     # tick당 tone별 상한(스팸 방지)
     max_user_probe_offers_per_tick: int = 1

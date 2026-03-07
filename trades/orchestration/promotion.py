@@ -546,9 +546,6 @@ def promote_and_commit(
             other = seller if buyer_h else buyer
 
             offered = int(user_offered_by_user.get(user_tid, 0))
-            if offered >= int(config.max_user_offers_per_tick):
-                result.skipped += 1
-                continue
 
             if user_tid not in active_sessions_cache:
                 active_sessions_cache[user_tid] = _count_active_user_sessions(negotiations_snapshot, user_tid, today=today)
@@ -593,15 +590,6 @@ def promote_and_commit(
                 if not bool(getattr(config, "enable_user_reject_offers", False)):
                     result.skipped += 1
                     record_market_event(trade_market, today=today, event_type="USER_OFFER_SUPPRESSED_USER_REJECT", payload={"deal_id": deal_key, "user_team_id": user_tid, "other_team_id": other, "buyer_id": buyer, "seller_id": seller, "score": score})
-                    continue
-
-                try:
-                    if score < float(getattr(config, "user_reject_offer_min_score", 0.0)):
-                        result.skipped += 1
-                        record_market_event(trade_market, today=today, event_type="USER_OFFER_SUPPRESSED_REJECT_SCORE_TOO_LOW", payload={"deal_id": deal_key, "user_team_id": user_tid, "other_team_id": other, "score": score})
-                        continue
-                except Exception:
-                    result.skipped += 1
                     continue
 
                 if bool(getattr(config, "disable_reject_offers_if_any_serious_sent", True)) and int(user_serious_sent_by_user.get(user_tid, 0)) > 0:
@@ -664,11 +652,6 @@ def promote_and_commit(
                     result.skipped += 1
                     record_market_event(trade_market, today=today, event_type="USER_OFFER_SUPPRESSED_REJECT_PROBABILITY_ROLL", payload={"deal_id": deal_key, "user_team_id": user_tid, "other_team_id": other, "tone": tone, "p_send": p_send})
                     continue
-            else:
-                if not policy.should_offer_to_user(prop, config=config):
-                    result.skipped += 1
-                    continue
-
             other_set = user_offered_other_teams_by_user.setdefault(user_tid, set())
             if other in other_set:
                 result.skipped += 1
