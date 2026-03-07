@@ -323,7 +323,7 @@ function getPrefetchPlanForEvent(eventType, context = {}) {
       { key: keys.collegeTeams, url: "/api/college/teams", ttlMs: CACHE_TTL_MS.college },
       { key: keys.collegeExperts, url: "/api/offseason/draft/experts", ttlMs: CACHE_TTL_MS.college },
       ...(tid ? [
-        { key: keys.collegeScouts, url: `/api/scouting/scouts?team_id=${encodeURIComponent(tid)}`, ttlMs: CACHE_TTL_MS.college },
+        { key: keys.collegeScouts, url: `/api/scouting/scouts/${encodeURIComponent(tid)}`, ttlMs: CACHE_TTL_MS.college },
         { key: keys.collegeReports, url: `/api/scouting/reports?team_id=${encodeURIComponent(tid)}&status=all`, ttlMs: CACHE_TTL_MS.college },
       ] : []),
     ];

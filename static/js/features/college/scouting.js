@@ -31,7 +31,7 @@ async function prefetchCollegeScoutingData(teamId = state.selectedTeamId) {
     fetchCachedJson({ key: keys.collegeMeta, url: "/api/college/meta", ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }).catch(() => null),
     fetchCachedJson({ key: keys.collegeTeams, url: "/api/college/teams", ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }).catch(() => null),
     fetchCachedJson({ key: keys.collegeExperts, url: "/api/offseason/draft/experts", ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }).catch(() => null),
-    fetchCachedJson({ key: getCollegeScoutingScoutsCacheKey(tid), url: `/api/scouting/scouts?team_id=${encodeURIComponent(tid)}`, ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }).catch(() => null),
+    fetchCachedJson({ key: getCollegeScoutingScoutsCacheKey(tid), url: `/api/scouting/scouts/${encodeURIComponent(tid)}`, ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }).catch(() => null),
     fetchCachedJson({ key: getCollegeScoutingReportsCacheKey(tid), url: `/api/scouting/reports?team_id=${encodeURIComponent(tid)}&status=all`, ttlMs: CACHE_TTL_MS.college, staleWhileRevalidate: true }).catch(() => null),
   ]);
   return true;
@@ -136,7 +136,7 @@ async function loadCollegeScouting({ force = false } = {}) {
   const [scoutsPayload, reportsPayload] = await Promise.all([
     fetchCachedJson({
       key: getCollegeScoutingScoutsCacheKey(teamId),
-      url: `/api/scouting/scouts?team_id=${encodeURIComponent(teamId)}`,
+      url: `/api/scouting/scouts/${encodeURIComponent(teamId)}`,
       ttlMs: COLLEGE_SCOUTING_TTL_MS,
       staleWhileRevalidate: true,
       force,
