@@ -77,7 +77,12 @@ def _apply_standings_cache_incremental_updates(*, game_ids: Iterable[Any]) -> Di
     return {"candidates": len(target_ids), "applied": int(applied), "missing": int(missing)}
 
 
-def _run_trade_orchestration_for_date(*, user_team_id: str, tick_date: date) -> Dict[str, Any]:
+def _run_trade_orchestration_for_date(
+    *,
+    user_team_id: str,
+    tick_date: date,
+    allow_backfill_state_mutation: bool = False,
+) -> Dict[str, Any]:
     """Run trade orchestration for a specific in-game date and summarize outcome."""
     user_tid = str(user_team_id or "").upper().strip()
     if not user_tid:
@@ -94,6 +99,7 @@ def _run_trade_orchestration_for_date(*, user_team_id: str, tick_date: date) -> 
             user_team_id=user_tid,
             dry_run=False,
             validate_integrity=False,
+            allow_backfill_state_mutation=bool(allow_backfill_state_mutation),
         )
     except Exception as exc:
         return {
@@ -113,6 +119,7 @@ def _run_trade_orchestration_for_date(*, user_team_id: str, tick_date: date) -> 
         "user_offer_sessions_created": len(getattr(promo, "user_offer_sessions", []) or []) if promo is not None else 0,
         "executed_trade_events": len(getattr(promo, "executed_trade_events", []) or []) if promo is not None else 0,
         "errors": list(getattr(promo, "errors", []) or []) if promo is not None else [],
+        "allow_backfill_state_mutation": bool(allow_backfill_state_mutation),
     }
 
 
@@ -153,7 +160,11 @@ def _run_trade_orchestration_catchup(*, user_team_id: str, from_exclusive: str, 
         }
 
     runs = [
-        _run_trade_orchestration_for_date(user_team_id=user_team_id, tick_date=d)
+        _run_trade_orchestration_for_date(
+            user_team_id=user_team_id,
+            tick_date=d,
+            allow_backfill_state_mutation=True,
+        )
         for d in days
     ]
     return {
@@ -161,6 +172,7 @@ def _run_trade_orchestration_catchup(*, user_team_id: str, from_exclusive: str, 
         "from_exclusive": str(from_exclusive),
         "to_inclusive": str(to_inclusive),
         "runs": runs,
+        "allow_backfill_state_mutation": True,
         "summary": {
             "requested_days": len(days),
             "executed_days": sum(1 for r in runs if bool(r.get("ok")) and not bool(r.get("skipped"))),

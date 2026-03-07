@@ -261,9 +261,6 @@ def select_targets_sell(
     if max_targets <= 0:
         return []
 
-    ts = tick_ctx.get_team_situation(seller_u)
-    posture = str(getattr(ts, "trade_posture", "SELL") or "SELL").upper()
-
     allow_id = str(allow_locked_by_deal_id or "").strip() or None
 
     # v2와 동일한 우선순위(숫자 낮을수록 우선)
@@ -275,7 +272,6 @@ def select_targets_sell(
         "FILLER_CHEAP": 4,
         "FILLER_BAD_CONTRACT": 5,
         "CONSOLIDATE": 6,
-        "CORE": 99,
     }
 
     rows: List[Tuple[Tuple[int, float, float, float, float, str], SellAssetCandidate]] = []
@@ -298,14 +294,7 @@ def select_targets_sell(
 
         buckets = tuple(getattr(c, "buckets", None) or ())
 
-        # (3) CORE 처리: SOFT_SELL에서는 제외, SELL에서는 4% 확률만 허용
-        if "CORE" in buckets:
-            if posture != "SELL":
-                continue
-            if rng.random() > 0.04:
-                continue
-
-        # (4) 정렬 키 구성 (v2와 동일)
+        # (3) 정렬 키 구성 (v2와 동일)
         if buckets:
             pri = min(bucket_pri.get(b, 50) for b in buckets)
         else:
@@ -431,12 +420,7 @@ def _is_ban_active(current_date: date, until_iso: Optional[str]) -> bool:
 
 
 def _is_seller_willing_to_move_player(player_id: str, seller_out: TeamOutgoingCatalog) -> bool:
-    core = set(seller_out.player_ids_by_bucket.get("CORE", tuple()))
-    if player_id in core:
-        return False
     for b, ids in seller_out.player_ids_by_bucket.items():
-        if b == "CORE":
-            continue
         if player_id in ids:
             return True
     return False
