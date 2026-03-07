@@ -44,10 +44,25 @@ function maybeLogCacheMetrics() {
   });
 }
 
+function resolveApiErrorDetail(data, fallbackUrl = "") {
+  const detail = data?.detail;
+  if (typeof detail === "string" && detail.trim()) return detail.trim();
+  if (detail && typeof detail === "object") {
+    const code = String(detail.code || detail.error_code || "").trim();
+    const message = String(detail.message || detail.error || detail.detail || "").trim();
+    if (code && message) return `${code}: ${message}`;
+    if (code) return code;
+    if (message) return message;
+  }
+  const message = String(data?.message || data?.error || "").trim();
+  if (message) return message;
+  return `요청 실패: ${fallbackUrl}`;
+}
+
 async function fetchJson(url, options = {}) {
   const res = await fetch(url, options);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || `요청 실패: ${url}`);
+  if (!res.ok) throw new Error(resolveApiErrorDetail(data, url));
   return data;
 }
 

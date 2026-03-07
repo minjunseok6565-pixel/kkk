@@ -1,4 +1,4 @@
-import { state } from "../../app/state.js";
+import { state, syncMarketTradeModalSessionState } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
 import {
@@ -13,8 +13,8 @@ import {
   setLoading,
 } from "../../core/api.js";
 import { num } from "../../core/guards.js";
-import { formatHeightIn, formatMoney, formatWeightLb } from "../../core/format.js";
-import { TEAM_FULL_NAMES } from "../../core/constants/teams.js";
+import { formatHeightIn, formatMoney, formatWeightLb, formatPickLabel, formatProtectionSummary, formatSwapAssetLabel, formatFixedAssetLabel } from "../../core/format.js";
+import { TEAM_FULL_NAMES, applyTeamLogo, getTeamDisplayName } from "../../core/constants/teams.js";
 import { loadPlayerDetail } from "../myteam/playerDetail.js";
 import { fetchTeamDetail, invalidateTeamDetailCache } from "../team/teamDetailCache.js";
 
@@ -38,11 +38,23 @@ function toFriendlyRuleMessage(rawMessage) {
   if (msg.includes("NEGOTIATION_MODE_MISMATCH")) {
     return "협상 모드가 맞지 않습니다. 협상을 다시 시작해주세요.";
   }
+  if (msg.includes("NEGOTIATION_NOT_AUTHORIZED")) {
+    return "해당 제안에 대한 권한이 없습니다.";
+  }
+  if (msg.includes("NEGOTIATION_NOT_FOUND")) {
+    return "존재하지 않는 협상 세션입니다.";
+  }
+  if (msg.includes("NEGOTIATION_INVALID_PHASE")) {
+    return "현재 협상 단계에서는 해당 작업을 수행할 수 없습니다.";
+  }
   if (msg.includes("NEGOTIATION_ENDED_BY_AI")) {
     return "상대 팀이 협상을 종료했습니다. 제안이 인박스에서 제거됩니다.";
   }
   if (msg.includes("NEGOTIATION_NOT_ACTIVE") || msg.includes("Negotiation session is closed")) {
     return "협상이 이미 종료되었습니다. 새 협상을 시작해주세요.";
+  }
+  if (msg.includes("DEAL_INVALIDATED")) {
+    return "딜 데이터가 유효하지 않습니다. 자산 구성을 다시 확인해주세요.";
   }
   return msg;
 }
@@ -146,12 +158,67 @@ function normalizeTradeDealDraft(sourceDeal, userTeamId, otherTeamId) {
   };
 }
 
-function buildBaseDraftFromSession(session, userTeamId, otherTeamId) {
-  const draftDeal = session?.draft_deal;
-  const lastOffer = session?.last_offer?.deal || session?.last_offer;
-  if (draftDeal) return normalizeTradeDealDraft(draftDeal, userTeamId, otherTeamId);
-  if (lastOffer) return normalizeTradeDealDraft(lastOffer, userTeamId, otherTeamId);
+function normalizeTradeDealCandidate(candidate, userTeamId, otherTeamId) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  const teams = Array.isArray(candidate?.teams) ? candidate.teams : [];
+  const legs = candidate?.legs;
+  if (!teams.length || !legs || typeof legs !== "object" || Array.isArray(legs)) return null;
+  return normalizeTradeDealDraft(candidate, userTeamId, otherTeamId);
+}
+
+function normalizeInboxOfferDeal(row, userTeamId = state.selectedTeamId, otherTeamId = row?.other_team_id) {
+  const offer = row?.offer;
+  const candidates = [
+    offer?.deal,
+    offer?.offer,
+    row?.deal,
+    row?.last_offer?.deal,
+    row?.last_offer?.offer,
+    row?.last_offer,
+    offer,
+    row,
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizeTradeDealCandidate(candidate, userTeamId, otherTeamId);
+    if (normalized) return normalized;
+  }
   return createEmptyTradeDealDraft(userTeamId, otherTeamId);
+}
+
+function normalizeSessionDeal(session, userTeamId = state.selectedTeamId, otherTeamId = session?.other_team_id) {
+  const candidates = [
+    session?.draft_deal,
+    session?.last_offer?.deal,
+    session?.last_offer?.offer,
+    session?.last_offer,
+    session?.offer?.deal,
+    session?.offer,
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizeTradeDealCandidate(candidate, userTeamId, otherTeamId);
+    if (normalized) return normalized;
+  }
+  return createEmptyTradeDealDraft(userTeamId, otherTeamId);
+}
+
+function normalizeTradeAssetsSnapshot(rawAssets) {
+  const src = rawAssets && typeof rawAssets === "object" ? rawAssets : {};
+
+  const toRows = (value) => {
+    if (Array.isArray(value)) return value.filter((item) => item && typeof item === "object");
+    if (value && typeof value === "object") return Object.values(value).filter((item) => item && typeof item === "object");
+    return [];
+  };
+
+  return {
+    draft_picks: toRows(src?.draft_picks),
+    swap_rights: toRows(src?.swap_rights),
+    fixed_assets: toRows(src?.fixed_assets),
+  };
+}
+
+function buildBaseDraftFromSession(session, userTeamId, otherTeamId) {
+  return normalizeSessionDeal(session, userTeamId, otherTeamId);
 }
 
 function renderMarketTradeDealDraftPreview() {
@@ -209,7 +276,12 @@ function toAssetKey(asset) {
   if (!asset || typeof asset !== "object") return "";
   if (asset.kind === "player") return `player:${asset.player_id || ""}`;
   if (asset.kind === "pick") return `pick:${asset.pick_id || ""}`;
-  if (asset.kind === "swap") return `swap:${asset.swap_id || ""}`;
+  if (asset.kind === "swap") {
+    const swapId = String(asset.swap_id || "").trim();
+    if (swapId) return `swap:${swapId}`;
+    const fallbackSwapId = computeSwapIdFromPair(asset?.pick_id_a, asset?.pick_id_b);
+    return fallbackSwapId ? `swap:${fallbackSwapId}` : "";
+  }
   if (asset.kind === "fixed_asset") return `fixed_asset:${asset.asset_id || ""}`;
   return "";
 }
@@ -349,27 +421,51 @@ function renderTradeDealAssetList(container, teamId, pool) {
 function renderTradeDealEditor() {
   const myTeamId = state.selectedTeamId;
   const otherTeamId = String(state.marketTradeActiveSession?.other_team_id || "").toUpperCase();
+
+  // legacy hidden containers are kept for incremental migration compatibility.
   renderTradeDealAssetList(els.marketTradeDealAssetsMyTeam, myTeamId, state.marketTradeAssetPool?.myTeam || {});
   renderTradeDealAssetList(els.marketTradeDealAssetsOtherTeam, otherTeamId, state.marketTradeAssetPool?.otherTeam || {});
+
+  renderTradeDealTopPackage();
+  renderTradeDealAssetTabs();
   renderMarketTradeDealDraftPreview();
 }
 
 function extractTeamTradeAssets(summaryPayload, ownerTeamId) {
   const teamId = String(ownerTeamId || "").toUpperCase();
-  const snapshot = summaryPayload?.db_snapshot?.trade_assets || {};
-  const picksRaw = Array.isArray(snapshot?.draft_picks) ? snapshot.draft_picks : [];
-  const swapsRaw = Array.isArray(snapshot?.swap_rights) ? snapshot.swap_rights : [];
-  const fixedRaw = Array.isArray(snapshot?.fixed_assets) ? snapshot.fixed_assets : [];
+  const rawSnapshot = summaryPayload?.db_snapshot?.trade_assets;
+  const snapshot = normalizeTradeAssetsSnapshot(rawSnapshot);
+  const picksRaw = snapshot.draft_picks;
+  const swapsRaw = snapshot.swap_rights;
+  const fixedRaw = snapshot.fixed_assets;
 
   const picks = picksRaw
     .filter((item) => String(item?.owner_team_id || item?.owner_team || "").toUpperCase() === teamId)
-    .map((item) => ({ pick_id: item?.pick_id, protection: item?.protection || null }));
+    .map((item) => ({
+      pick_id: item?.pick_id,
+      year: item?.year,
+      round: item?.round,
+      owner_team: item?.owner_team,
+      original_team: item?.original_team,
+      protection: item?.protection || null,
+    }));
   const swaps = swapsRaw
     .filter((item) => String(item?.owner_team_id || item?.owner_team || "").toUpperCase() === teamId)
-    .map((item) => ({ swap_id: item?.swap_id, pick_id_a: item?.pick_id_a, pick_id_b: item?.pick_id_b }));
+    .map((item) => ({
+      swap_id: item?.swap_id || computeSwapIdFromPair(item?.pick_id_a, item?.pick_id_b),
+      year: item?.year,
+      round: item?.round,
+      pick_id_a: item?.pick_id_a,
+      pick_id_b: item?.pick_id_b,
+    }));
   const fixedAssets = fixedRaw
     .filter((item) => String(item?.owner_team_id || item?.owner_team || "").toUpperCase() === teamId)
-    .map((item) => ({ asset_id: item?.asset_id, source_pick_id: item?.source_pick_id || null }));
+    .map((item) => ({
+      asset_id: item?.asset_id,
+      label: item?.label || "",
+      draft_year: item?.draft_year ?? null,
+      source_pick_id: item?.source_pick_id || null,
+    }));
 
   return { picks, swaps, fixedAssets };
 }
@@ -377,31 +473,41 @@ function extractTeamTradeAssets(summaryPayload, ownerTeamId) {
 async function loadTradeDealPlayerPools(otherTeamId) {
   const myTeamId = state.selectedTeamId;
   if (!myTeamId || !otherTeamId) return;
-  const [myTeamDetail, otherTeamDetail, summary] = await Promise.all([
-    fetchTeamDetail(myTeamId, { force: true }),
-    fetchTeamDetail(otherTeamId, { force: true }),
-    fetchStateSummary(),
-  ]);
-  const myAssets = extractTeamTradeAssets(summary, myTeamId);
-  const otherAssets = extractTeamTradeAssets(summary, otherTeamId);
 
-  state.marketTradeAssetPool = {
-    ...state.marketTradeAssetPool,
-    myTeam: {
-      ...(state.marketTradeAssetPool?.myTeam || {}),
-      players: Array.isArray(myTeamDetail?.roster) ? myTeamDetail.roster : [],
-      picks: myAssets.picks,
-      swaps: myAssets.swaps,
-      fixedAssets: myAssets.fixedAssets,
-    },
-    otherTeam: {
-      ...(state.marketTradeAssetPool?.otherTeam || {}),
-      players: Array.isArray(otherTeamDetail?.roster) ? otherTeamDetail.roster : [],
-      picks: otherAssets.picks,
-      swaps: otherAssets.swaps,
-      fixedAssets: otherAssets.fixedAssets,
-    },
-  };
+  const prevPool = state.marketTradeAssetPool
+    ? JSON.parse(JSON.stringify(state.marketTradeAssetPool))
+    : { myTeam: { players: [], picks: [], swaps: [], fixedAssets: [] }, otherTeam: { players: [], picks: [], swaps: [], fixedAssets: [] } };
+
+  try {
+    const [myTeamDetail, otherTeamDetail, summary] = await Promise.all([
+      fetchTeamDetail(myTeamId, { force: true }),
+      fetchTeamDetail(otherTeamId, { force: true }),
+      fetchStateSummary(),
+    ]);
+    const myAssets = extractTeamTradeAssets(summary, myTeamId);
+    const otherAssets = extractTeamTradeAssets(summary, otherTeamId);
+
+    state.marketTradeAssetPool = {
+      ...state.marketTradeAssetPool,
+      myTeam: {
+        ...(state.marketTradeAssetPool?.myTeam || {}),
+        players: Array.isArray(myTeamDetail?.roster) ? myTeamDetail.roster : [],
+        picks: myAssets.picks,
+        swaps: myAssets.swaps,
+        fixedAssets: myAssets.fixedAssets,
+      },
+      otherTeam: {
+        ...(state.marketTradeAssetPool?.otherTeam || {}),
+        players: Array.isArray(otherTeamDetail?.roster) ? otherTeamDetail.roster : [],
+        picks: otherAssets.picks,
+        swaps: otherAssets.swaps,
+        fixedAssets: otherAssets.fixedAssets,
+      },
+    };
+  } catch (error) {
+    state.marketTradeAssetPool = prevPool;
+    throw new Error(toFriendlyRuleMessage(error?.message || "거래 자산 정보를 불러오지 못했습니다."));
+  }
 }
 
 function validateTradeDealDraftForCommit() {
@@ -437,7 +543,11 @@ function toFriendlyCommitErrorMessage(rawMessage) {
   if (msg.includes("PICK_NOT_OWNED")) return "소유하지 않은 픽이 포함되어 있습니다.";
   if (msg.includes("PROTECTION_CONFLICT")) return "보호조건이 충돌합니다.";
   if (msg.includes("SWAP_INVALID")) return "스왑 자산 구성이 유효하지 않습니다.";
+  if (msg.includes("FIXED_ASSET_NOT_OWNED") || msg.includes("FIXED_ASSET_NOT_FOUND")) return "고정 자산 소유/존재 정보를 다시 확인해주세요.";
+  if (msg.includes("PLAYER_NOT_OWNED")) return "소유하지 않은 선수가 포함되어 있습니다.";
   if (msg.includes("NEGOTIATION_NOT_ACTIVE")) return "협상이 이미 종료되었습니다.";
+  if (msg.includes("NEGOTIATION_INVALID_PHASE")) return "현재 협상 단계에서는 제출할 수 없습니다.";
+  if (msg.includes("DEAL_INVALIDATED")) return "딜 데이터가 유효하지 않습니다. 구성을 다시 확인해주세요.";
   return msg;
 }
 
@@ -497,6 +607,11 @@ async function submitTradeDealDraft() {
     exposeToMedia: false,
   });
 
+  const otherTeamId = String(state.marketTradeActiveSession?.other_team_id || "").toUpperCase();
+  const latestSession = result?.session || state.marketTradeActiveSession || {};
+  const latestDeal = normalizeSessionDeal(latestSession, state.selectedTeamId, otherTeamId);
+  setMarketTradeOfferSnapshot("latest", sessionId, latestDeal);
+
   if (els.marketTradeDealStatus) {
     const accepted = result?.accepted === true;
     els.marketTradeDealStatus.innerHTML = `<p class="subtitle">제출 결과: ${accepted ? "수락" : "검토중/카운터"}</p>`;
@@ -508,7 +623,6 @@ async function submitTradeDealDraft() {
   const accepted = result?.accepted === true;
   const dealId = result?.deal_id || result?.deal?.deal_id || null;
   if (accepted && dealId) {
-    const otherTeamId = String(state.marketTradeActiveSession?.other_team_id || "").toUpperCase();
     const submitOut = await submitCommittedTradeDeal({ dealId, force: true });
     if (els.marketTradeDealStatus) {
       els.marketTradeDealStatus.innerHTML = '<p class="subtitle">제출 결과: 수락 · 거래 반영 완료</p>';
@@ -524,9 +638,18 @@ async function openTradeDealEditorFromSession(session, fallback = {}) {
   const fallbackOtherTeamId = String(fallback?.otherTeamId || "").toUpperCase();
   const otherTeamId = String(activeSession?.other_team_id || fallbackOtherTeamId || "").toUpperCase();
   const prefillPlayerId = fallback?.prefillPlayerId || null;
+  const sessionId = activeSession?.session_id || fallback?.sessionId || null;
 
+  const sync = syncMarketTradeModalSessionState(sessionId, { keepTabsOnReopen: true });
   state.marketTradeActiveSession = activeSession;
-  state.marketTradeDealDraft = buildBaseDraftFromSession(activeSession, state.selectedTeamId, otherTeamId);
+
+  const normalizedDeal = normalizeSessionDeal(activeSession, state.selectedTeamId, otherTeamId);
+  if (sync?.didReset || !state.marketTradeInitialOfferSnapshot?.deal) {
+    setMarketTradeOfferSnapshot("initial", sessionId, normalizedDeal);
+  }
+  setMarketTradeOfferSnapshot("latest", sessionId, normalizedDeal);
+
+  state.marketTradeDealDraft = normalizeTradeDealDraft(normalizedDeal, state.selectedTeamId, otherTeamId);
   ensurePrefillAssetInDraft(state.marketTradeDealDraft, otherTeamId, prefillPlayerId);
 
   if (!els.marketTradeDealModal) return;
@@ -534,7 +657,7 @@ async function openTradeDealEditorFromSession(session, fallback = {}) {
   document.body.classList.add("is-modal-open");
 
   if (els.marketTradeDealSession) {
-    els.marketTradeDealSession.textContent = `세션: ${activeSession?.session_id || fallback?.sessionId || "-"}`;
+    els.marketTradeDealSession.textContent = `세션: ${sessionId || "-"}`;
   }
   if (els.marketTradeDealMeta) {
     const teamName = TEAM_FULL_NAMES[otherTeamId] || otherTeamId || "-";
@@ -547,6 +670,472 @@ async function openTradeDealEditorFromSession(session, fallback = {}) {
   setTradeDealEditorMessage("");
   await loadTradeDealPlayerPools(otherTeamId);
   renderTradeDealEditor();
+}
+
+function normalizeTeamIdUpper(value) {
+  return String(value || "").toUpperCase();
+}
+
+function getInboxPlayerDirectory() {
+  if (!state.marketTradeInboxPlayerDirectory || typeof state.marketTradeInboxPlayerDirectory !== "object") {
+    state.marketTradeInboxPlayerDirectory = {};
+  }
+  return state.marketTradeInboxPlayerDirectory;
+}
+
+async function hydrateMarketTradeInboxPlayerDirectory(rows) {
+  const userTeamId = normalizeTeamIdUpper(state.selectedTeamId);
+  const teamIds = new Set([userTeamId]);
+  (rows || []).forEach((row) => {
+    const other = normalizeTeamIdUpper(row?.other_team_id);
+    if (other) teamIds.add(other);
+  });
+
+  const directory = getInboxPlayerDirectory();
+  await Promise.all(Array.from(teamIds)
+    .filter(Boolean)
+    .map(async (teamId) => {
+      try {
+        const detail = await fetchTeamDetail(teamId, { force: false, staleWhileRevalidate: true });
+        const roster = Array.isArray(detail?.roster) ? detail.roster : [];
+        roster.forEach((player) => {
+          const pid = String(player?.player_id || "");
+          if (!pid) return;
+          directory[pid] = {
+            name: String(player?.name || "").trim() || pid,
+            pos: String(player?.pos || "").trim(),
+            salary: player?.salary,
+          };
+        });
+      } catch {
+        // no-op: keep graceful fallback labels
+      }
+    }));
+}
+
+function resolveDealAssetReceiver(deal, senderTeamId, asset) {
+  const explicit = normalizeTeamIdUpper(asset?.to_team);
+  if (explicit) return explicit;
+  const teams = Array.isArray(deal?.teams) ? deal.teams.map((teamId) => normalizeTeamIdUpper(teamId)).filter(Boolean) : [];
+  if (teams.length === 2) {
+    return teams.find((teamId) => teamId !== senderTeamId) || "";
+  }
+  return "";
+}
+
+function splitDealAssetsForInbox(deal, userTeamId, otherTeamId) {
+  const outgoing = [];
+  const incoming = [];
+  const legs = deal?.legs && typeof deal.legs === "object" ? deal.legs : {};
+
+  Object.entries(legs).forEach(([fromTeamIdRaw, assetsRaw]) => {
+    const fromTeamId = normalizeTeamIdUpper(fromTeamIdRaw);
+    const assets = Array.isArray(assetsRaw) ? assetsRaw : [];
+    assets.forEach((asset) => {
+      const receiver = resolveDealAssetReceiver(deal, fromTeamId, asset);
+      const kind = String(asset?.kind || "").toLowerCase();
+      if (!kind) return;
+
+      if (fromTeamId === userTeamId || receiver === otherTeamId) outgoing.push(asset);
+      if (fromTeamId === otherTeamId || receiver === userTeamId) incoming.push(asset);
+    });
+  });
+
+  return { outgoing, incoming };
+}
+
+function formatInboxAssetText(asset, { teamNameById = {}, playerDirectory = {} } = {}) {
+  const kind = String(asset?.kind || "").toLowerCase();
+  if (kind === "player") {
+    const pid = String(asset?.player_id || "");
+    const player = playerDirectory[pid] || {};
+    const name = String(player?.name || "").trim() || `Unknown Player`;
+    const pos = String(player?.pos || "").trim();
+    const salary = player?.salary != null ? ` · ${formatMoney(player.salary)}` : "";
+    return `[선수] ${name}${pos ? ` (${pos})` : ""}${salary}`;
+  }
+  if (kind === "pick") {
+    const teamName = teamNameById[normalizeTeamIdUpper(asset?.to_team)] || "";
+    const pickText = formatPickLabel({ year: asset?.year, round: asset?.round, teamName, includeTeam: Boolean(teamName) });
+    const protectionText = formatProtectionSummary(asset?.protection);
+    const protectedBadge = protectionText && protectionText !== "Unprotected" ? ` · ${protectionText}` : "";
+    return `[픽] ${pickText}${protectedBadge}`;
+  }
+  if (kind === "swap") {
+    return `[스왑] ${formatSwapAssetLabel({ year: asset?.year, round: asset?.round, pickA: asset?.pick_id_a, pickB: asset?.pick_id_b })}`;
+  }
+  if (kind === "fixed_asset") {
+    return `[고정자산] ${formatFixedAssetLabel({ label: asset?.label, draftYear: asset?.draft_year, sourcePickId: asset?.source_pick_id, assetId: asset?.asset_id })}`;
+  }
+  return "[자산] 기타 자산";
+}
+
+function getModalPlayerDirectory() {
+  const directory = {};
+  const myPlayers = Array.isArray(state.marketTradeAssetPool?.myTeam?.players) ? state.marketTradeAssetPool.myTeam.players : [];
+  const otherPlayers = Array.isArray(state.marketTradeAssetPool?.otherTeam?.players) ? state.marketTradeAssetPool.otherTeam.players : [];
+  [...myPlayers, ...otherPlayers].forEach((player) => {
+    const pid = String(player?.player_id || "");
+    if (!pid) return;
+    directory[pid] = {
+      name: String(player?.name || "").trim() || pid,
+      pos: String(player?.pos || "").trim(),
+      salary: player?.salary,
+    };
+  });
+  return directory;
+}
+
+function setMarketTradeOfferSnapshot(type, sessionId, deal) {
+  const payload = {
+    sessionId: sessionId ? String(sessionId) : null,
+    deal: deal && typeof deal === "object" ? deal : null,
+    capturedAt: new Date().toISOString(),
+  };
+  if (type === "initial") state.marketTradeInitialOfferSnapshot = payload;
+  if (type === "latest") state.marketTradeLatestOfferSnapshot = payload;
+}
+
+function getActivePackageDeal() {
+  const draftDeal = state.marketTradeDealDraft;
+  if (draftDeal && typeof draftDeal === "object") {
+    return normalizeTradeDealDraft(draftDeal, state.selectedTeamId, state.marketTradeActiveSession?.other_team_id);
+  }
+  const latestDeal = state.marketTradeLatestOfferSnapshot?.deal;
+  if (latestDeal && typeof latestDeal === "object") {
+    return normalizeTradeDealDraft(latestDeal, state.selectedTeamId, state.marketTradeActiveSession?.other_team_id);
+  }
+  const initialDeal = state.marketTradeInitialOfferSnapshot?.deal;
+  if (initialDeal && typeof initialDeal === "object") {
+    return normalizeTradeDealDraft(initialDeal, state.selectedTeamId, state.marketTradeActiveSession?.other_team_id);
+  }
+  return createEmptyTradeDealDraft(state.selectedTeamId, state.marketTradeActiveSession?.other_team_id);
+}
+
+function renderTradeDealTopPackage() {
+  const otherTeamId = normalizeTeamIdUpper(state.marketTradeActiveSession?.other_team_id);
+  const myTeamId = normalizeTeamIdUpper(state.selectedTeamId);
+
+  applyTeamLogo(els.marketTradeDealOtherTeamLogo, otherTeamId);
+  applyTeamLogo(els.marketTradeDealMyTeamLogo, myTeamId);
+  if (els.marketTradeDealOtherTeamName) els.marketTradeDealOtherTeamName.textContent = getTeamDisplayName(otherTeamId);
+  if (els.marketTradeDealMyTeamName) els.marketTradeDealMyTeamName.textContent = getTeamDisplayName(myTeamId);
+
+  const packageDeal = getActivePackageDeal();
+  const { outgoing, incoming } = splitDealAssetsForInbox(packageDeal, myTeamId, otherTeamId);
+  const playerDirectory = getModalPlayerDirectory();
+  const teamNameById = {
+    [myTeamId]: getTeamDisplayName(myTeamId),
+    [otherTeamId]: getTeamDisplayName(otherTeamId),
+  };
+
+  if (els.marketTradeDealPackageOtherList) {
+    els.marketTradeDealPackageOtherList.innerHTML = incoming.length
+      ? incoming.map((asset) => `<li>${formatInboxAssetText(asset, { teamNameById, playerDirectory })}</li>`).join("")
+      : "<li>제공 자산 없음</li>";
+  }
+  if (els.marketTradeDealPackageMyList) {
+    els.marketTradeDealPackageMyList.innerHTML = outgoing.length
+      ? outgoing.map((asset) => `<li>${formatInboxAssetText(asset, { teamNameById, playerDirectory })}</li>`).join("")
+      : "<li>요청 자산 없음</li>";
+  }
+}
+
+function getDealTabState(side) {
+  return side === "my" ? state.marketTradeDealTabs?.myTeamAssetTab : state.marketTradeDealTabs?.otherTeamAssetTab;
+}
+
+function setDealTabState(side, kind) {
+  if (!state.marketTradeDealTabs || typeof state.marketTradeDealTabs !== "object") {
+    state.marketTradeDealTabs = { myTeamAssetTab: "player", otherTeamAssetTab: "player" };
+  }
+  const normalizedKind = ["player", "pick", "swap", "fixed_asset"].includes(String(kind)) ? String(kind) : "player";
+  if (side === "my") state.marketTradeDealTabs.myTeamAssetTab = normalizedKind;
+  if (side === "other") state.marketTradeDealTabs.otherTeamAssetTab = normalizedKind;
+}
+
+function renderDealTabsForSide(side) {
+  const tabs = side === "my"
+    ? [
+      [els.marketTradeDealTabMyPlayer, els.marketTradeDealPanelMyPlayer, "player"],
+      [els.marketTradeDealTabMyPick, els.marketTradeDealPanelMyPick, "pick"],
+      [els.marketTradeDealTabMySwap, els.marketTradeDealPanelMySwap, "swap"],
+      [els.marketTradeDealTabMyFixedAsset, els.marketTradeDealPanelMyFixedAsset, "fixed_asset"],
+    ]
+    : [
+      [els.marketTradeDealTabOtherPlayer, els.marketTradeDealPanelOtherPlayer, "player"],
+      [els.marketTradeDealTabOtherPick, els.marketTradeDealPanelOtherPick, "pick"],
+      [els.marketTradeDealTabOtherSwap, els.marketTradeDealPanelOtherSwap, "swap"],
+      [els.marketTradeDealTabOtherFixedAsset, els.marketTradeDealPanelOtherFixedAsset, "fixed_asset"],
+    ];
+
+  const active = getDealTabState(side) || "player";
+  tabs.forEach(([btn, panel, kind]) => {
+    const selected = active === kind;
+    btn?.setAttribute("aria-selected", selected ? "true" : "false");
+    btn?.classList.toggle("is-active", selected);
+    panel?.classList.toggle("hidden", !selected);
+  });
+}
+
+function renderTradeDealTabPanel(panelEl, rows, teamId, playerDirectory, teamNameById) {
+  if (!panelEl) return;
+  if (!rows.length) {
+    panelEl.innerHTML = '<p class="subtitle">표시할 자산이 없습니다.</p>';
+    return;
+  }
+
+  panelEl.innerHTML = `
+    <ul class="market-trade-deal-list-inner">
+      ${rows.map((row) => `<li>${row.html}</li>`).join("")}
+    </ul>
+  `;
+
+  panelEl.querySelectorAll("button[data-deal-toggle-kind]").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      const kind = btn.getAttribute("data-deal-toggle-kind");
+      const id = btn.getAttribute("data-deal-id");
+      if (!kind || !id) return;
+      try {
+        if (kind === "player") toggleAsset(teamId, { kind: "player", player_id: id });
+        if (kind === "pick") {
+          const pickRow = rows.find((entry) => String(entry.id) === String(id)) || {};
+          const pick = pickRow.raw || {};
+          const input = panelEl.querySelector(`input[data-pick-protection-editor='${id}']`);
+          const canEditProtection = Boolean(pick?.can_edit_protection);
+          let protectionPayload = pick?.protection ?? null;
+          if (canEditProtection && input) {
+            const parsed = parseProtectionInput(input.value || "");
+            if (!parsed.ok) throw new Error(parsed.error || "보호조건 입력값이 유효하지 않습니다.");
+            protectionPayload = parsed.value;
+          }
+          toggleAsset(teamId, {
+            kind: "pick",
+            pick_id: id,
+            ...(protectionPayload != null ? { protection: protectionPayload } : {}),
+          });
+        }
+        if (kind === "swap") {
+          const swap = rows.find((entry) => String(entry.id) === String(id))?.raw || {};
+          toggleAsset(teamId, { kind: "swap", swap_id: id, pick_id_a: swap?.pick_id_a, pick_id_b: swap?.pick_id_b });
+        }
+        if (kind === "fixed_asset") toggleAsset(teamId, { kind: "fixed_asset", asset_id: id });
+        renderTradeDealEditor();
+      } catch (e) {
+        setTradeDealEditorMessage(e?.message || "자산 처리 중 오류가 발생했습니다.");
+      }
+    });
+  });
+}
+
+function computeSwapIdFromPair(pickA, pickB) {
+  const ids = [String(pickA || "").trim(), String(pickB || "").trim()].filter(Boolean).sort();
+  if (ids.length !== 2) return "";
+  return `SWAP_${ids[0]}__${ids[1]}`;
+}
+
+function buildSwapCandidateRows(teamId, existingSwaps, myPool, otherPool) {
+  const teamU = normalizeTeamIdUpper(teamId);
+  const existingMap = new Map(
+    (existingSwaps || [])
+      .map((swap) => {
+        const swapId = String(swap?.swap_id || "").trim() || computeSwapIdFromPair(swap?.pick_id_a, swap?.pick_id_b);
+        return [swapId, swap];
+      })
+      .filter(([id]) => id),
+  );
+
+  const ownPicks = (Array.isArray(myPool?.picks) ? myPool.picks : []).map((p) => ({ ...p, owner_team: teamU }));
+  const opponentPicks = (Array.isArray(otherPool?.picks) ? otherPool.picks : [])
+    .filter((p) => normalizeTeamIdUpper(p?.owner_team) !== teamU)
+    .map((p) => ({ ...p }));
+
+  const candidates = [];
+  ownPicks.forEach((pickA) => {
+    opponentPicks.forEach((pickB) => {
+      const sameYearRound = Number(pickA?.year) === Number(pickB?.year) && Number(pickA?.round) === Number(pickB?.round);
+      if (!sameYearRound) return;
+      const swapId = computeSwapIdFromPair(pickA?.pick_id, pickB?.pick_id);
+      if (!swapId || existingMap.has(swapId)) return;
+      candidates.push({
+        swap_id: swapId,
+        year: pickA?.year,
+        round: pickA?.round,
+        pick_id_a: pickA?.pick_id,
+        pick_id_b: pickB?.pick_id,
+        candidate: true,
+      });
+    });
+  });
+
+  const unique = new Map();
+  candidates.forEach((row) => {
+    if (!unique.has(row.swap_id)) unique.set(row.swap_id, row);
+  });
+  return Array.from(unique.values());
+}
+
+function buildTabRowsForTeam(kind, pool, teamId, teamNameById, playerDirectory, context = {}) {
+  const rows = [];
+  const teamU = normalizeTeamIdUpper(teamId);
+
+  if (kind === "player") {
+    const players = Array.isArray(pool?.players) ? pool.players : [];
+    players.forEach((player) => {
+      const pid = String(player?.player_id || "");
+      if (!pid) return;
+      const selected = hasAsset(teamId, { kind: "player", player_id: pid });
+      rows.push({
+        id: pid,
+        raw: player,
+        html: `<span>${formatInboxAssetText({ kind: "player", player_id: pid }, { teamNameById, playerDirectory })}</span><button type="button" class="btn btn-secondary" data-deal-toggle-kind="player" data-deal-id="${pid}">${selected ? "제거" : "추가"}</button>`,
+      });
+    });
+  }
+
+  if (kind === "pick") {
+    const picks = Array.isArray(pool?.picks) ? pool.picks : [];
+    picks.forEach((pick) => {
+      const pickId = String(pick?.pick_id || "");
+      if (!pickId) return;
+      const selected = hasAsset(teamId, { kind: "pick", pick_id: pickId });
+      const protectionText = formatProtectionSummary(pick?.protection);
+      const canEditProtection = normalizeTeamIdUpper(pick?.owner_team) === normalizeTeamIdUpper(pick?.original_team);
+      const label = formatPickLabel({ year: pick?.year, round: pick?.round, teamName: teamNameById[teamU], includeTeam: true });
+      const protectionValue = pick?.protection ? JSON.stringify(pick.protection) : "";
+      const protectionBadge = protectionText && protectionText !== "Unprotected"
+        ? `<span class="market-trade-asset-badge market-trade-asset-badge-protected">보호픽</span>`
+        : "";
+      const protectionEditor = canEditProtection
+        ? `<input type="text" class="ui-input" data-pick-protection-editor='${pickId}' placeholder='{"type":"TOP","value":5}' value='${protectionValue}' />`
+        : `<span class="subtitle">보호조건 편집 불가</span>`;
+      rows.push({
+        id: pickId,
+        raw: { ...pick, can_edit_protection: canEditProtection },
+        html: `<div><span>[픽] ${label}${protectionText && protectionText !== "Unprotected" ? ` · ${protectionText}` : ""} ${protectionBadge}</span><div class="market-trade-pick-editor">${protectionEditor}</div></div><button type="button" class="btn btn-secondary" data-deal-toggle-kind="pick" data-deal-id="${pickId}">${selected ? "제거" : "추가"}</button>`,
+      });
+    });
+  }
+
+  if (kind === "swap") {
+    const swaps = Array.isArray(pool?.swaps) ? pool.swaps : [];
+    const candidates = buildSwapCandidateRows(teamU, swaps, pool, context?.counterPool || {});
+
+    swaps.forEach((swap) => {
+      const swapId = String(swap?.swap_id || "");
+      if (!swapId) return;
+      const selected = hasAsset(teamId, { kind: "swap", swap_id: swapId, pick_id_a: swap?.pick_id_a, pick_id_b: swap?.pick_id_b });
+      rows.push({
+        id: swapId,
+        raw: { ...swap, candidate: false },
+        html: `<span>[스왑] ${formatSwapAssetLabel({ year: swap?.year, round: swap?.round, pickA: swap?.pick_id_a, pickB: swap?.pick_id_b })} <span class="market-trade-asset-badge">보유</span></span><button type="button" class="btn btn-secondary" data-deal-toggle-kind="swap" data-deal-id="${swapId}">${selected ? "제거" : "추가"}</button>`,
+      });
+    });
+
+    candidates.forEach((swap) => {
+      const swapId = String(swap?.swap_id || "");
+      const selected = hasAsset(teamId, { kind: "swap", swap_id: swapId, pick_id_a: swap?.pick_id_a, pick_id_b: swap?.pick_id_b });
+      rows.push({
+        id: swapId,
+        raw: swap,
+        html: `<span>[스왑] ${formatSwapAssetLabel({ year: swap?.year, round: swap?.round, pickA: swap?.pick_id_a, pickB: swap?.pick_id_b })} <span class="market-trade-asset-badge market-trade-asset-badge-candidate">생성 가능</span></span><button type="button" class="btn btn-secondary" data-deal-toggle-kind="swap" data-deal-id="${swapId}">${selected ? "제거" : "추가"}</button>`,
+      });
+    });
+  }
+
+  if (kind === "fixed_asset") {
+    const fixedAssets = Array.isArray(pool?.fixedAssets) ? pool.fixedAssets : [];
+    fixedAssets.forEach((fixed) => {
+      const assetId = String(fixed?.asset_id || "");
+      if (!assetId) return;
+      const selected = hasAsset(teamId, { kind: "fixed_asset", asset_id: assetId });
+      rows.push({
+        id: assetId,
+        raw: fixed,
+        html: `<span>[고정자산] ${formatFixedAssetLabel({ label: fixed?.label, draftYear: fixed?.draft_year, sourcePickId: fixed?.source_pick_id, assetId })}</span><button type="button" class="btn btn-secondary" data-deal-toggle-kind="fixed_asset" data-deal-id="${assetId}">${selected ? "제거" : "추가"}</button>`,
+      });
+    });
+  }
+  return rows;
+}
+
+function renderTradeDealAssetTabs() {
+  const myTeamId = normalizeTeamIdUpper(state.selectedTeamId);
+  const otherTeamId = normalizeTeamIdUpper(state.marketTradeActiveSession?.other_team_id);
+  const teamNameById = {
+    [myTeamId]: getTeamDisplayName(myTeamId),
+    [otherTeamId]: getTeamDisplayName(otherTeamId),
+  };
+  const playerDirectory = getModalPlayerDirectory();
+
+  const myKind = getDealTabState("my") || "player";
+  const otherKind = getDealTabState("other") || "player";
+
+  renderDealTabsForSide("my");
+  renderDealTabsForSide("other");
+
+  renderTradeDealTabPanel(
+    els.marketTradeDealPanelMyPlayer,
+    buildTabRowsForTeam("player", state.marketTradeAssetPool?.myTeam || {}, myTeamId, teamNameById, playerDirectory, { counterPool: state.marketTradeAssetPool?.otherTeam || {} }),
+    myTeamId,
+    playerDirectory,
+    teamNameById,
+  );
+  renderTradeDealTabPanel(
+    els.marketTradeDealPanelMyPick,
+    buildTabRowsForTeam("pick", state.marketTradeAssetPool?.myTeam || {}, myTeamId, teamNameById, playerDirectory, { counterPool: state.marketTradeAssetPool?.otherTeam || {} }),
+    myTeamId,
+    playerDirectory,
+    teamNameById,
+  );
+  renderTradeDealTabPanel(
+    els.marketTradeDealPanelMySwap,
+    buildTabRowsForTeam("swap", state.marketTradeAssetPool?.myTeam || {}, myTeamId, teamNameById, playerDirectory, { counterPool: state.marketTradeAssetPool?.otherTeam || {} }),
+    myTeamId,
+    playerDirectory,
+    teamNameById,
+  );
+  renderTradeDealTabPanel(
+    els.marketTradeDealPanelMyFixedAsset,
+    buildTabRowsForTeam("fixed_asset", state.marketTradeAssetPool?.myTeam || {}, myTeamId, teamNameById, playerDirectory, { counterPool: state.marketTradeAssetPool?.otherTeam || {} }),
+    myTeamId,
+    playerDirectory,
+    teamNameById,
+  );
+
+  renderTradeDealTabPanel(
+    els.marketTradeDealPanelOtherPlayer,
+    buildTabRowsForTeam("player", state.marketTradeAssetPool?.otherTeam || {}, otherTeamId, teamNameById, playerDirectory, { counterPool: state.marketTradeAssetPool?.myTeam || {} }),
+    otherTeamId,
+    playerDirectory,
+    teamNameById,
+  );
+  renderTradeDealTabPanel(
+    els.marketTradeDealPanelOtherPick,
+    buildTabRowsForTeam("pick", state.marketTradeAssetPool?.otherTeam || {}, otherTeamId, teamNameById, playerDirectory, { counterPool: state.marketTradeAssetPool?.myTeam || {} }),
+    otherTeamId,
+    playerDirectory,
+    teamNameById,
+  );
+  renderTradeDealTabPanel(
+    els.marketTradeDealPanelOtherSwap,
+    buildTabRowsForTeam("swap", state.marketTradeAssetPool?.otherTeam || {}, otherTeamId, teamNameById, playerDirectory, { counterPool: state.marketTradeAssetPool?.myTeam || {} }),
+    otherTeamId,
+    playerDirectory,
+    teamNameById,
+  );
+  renderTradeDealTabPanel(
+    els.marketTradeDealPanelOtherFixedAsset,
+    buildTabRowsForTeam("fixed_asset", state.marketTradeAssetPool?.otherTeam || {}, otherTeamId, teamNameById, playerDirectory, { counterPool: state.marketTradeAssetPool?.myTeam || {} }),
+    otherTeamId,
+    playerDirectory,
+    teamNameById,
+  );
+
+  // keep tab state touched to avoid lint for derived vars
+  void myKind;
+  void otherKind;
 }
 
 function renderMarketTradeInbox() {
@@ -567,47 +1156,102 @@ function renderMarketTradeInbox() {
   }
   emptyEl.classList.add("hidden");
 
+  const template = els.marketTradeInboxCardTemplate;
+  const playerDirectory = getInboxPlayerDirectory();
+  const teamNameById = Object.fromEntries(Object.keys(TEAM_FULL_NAMES).map((id) => [id, getTeamDisplayName(id)]));
+
   grouped.forEach((group) => {
     const section = document.createElement("section");
     section.className = "market-trade-inbox-group";
-    const teamId = String(group?.other_team_id || "-").toUpperCase();
-    const teamName = TEAM_FULL_NAMES[teamId] || teamId;
+    const teamId = normalizeTeamIdUpper(group?.other_team_id || "-");
+    const teamName = getTeamDisplayName(teamId);
     const items = Array.isArray(group?.rows) ? group.rows : [];
     section.innerHTML = `
       <h4>${teamName} · ${items.length}건</h4>
       <ul class="market-trade-inbox-list"></ul>
     `;
     const list = section.querySelector(".market-trade-inbox-list");
+
     items.forEach((row) => {
+      const sessionId = row?.session_id || "-";
+      const deal = normalizeInboxOfferDeal(row, state.selectedTeamId, row?.other_team_id);
+      const { outgoing, incoming } = splitDealAssetsForInbox(
+        deal,
+        normalizeTeamIdUpper(state.selectedTeamId),
+        normalizeTeamIdUpper(row?.other_team_id),
+      );
+      const createdOrUpdated = row?.created_at || row?.updated_at || "-";
+      const dateText = String(createdOrUpdated).slice(5, 10).replace("-", "/") || "--/--";
+
       const li = document.createElement("li");
       li.className = "market-trade-inbox-item";
-      const sessionId = row?.session_id || "-";
-      const updatedAt = row?.updated_at || "-";
-      const status = String(row?.status || "-").toUpperCase();
-      const phase = String(row?.phase || "-").toUpperCase();
-      li.innerHTML = `
-        <div class="market-trade-inbox-item-main">
-          <strong>세션 ${sessionId}</strong>
-          <span>상태 ${status}/${phase}</span>
-          <span>업데이트 ${updatedAt}</span>
-        </div>
-        <div class="market-trade-inbox-item-actions">
-          <button type="button" class="btn btn-secondary" data-inbox-action="open" data-session-id="${sessionId}">협상</button>
-          <button type="button" class="btn btn-secondary" data-inbox-action="reject" data-session-id="${sessionId}">거절</button>
-        </div>
-      `;
-      const openBtn = li.querySelector('button[data-inbox-action="open"]');
-      openBtn?.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        openTradeInboxSession(row).catch((e) => alert(e.message));
-      });
-      const rejectBtn = li.querySelector('button[data-inbox-action="reject"]');
-      rejectBtn?.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        rejectTradeInboxSession(row).catch((e) => alert(e.message));
-      });
+
+      if (template instanceof HTMLTemplateElement) {
+        const fragment = template.content.cloneNode(true);
+        const article = fragment.querySelector('[data-market-trade-role="card"]');
+        const logoEl = fragment.querySelector('#market-trade-inbox-card-logo');
+        const outgoingList = fragment.querySelector('#market-trade-inbox-card-outgoing-list');
+        const incomingList = fragment.querySelector('#market-trade-inbox-card-incoming-list');
+        const dateEl = fragment.querySelector('#market-trade-inbox-card-date');
+        const openBtn = fragment.querySelector('#market-trade-inbox-card-open');
+        const rejectBtn = fragment.querySelector('#market-trade-inbox-card-reject');
+
+        if (article) {
+          article.setAttribute('data-session-id', String(sessionId));
+        }
+        applyTeamLogo(logoEl, teamId);
+
+        if (outgoingList) {
+          outgoingList.innerHTML = outgoing.length
+            ? outgoing.map((asset) => `<li>${formatInboxAssetText(asset, { teamNameById, playerDirectory })}</li>`).join('')
+            : '<li>요청 자산 없음</li>';
+        }
+        if (incomingList) {
+          incomingList.innerHTML = incoming.length
+            ? incoming.map((asset) => `<li>${formatInboxAssetText(asset, { teamNameById, playerDirectory })}</li>`).join('')
+            : '<li>제공 자산 없음</li>';
+        }
+        if (dateEl) dateEl.textContent = dateText;
+
+        openBtn?.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openTradeInboxSession(row).catch((e) => alert(e.message));
+        });
+        rejectBtn?.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          rejectTradeInboxSession(row).catch((e) => alert(e.message));
+        });
+
+        li.appendChild(fragment);
+      } else {
+        // fallback legacy rendering
+        li.innerHTML = `
+          <div class="market-trade-inbox-item-main">
+            <strong>세션 ${sessionId}</strong>
+            <span>${teamName}</span>
+            <span>제안일 ${dateText}</span>
+          </div>
+          <div class="market-trade-inbox-item-actions">
+            <button type="button" class="btn btn-secondary" data-inbox-action="open" data-session-id="${sessionId}">협상</button>
+            <button type="button" class="btn btn-secondary" data-inbox-action="reject" data-session-id="${sessionId}">거절</button>
+          </div>
+        `;
+        const openBtn = li.querySelector('button[data-inbox-action="open"]');
+        openBtn?.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openTradeInboxSession(row).catch((e) => alert(e.message));
+        });
+        const rejectBtn = li.querySelector('button[data-inbox-action="reject"]');
+        rejectBtn?.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          rejectTradeInboxSession(row).catch((e) => alert(e.message));
+        });
+      }
+
       list?.appendChild(li);
     });
     groupsEl.appendChild(section);
@@ -650,6 +1294,9 @@ async function loadMarketTradeInbox({ force = false } = {}) {
     return;
   }
 
+  const previousRows = Array.isArray(state.marketTradeInboxRows) ? [...state.marketTradeInboxRows] : [];
+  const previousGroups = Array.isArray(state.marketTradeInboxGrouped) ? [...state.marketTradeInboxGrouped] : [];
+
   setMarketTradeInboxLoading(true);
   renderMarketTradeInbox();
   try {
@@ -663,10 +1310,19 @@ async function loadMarketTradeInbox({ force = false } = {}) {
       : Array.isArray(payload?.sessions)
         ? payload.sessions
         : [];
+    await hydrateMarketTradeInboxPlayerDirectory(rows);
     state.marketTradeInboxRows = rows;
     state.marketTradeInboxGrouped = groupInboxRowsByOtherTeam(rows);
     state.marketTradeInboxLastLoadedAt = Date.now();
     renderMarketTradeInbox();
+  } catch (error) {
+    state.marketTradeInboxRows = previousRows;
+    state.marketTradeInboxGrouped = previousGroups;
+    renderMarketTradeInbox();
+    if (els.marketTradeInboxSummary) {
+      els.marketTradeInboxSummary.textContent = toFriendlyRuleMessage(error?.message || "제안 목록을 불러오지 못했습니다.");
+    }
+    throw new Error(toFriendlyRuleMessage(error?.message || "제안 목록을 불러오지 못했습니다."));
   } finally {
     setMarketTradeInboxLoading(false);
   }
@@ -698,7 +1354,7 @@ async function openTradeInboxSession(row) {
       state.marketTradeInboxLastLoadedAt = Date.now();
       loadMarketTradeInbox({ force: true }).catch(() => {});
     }
-    throw error;
+    throw new Error(toFriendlyRuleMessage(msg || "협상 세션을 열지 못했습니다."));
   } finally {
     setLoading(false);
   }
@@ -863,6 +1519,26 @@ async function startTradeNegotiationFromModal() {
   await openTradeDealEditorFromSession(state.marketTradeNegotiationSession || {}, {
     otherTeamId,
     prefillPlayerId: playerId,
+  });
+}
+
+function bindTradeDealTabEvents() {
+  const bindings = [
+    [els.marketTradeDealTabMyPlayer, "my", "player"],
+    [els.marketTradeDealTabMyPick, "my", "pick"],
+    [els.marketTradeDealTabMySwap, "my", "swap"],
+    [els.marketTradeDealTabMyFixedAsset, "my", "fixed_asset"],
+    [els.marketTradeDealTabOtherPlayer, "other", "player"],
+    [els.marketTradeDealTabOtherPick, "other", "pick"],
+    [els.marketTradeDealTabOtherSwap, "other", "swap"],
+    [els.marketTradeDealTabOtherFixedAsset, "other", "fixed_asset"],
+  ];
+  bindings.forEach(([btn, side, kind]) => {
+    btn?.addEventListener("click", (event) => {
+      event.preventDefault();
+      setDealTabState(side, kind);
+      renderTradeDealEditor();
+    });
   });
 }
 
@@ -1448,6 +2124,7 @@ async function showMarketScreen() {
 
     els.marketTradeDealBackdrop?.addEventListener("click", closeTradeDealEditorModal);
     els.marketTradeDealCancel?.addEventListener("click", closeTradeDealEditorModal);
+    bindTradeDealTabEvents();
     els.marketTradeDealSubmit?.addEventListener("click", () => {
       if (state.marketTradeUi?.submitPending) return;
       setTradeDealSubmitPending(true);

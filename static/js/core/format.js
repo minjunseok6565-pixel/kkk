@@ -84,4 +84,62 @@ function formatSignedDelta(v) {
   };
 }
 
-export { formatIsoDate, formatHeightIn, formatWeightLb, formatMoney, formatPercent, seasonLabelByYear, getOptionTypeLabel, formatWinPct, dateToIso, parseIsoDate, startOfWeek, addDays, formatSignedDiff, formatSignedDelta };
+
+function formatDraftRoundLabel(roundNumber) {
+  const round = Number(roundNumber);
+  if (round === 1) return "1st round";
+  if (round === 2) return "2nd round";
+  if (round === 3) return "3rd round";
+  if (Number.isFinite(round) && round > 0) return `${round}th round`;
+  return "round";
+}
+
+function formatPickLabel({ year, round, teamName = "", includeTeam = true } = {}) {
+  const yearNum = Number(year);
+  const roundLabel = formatDraftRoundLabel(round);
+  const yearText = Number.isFinite(yearNum) ? String(yearNum) : "----";
+  const base = `${yearText} ${roundLabel} pick`;
+  const team = String(teamName || "").trim();
+  if (!includeTeam || !team) return base;
+  return `${base} (${team})`;
+}
+
+function formatProtectionSummary(protection) {
+  if (!protection || typeof protection !== "object" || Array.isArray(protection)) return "Unprotected";
+  const type = String(protection.type || "").toUpperCase();
+  const value = Number(protection.value ?? protection.n ?? protection.top_n);
+
+  if (["TOP", "TOP_N", "TOP_PROTECTED"].includes(type) && Number.isFinite(value) && value > 0) {
+    return `Top ${Math.floor(value)} protected`;
+  }
+
+  if (type === "LOTTERY") return "Lottery protected";
+  if (type === "UNPROTECTED") return "Unprotected";
+
+  return type ? `${type} protected` : "Protected";
+}
+
+function formatSwapAssetLabel({ year, round, pickA = "", pickB = "" } = {}) {
+  const y = Number(year);
+  const yearText = Number.isFinite(y) ? String(y) : "----";
+  const roundLabel = formatDraftRoundLabel(round);
+  const pairText = [String(pickA || "").trim(), String(pickB || "").trim()].filter(Boolean).join(" ↔ ");
+  return pairText
+    ? `${yearText} ${roundLabel} swap right (${pairText})`
+    : `${yearText} ${roundLabel} swap right`;
+}
+
+function formatFixedAssetLabel({ label = "", draftYear = null, sourcePickId = "", assetId = "" } = {}) {
+  const cleanLabel = String(label || "").trim();
+  const yr = Number(draftYear);
+  const yearText = Number.isFinite(yr) ? String(yr) : "";
+  const source = String(sourcePickId || "").trim();
+  const fallbackId = String(assetId || "").trim();
+
+  const bits = [cleanLabel || "Fixed asset"];
+  if (yearText) bits.push(yearText);
+  if (source) bits.push(`from ${source}`);
+  if (!cleanLabel && fallbackId) bits.push(`#${fallbackId}`);
+  return bits.join(" · ");
+}
+export { formatIsoDate, formatHeightIn, formatWeightLb, formatMoney, formatPercent, seasonLabelByYear, getOptionTypeLabel, formatWinPct, dateToIso, parseIsoDate, startOfWeek, addDays, formatSignedDiff, formatSignedDelta, formatDraftRoundLabel, formatPickLabel, formatProtectionSummary, formatSwapAssetLabel, formatFixedAssetLabel };
