@@ -131,6 +131,48 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         )
         self.assertEqual(out[0].player_id, "p2")
 
+    def test_public_listing_bypasses_seller_bucket_willingness_gate(self):
+        refs = [
+            IncomingPlayerRef("core1", "LAL", "WING", 0.8, 10.0, 8.0, 2.0, 26.0),
+        ]
+        out_lal = TeamOutgoingCatalog(
+            team_id="LAL",
+            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple(), "CORE": tuple()},
+            pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
+            swap_ids=tuple(),
+            players={"core1": SimpleNamespace(buckets=tuple())},
+            picks={},
+            swaps={},
+        )
+        catalog = SimpleNamespace(
+            incoming_by_need_tag={"WING": tuple(refs)},
+            incoming_cheap_by_need_tag={"WING": tuple()},
+            outgoing_by_team={"LAL": out_lal, "BOS": self._catalog(refs).outgoing_by_team["BOS"]},
+        )
+        trade_market = {
+            "listings": {
+                "core1": {
+                    "player_id": "core1",
+                    "team_id": "LAL",
+                    "status": "ACTIVE",
+                    "visibility": "PUBLIC",
+                    "priority": 1.0,
+                    "updated_at": "2026-02-10",
+                }
+            }
+        }
+        out = select_targets_buy(
+            "BOS",
+            _TickCtxStub(trade_market=trade_market),
+            catalog,
+            DealGeneratorConfig(),
+            budget=self._budget(),
+            rng=random.Random(7),
+            banned_players=set(),
+        )
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].player_id, "core1")
+
 
 if __name__ == "__main__":
     unittest.main()
