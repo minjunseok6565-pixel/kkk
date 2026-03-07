@@ -179,10 +179,8 @@ def select_targets_buy(
             listed = listing_meta_by_player.get(str(r.player_id), {}) if listing_meta_by_player else {}
             is_public_listing = bool(listed) and str(listed.get("team_id") or "").upper() == from_team
 
-            # CORE/비매물 컷(타깃 단계에서)
-            # 단, 판매팀이 공개 Trade Block에 올린 선수는 구매자 관심 후보에 포함한다.
-            if not is_public_listing and not _is_seller_willing_to_move_player(r.player_id, seller_out):
-                continue
+            # BUY 관점에서는 seller outgoing bucket 포함 여부를 사전 컷에 사용하지 않는다.
+            # 공개 listing은 rank boost 신호로만 사용하고, 비공개/일반 자산도 incoming index 기준으로 탐색한다.
 
             # 가벼운 rank score는 정렬에만 사용
             rank = float(r.tag_strength) * (0.55 + 0.45 * w_need) + 0.02 * float(r.market_total)

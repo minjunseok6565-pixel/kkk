@@ -21,7 +21,6 @@ from .utils import (
     _split_young_candidates,
     _shape_ok,
 )
-from .targets import _is_seller_willing_to_move_player
 
 
 # =============================================================================
@@ -60,9 +59,7 @@ def build_offer_skeletons_buy(
     if buyer_out is None or seller_out is None:
         return []
 
-    # seller가 해당 선수를 "매물"로 갖고 있는지(= outgoing pool에 포함) 확인
-    if not _is_seller_willing_to_move_player(target.player_id, seller_out):
-        return []
+    # BUY 관점에서는 seller outgoing bucket 포함 여부를 선제 게이트로 사용하지 않는다.
 
     # return-ban precheck
     cand_target = seller_out.players.get(target.player_id)
