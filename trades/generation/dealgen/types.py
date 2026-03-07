@@ -147,11 +147,28 @@ class DealGeneratorConfig:
     target_repeat_penalty: float = 0.15
 
     # --- market signal priority boosts (sell target ordering)
-    # Listed players should surface earlier, but not overwhelm core quality signals.
-    listed_player_priority_boost: float = 1.25
     public_request_priority_boost: float = 0.55
-    listed_public_request_synergy_boost: float = 0.30
-    priority_signal_boost_cap: float = 1.75
+    public_request_priority_boost_cap: float = 1.25
+
+    # --- listing interest priority boosts (buy target ordering)
+    buy_target_listing_interest_enabled: bool = True
+    buy_target_listing_interest_boost_base: float = 0.25
+    buy_target_listing_interest_priority_scale: float = 0.35
+    buy_target_listing_interest_recency_half_life_days: float = 7.0
+    buy_target_listing_interest_need_weight_scale: float = 0.25
+    buy_target_listing_interest_cap: float = 0.85
+
+    # --- proactive listing controls (AI)
+    ai_proactive_listing_enabled: bool = True
+    ai_proactive_listing_team_daily_cap: int = 2
+    ai_proactive_listing_team_active_cap: int = 4
+    ai_proactive_listing_player_cooldown_days: int = 7
+    ai_proactive_listing_ttl_days_sell: int = 12
+    ai_proactive_listing_ttl_days_soft_sell: int = 7
+    ai_proactive_listing_ttl_days_default: int = 5
+    ai_proactive_listing_min_score: float = 0.25
+    ai_proactive_listing_priority_base: float = 0.45
+    ai_proactive_listing_priority_span: float = 0.35
 
     # --- opponent diversity / spam prevention
     opponent_repeat_penalty: float = 0.25

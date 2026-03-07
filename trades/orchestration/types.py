@@ -155,13 +155,8 @@ class OrchestrationConfig:
 
     # --- Trade block (listing) market effects
     enable_trade_block: bool = True
-    trade_block_actor_weight_multiplier: float = 1.20
     # Public trade-request teams should surface somewhat more often.
     trade_request_public_actor_weight_multiplier: float = 1.15
-    # If a team has public trade request(s) but no active listing, give a smaller boost.
-    trade_request_public_no_listing_weight_multiplier: float = 1.08
-    # If a team has both listing and public trade request signal, apply a mild extra boost.
-    trade_request_public_with_listing_weight_multiplier: float = 1.06
     # Guardrail: cap total actor weight multiplier after all boosts.
     actor_weight_multiplier_cap: float = 3.00
     trade_block_auto_list_days_public_offer: int = 10
