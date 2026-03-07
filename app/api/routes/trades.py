@@ -43,6 +43,7 @@ from app.schemas.trades import (
     TradeNegotiationCommitRequest,
     TradeNegotiationOpenRequest,
     TradeNegotiationRejectRequest,
+    TradeNegotiationInboxResponse,
     TradeNegotiationStartRequest,
     TradeSubmitCommittedRequest,
     TradeSubmitRequest,
@@ -50,6 +51,7 @@ from app.schemas.trades import (
 from app.services.cache_facade import _try_ui_cache_refresh_players
 from app.services.contract_facade import _validate_repo_integrity
 from app.services.trade_facade import _trade_error_response
+from app.services.trade_contract_telemetry import emit_trade_contract_violation
 from agency.service import apply_trade_offer_grievances
 
 router = APIRouter()
@@ -641,39 +643,285 @@ def _count_assets_for_user(offer_payload: Dict[str, Any], *, user_team_id: str) 
         "user_incoming_picks": 0,
     }
     legs = offer_payload.get("legs") if isinstance(offer_payload, dict) else None
-    if not isinstance(legs, list):
+    tid = str(user_team_id).upper()
+
+    if isinstance(legs, list):
+        for leg in legs:
+            if not isinstance(leg, dict):
+                continue
+            from_team = str(leg.get("from_team") or "").upper()
+            to_team = str(leg.get("to_team") or "").upper()
+            assets = leg.get("assets")
+            if not isinstance(assets, list):
+                continue
+
+            for asset in assets:
+                if not isinstance(asset, dict):
+                    continue
+                kind = str(asset.get("kind") or "").upper()
+                if kind not in {"PLAYER", "PICK"}:
+                    continue
+                if from_team == tid:
+                    key = "user_outgoing_players" if kind == "PLAYER" else "user_outgoing_picks"
+                    counts[key] += 1
+                if to_team == tid:
+                    key = "user_incoming_players" if kind == "PLAYER" else "user_incoming_picks"
+                    counts[key] += 1
         return counts
 
-    tid = str(user_team_id).upper()
-    for leg in legs:
-        if not isinstance(leg, dict):
-            continue
-        from_team = str(leg.get("from_team") or "").upper()
-        to_team = str(leg.get("to_team") or "").upper()
-        assets = leg.get("assets")
-        if not isinstance(assets, list):
-            continue
-
-        for asset in assets:
-            if not isinstance(asset, dict):
+    if isinstance(legs, dict):
+        teams = [str(t).upper() for t in (offer_payload.get("teams") or []) if str(t)]
+        counterpart = next((team for team in teams if team != tid), "")
+        for from_team_raw, assets in legs.items():
+            from_team = str(from_team_raw or "").upper()
+            if not isinstance(assets, list):
                 continue
-            kind = str(asset.get("kind") or "").upper()
-            if kind not in {"PLAYER", "PICK"}:
-                continue
-            if from_team == tid:
-                key = "user_outgoing_players" if kind == "PLAYER" else "user_outgoing_picks"
-                counts[key] += 1
-            if to_team == tid:
-                key = "user_incoming_players" if kind == "PLAYER" else "user_incoming_picks"
-                counts[key] += 1
+            for asset in assets:
+                if not isinstance(asset, dict):
+                    continue
+                kind = str(asset.get("kind") or "").upper()
+                if kind not in {"PLAYER", "PICK"}:
+                    continue
+                to_team = str(asset.get("to_team") or "").upper() or (counterpart if counterpart else "")
+                if from_team == tid:
+                    key = "user_outgoing_players" if kind == "PLAYER" else "user_outgoing_picks"
+                    counts[key] += 1
+                if to_team == tid:
+                    key = "user_incoming_players" if kind == "PLAYER" else "user_incoming_picks"
+                    counts[key] += 1
     return counts
 
 
-def _build_trade_negotiation_inbox_row(session: Dict[str, Any], *, today: date) -> Dict[str, Any]:
+def _first_nonempty_str(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _is_deal_payload(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return isinstance(payload.get("teams"), list) and isinstance(payload.get("legs"), dict)
+
+
+def _extract_deal_payload(payload: Any) -> Dict[str, Any]:
+    if _is_deal_payload(payload):
+        return payload
+    if not isinstance(payload, dict):
+        return {}
+    for key in ("offer", "deal"):
+        candidate = payload.get(key)
+        if _is_deal_payload(candidate):
+            return candidate
+    return {}
+
+
+def _collect_player_ids_from_deal(offer_payload: Dict[str, Any]) -> List[str]:
+    deal = _extract_deal_payload(offer_payload)
+    out: List[str] = []
+    legs = deal.get("legs") if isinstance(deal, dict) else {}
+    for assets in (legs.values() if isinstance(legs, dict) else []):
+        if not isinstance(assets, list):
+            continue
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            if str(asset.get("kind") or "").lower() != "player":
+                continue
+            pid = str(asset.get("player_id") or "").strip()
+            if pid:
+                out.append(pid)
+    return list(dict.fromkeys(out))
+
+
+def _collect_pick_ids_from_deal(offer_payload: Dict[str, Any]) -> List[str]:
+    deal = _extract_deal_payload(offer_payload)
+    out: List[str] = []
+    legs = deal.get("legs") if isinstance(deal, dict) else {}
+    for assets in (legs.values() if isinstance(legs, dict) else []):
+        if not isinstance(assets, list):
+            continue
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            if str(asset.get("kind") or "").lower() != "pick":
+                continue
+            pick_id = str(asset.get("pick_id") or "").strip()
+            if pick_id:
+                out.append(pick_id)
+    return list(dict.fromkeys(out))
+
+
+def _hydrate_player_asset_snapshots(player_ids: List[str], *, db_path: str) -> Dict[str, Dict[str, Any]]:
+    pids = [str(pid).strip() for pid in (player_ids or []) if str(pid).strip()]
+    if not pids:
+        return {}
+    placeholders = ",".join("?" for _ in pids)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT player_id, name, pos
+            FROM players
+            WHERE player_id IN ({placeholders})
+            """,
+            tuple(pids),
+        ).fetchall()
+    snaps: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        pid = str(row["player_id"])
+        snaps[pid] = {
+            "display_name": str(row["name"] or "").strip(),
+            "pos": str(row["pos"] or "").strip(),
+        }
+    return snaps
+
+
+def _hydrate_pick_asset_snapshots(pick_ids: List[str], *, db_path: str) -> Dict[str, Dict[str, Any]]:
+    ids = [str(pid).strip() for pid in (pick_ids or []) if str(pid).strip()]
+    if not ids:
+        return {}
+    wanted = set(ids)
+    with LeagueRepo(db_path) as repo:
+        picks = repo.get_draft_picks_map() or {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for pick_id in wanted:
+        row = picks.get(pick_id)
+        if not isinstance(row, dict):
+            continue
+        out[pick_id] = {
+            "year": row.get("year"),
+            "round": row.get("round"),
+            "original_team": _first_nonempty_str(row.get("original_team")),
+            "owner_team": _first_nonempty_str(row.get("owner_team")),
+        }
+    return out
+
+
+def _canonicalize_offer_assets(
+    offer_payload: Dict[str, Any],
+    *,
+    player_snaps: Dict[str, Dict[str, Any]],
+    pick_snaps: Dict[str, Dict[str, Any]],
+    session_id: str,
+    endpoint: str,
+) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    deal = _extract_deal_payload(offer_payload)
+    if not deal:
+        return {"teams": [], "legs": {}, "meta": {}}, []
+
+    teams = list(deal.get("teams") or [])
+    legs = deal.get("legs") if isinstance(deal.get("legs"), dict) else {}
+    out_legs: Dict[str, List[Dict[str, Any]]] = {}
+    violations: List[Dict[str, Any]] = []
+
+    for from_team, assets in legs.items():
+        from_key = str(from_team or "").upper()
+        rows: List[Dict[str, Any]] = []
+        if not isinstance(assets, list):
+            out_legs[from_key] = rows
+            continue
+        for idx, asset in enumerate(assets):
+            if not isinstance(asset, dict):
+                continue
+            normalized = dict(asset)
+            kind = str(asset.get("kind") or "").lower().strip()
+            if kind == "player":
+                pid = str(asset.get("player_id") or "").strip()
+                snap = player_snaps.get(pid) or {}
+                normalized["player_id"] = pid
+                normalized["display_name"] = _first_nonempty_str(asset.get("display_name"), snap.get("display_name"))
+                normalized["pos"] = _first_nonempty_str(asset.get("pos"), snap.get("pos"))
+                missing = [
+                    field
+                    for field in ("player_id", "display_name", "pos")
+                    if not _first_nonempty_str(normalized.get(field))
+                ]
+                if missing:
+                    violation = {
+                        "path": f"legs.{from_key}[{idx}]",
+                        "asset_kind": "player",
+                        "asset_ref": pid or f"idx:{idx}",
+                        "missing_fields": missing,
+                        "session_id": session_id,
+                        "endpoint": endpoint,
+                    }
+                    violations.append(violation)
+                    emit_trade_contract_violation(violation)
+            elif kind == "pick":
+                pick_id = str(asset.get("pick_id") or "").strip()
+                snap = pick_snaps.get(pick_id) or {}
+                normalized["pick_id"] = pick_id
+                normalized["year"] = asset.get("year", snap.get("year"))
+                normalized["round"] = asset.get("round", snap.get("round"))
+                normalized["original_team"] = _first_nonempty_str(asset.get("original_team"), snap.get("original_team"))
+                normalized["owner_team"] = _first_nonempty_str(asset.get("owner_team"), snap.get("owner_team"), from_key)
+                missing: List[str] = []
+                if not _first_nonempty_str(normalized.get("pick_id")):
+                    missing.append("pick_id")
+                try:
+                    normalized["year"] = int(normalized.get("year"))
+                except Exception:
+                    missing.append("year")
+                try:
+                    normalized["round"] = int(normalized.get("round"))
+                except Exception:
+                    missing.append("round")
+                if not _first_nonempty_str(normalized.get("original_team")):
+                    missing.append("original_team")
+                if not _first_nonempty_str(normalized.get("owner_team")):
+                    missing.append("owner_team")
+                if missing:
+                    violation = {
+                        "path": f"legs.{from_key}[{idx}]",
+                        "asset_kind": "pick",
+                        "asset_ref": pick_id or f"idx:{idx}",
+                        "missing_fields": missing,
+                        "session_id": session_id,
+                        "endpoint": endpoint,
+                    }
+                    violations.append(violation)
+                    emit_trade_contract_violation(violation)
+            rows.append(normalized)
+        out_legs[from_key] = rows
+
+    canonical_deal = {
+        "teams": teams,
+        "legs": out_legs,
+        "meta": deal.get("meta") if isinstance(deal.get("meta"), dict) else {},
+    }
+    return canonical_deal, violations
+
+
+def _canonicalize_offer_payload_for_response(
+    offer_payload: Dict[str, Any], *, session_id: str, endpoint: str, db_path: str
+) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    player_ids = _collect_player_ids_from_deal(offer_payload)
+    pick_ids = _collect_pick_ids_from_deal(offer_payload)
+    player_snaps = _hydrate_player_asset_snapshots(player_ids, db_path=db_path)
+    pick_snaps = _hydrate_pick_asset_snapshots(pick_ids, db_path=db_path)
+    return _canonicalize_offer_assets(
+        offer_payload,
+        player_snaps=player_snaps,
+        pick_snaps=pick_snaps,
+        session_id=session_id,
+        endpoint=endpoint,
+    )
+
+
+def _build_trade_negotiation_inbox_row(session: Dict[str, Any], *, today: date, db_path: str) -> Dict[str, Any]:
     phase = str(session.get("phase") or "INIT").upper()
     status = str(session.get("status") or "ACTIVE").upper()
     team_id = str(session.get("user_team_id") or "").upper()
     offer_payload = session.get("last_offer") if isinstance(session.get("last_offer"), dict) else {}
+    canonical_offer, contract_violations = _canonicalize_offer_payload_for_response(
+        offer_payload,
+        session_id=str(session.get("session_id") or ""),
+        endpoint="/api/trade/negotiation/inbox",
+        db_path=db_path,
+    )
     market_context = session.get("market_context") if isinstance(session.get("market_context"), dict) else {}
     offer_meta = market_context.get("offer_meta") if isinstance(market_context.get("offer_meta"), dict) else {}
 
@@ -697,14 +945,15 @@ def _build_trade_negotiation_inbox_row(session: Dict[str, Any], *, today: date) 
             "leak_status": str(offer_meta.get("leak_status") or "NONE").upper(),
         },
         "offer": {
-            "deal": offer_payload,
-            "asset_counts": _count_assets_for_user(offer_payload, user_team_id=team_id),
+            "deal": canonical_offer,
+            "asset_counts": _count_assets_for_user(canonical_offer, user_team_id=team_id),
         },
         "actions": {
             "can_open": status == "ACTIVE" and phase in {"INIT", "INBOX_PENDING", "NEGOTIATING", "COUNTER_PENDING"} and not is_expired,
             "can_reject": status == "ACTIVE" and phase not in {"REJECTED", "ACCEPTED"},
             "can_commit": status == "ACTIVE" and phase in {"NEGOTIATING", "COUNTER_PENDING"} and not is_expired,
         },
+        "contract_violations": contract_violations,
     }
 
 
@@ -754,7 +1003,7 @@ def _sort_trade_negotiation_inbox_rows(rows: List[Dict[str, Any]], *, sort_key: 
     return data
 
 
-@router.get("/api/trade/negotiation/inbox")
+@router.get("/api/trade/negotiation/inbox", response_model=TradeNegotiationInboxResponse)
 async def api_trade_negotiation_inbox(
     team_id: str,
     status: str = "ACTIVE",
@@ -776,6 +1025,7 @@ async def api_trade_negotiation_inbox(
         )
 
         today = state.get_current_date_as_date()
+        db_path = state.get_db_path()
         sessions = state.negotiations_get() or {}
 
         rows: List[Dict[str, Any]] = []
@@ -791,7 +1041,7 @@ async def api_trade_negotiation_inbox(
 
             s = dict(session)
             s.setdefault("session_id", str(sid))
-            row = _build_trade_negotiation_inbox_row(s, today=today)
+            row = _build_trade_negotiation_inbox_row(s, today=today, db_path=db_path)
 
             if not q.include_expired and row.get("is_expired"):
                 continue
@@ -1131,10 +1381,33 @@ async def api_trade_negotiation_open(req: TradeNegotiationOpenRequest):
             updated = negotiation_store.get_session(req.session_id)
 
         response = {
+        db_path = state.get_db_path()
+        contract_violations: List[Dict[str, Any]] = []
+        if isinstance(updated.get("last_offer"), dict):
+            canonical_offer, violations = _canonicalize_offer_payload_for_response(
+                updated["last_offer"],
+                session_id=str(updated.get("session_id") or req.session_id),
+                endpoint="/api/trade/negotiation/open:last_offer",
+                db_path=db_path,
+            )
+            updated["last_offer"] = canonical_offer
+            contract_violations.extend(violations)
+        if isinstance(updated.get("draft_deal"), dict):
+            canonical_draft, violations = _canonicalize_offer_payload_for_response(
+                updated["draft_deal"],
+                session_id=str(updated.get("session_id") or req.session_id),
+                endpoint="/api/trade/negotiation/open:draft_deal",
+                db_path=db_path,
+            )
+            updated["draft_deal"] = canonical_draft
+            contract_violations.extend(violations)
+
+        return {
             "ok": True,
             "session": updated,
             "opened": True,
             "idempotent": bool((result or {}).get("idempotent")) if isinstance(result, dict) else False,
+            "contract_violations": contract_violations,
         }
         if idem_key:
             response["idempotency_key"] = idem_key
@@ -1402,20 +1675,17 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
 
         # Record the latest offer evaluation in-session (do NOT overwrite last_counter).
         # - last_counter is reserved for the actual counter deal payload (for fast-accept).
-        try:
-            negotiation_store.set_last_offer(
-                req.session_id,
-                {
-                    "offer": deal_serialized,
-                    "ai_verdict": to_jsonable(decision.verdict),
-                    "ai_decision": to_jsonable(decision),
-                    "ai_evaluation": eval_summary,
-                    "offer_privacy": offer_privacy,
-                    "leak_status": leak_status,
-                },
-            )
-        except Exception:
-            pass
+        negotiation_store.set_last_offer(
+            req.session_id,
+            {
+                "offer": deal_serialized,
+                "ai_verdict": to_jsonable(decision.verdict),
+                "ai_decision": to_jsonable(decision),
+                "ai_evaluation": eval_summary,
+                "offer_privacy": offer_privacy,
+                "leak_status": leak_status,
+            },
+        )
 
         # Offer privacy effects (market-level, never mutate DB SSOT)
         leaked_player_ids: List[str] = []

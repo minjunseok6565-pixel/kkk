@@ -31,6 +31,7 @@ const state = {
   marketTradeBlockRosterModalBound: false,
   marketTradeInboxRows: [],
   marketTradeInboxGrouped: [],
+  marketTradeContractViolations: [],
   marketTradeInboxLoading: false,
   marketTradeInboxLastLoadedAt: 0,
   marketScreenActive: false,
@@ -219,6 +220,7 @@ function transitionMarketTradeSessionFsm(nextStatus, { sessionId = null, reason 
 function resetMarketTradeInboxState() {
   state.marketTradeInboxRows = [];
   state.marketTradeInboxGrouped = [];
+  state.marketTradeContractViolations = [];
   state.marketTradeInboxLoading = false;
   state.marketTradeInboxLastLoadedAt = 0;
 }
@@ -230,6 +232,7 @@ function resetMarketTradeDealState() {
   state.marketTradeRequestScopes = {};
   state.marketTradePendingActions = {};
   state.marketTaskQueueByScope = {};
+  state.marketTradeContractViolations = [];
   state.marketTradeInitialOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
   state.marketTradeLatestOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
   state.marketTradeDealDraft = createEmptyMarketTradeDealDraft();

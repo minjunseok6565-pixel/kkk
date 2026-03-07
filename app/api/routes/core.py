@@ -6,6 +6,7 @@ import sqlite3
 import hashlib
 import math
 import re
+import logging
 from datetime import date, timedelta
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -28,6 +29,7 @@ from team_utils import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 static_dir = os.path.join(BASE_DIR, "static")
 
@@ -41,6 +43,71 @@ TEAM_FULL_NAMES: Dict[str, str] = {
     "POR": "Portland Trail Blazers", "SAC": "Sacramento Kings", "SAS": "San Antonio Spurs", "TOR": "Toronto Raptors",
     "UTA": "Utah Jazz", "WAS": "Washington Wizards",
 }
+
+
+@router.post("/api/telemetry/client")
+async def api_client_telemetry(payload: Dict[str, Any]):
+    data = payload if isinstance(payload, dict) else {}
+    event_name = str(data.get("event_name") or "").strip()
+    screen = str(data.get("screen") or "").strip()
+    asset_kind = str(data.get("asset_kind") or "").strip()
+    missing_fields_raw = data.get("missing_fields")
+    missing_fields = [str(x) for x in missing_fields_raw] if isinstance(missing_fields_raw, list) else []
+
+    is_trade_contract_violation = event_name == "trade_contract_violation_detected"
+    has_min_required = bool(screen and asset_kind and missing_fields)
+
+    if is_trade_contract_violation and has_min_required:
+        logger.warning(
+            "client_trade_contract_violation_detected",
+            extra={
+                "event": event_name,
+                "screen": screen,
+                "endpoint": str(data.get("endpoint") or ""),
+                "session_id": str(data.get("session_id") or ""),
+                "asset_kind": asset_kind,
+                "asset_ref": str(data.get("asset_ref") or ""),
+                "path": str(data.get("path") or ""),
+                "missing_fields": missing_fields,
+                "payload": data,
+                "source": "client",
+            },
+        )
+    else:
+        logger.warning(
+            "client_telemetry_invalid_or_ignored",
+            extra={
+                "event": event_name,
+                "screen": screen,
+                "asset_kind": asset_kind,
+                "missing_fields": missing_fields,
+                "payload": data,
+                "source": "client",
+            },
+        )
+
+    try:
+        import importlib
+
+        sentry_sdk = importlib.import_module("sentry_sdk")
+        if is_trade_contract_violation and has_min_required:
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("event", event_name)
+                scope.set_tag("source", "client")
+                scope.set_tag("screen", screen)
+                scope.set_tag("asset_kind", asset_kind)
+                endpoint = str(data.get("endpoint") or "")
+                session_id = str(data.get("session_id") or "")
+                if endpoint:
+                    scope.set_tag("endpoint", endpoint)
+                if session_id:
+                    scope.set_tag("session_id", session_id)
+                scope.set_context("client_trade_contract_violation", data)
+                sentry_sdk.capture_message("client_trade_contract_violation_detected", level="warning")
+    except Exception:
+        pass
+
+    return {"ok": True}
 
 
 def _format_mmdd(date_value: Any) -> str:
