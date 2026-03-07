@@ -1,4 +1,4 @@
-import { state, syncMarketTradeModalSessionState } from "../../app/state.js";
+import { state, syncMarketTradeModalSessionState, transitionMarketTradeSessionFsm } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
 import {
@@ -10,6 +10,10 @@ import {
   commitTradeNegotiationSession,
   submitCommittedTradeDeal,
   fetchStateSummary,
+  beginScopedRequest,
+  isScopedRequestCurrent,
+  abortScopedRequest,
+  abortAllMarketTradeRequests,
   setLoading,
 } from "../../core/api.js";
 import { num } from "../../core/guards.js";
@@ -20,6 +24,82 @@ import { loadPlayerDetail } from "../myteam/playerDetail.js";
 import { fetchTeamDetail, invalidateTeamDetailCache } from "../team/teamDetailCache.js";
 
 const MARKET_TRADE_INBOX_CACHE_TTL_MS = 30 * 1000;
+
+function getActiveTradeSessionId() {
+  const sessionId = state.marketTradeActiveSession?.session_id;
+  return sessionId == null ? null : String(sessionId);
+}
+
+function isMarketUiActive() {
+  return Boolean(state.marketScreenActive && state.tradeDealModalOpen);
+}
+
+function createTradeIdempotencyKey(action, sessionId = null) {
+  const normalizedAction = String(action || "action").trim() || "action";
+  const normalizedSessionId = sessionId == null ? "none" : String(sessionId);
+  return `${normalizedSessionId}:${normalizedAction}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function runScopedTask(scope, runner) {
+  const key = String(scope || "default");
+  if (!state.marketTaskQueueByScope || typeof state.marketTaskQueueByScope !== "object") {
+    state.marketTaskQueueByScope = {};
+  }
+  const previous = state.marketTaskQueueByScope[key] || Promise.resolve();
+  const current = previous
+    .catch(() => {})
+    .then(async () => runner());
+  state.marketTaskQueueByScope[key] = current;
+  return current;
+}
+
+function setActionPending(action, sessionId, pending, idempotencyKey = "") {
+  const actionKey = `${String(action || "")}::${String(sessionId || "")}`;
+  if (!state.marketTradePendingActions || typeof state.marketTradePendingActions !== "object") {
+    state.marketTradePendingActions = {};
+  }
+  if (pending) {
+    state.marketTradePendingActions[actionKey] = {
+      pending: true,
+      idempotencyKey: String(idempotencyKey || ""),
+    };
+  } else {
+    delete state.marketTradePendingActions[actionKey];
+  }
+}
+
+function isActionPending(action, sessionId) {
+  const actionKey = `${String(action || "")}::${String(sessionId || "")}`;
+  return Boolean(state.marketTradePendingActions?.[actionKey]?.pending);
+}
+
+function syncTradeActionButtonStates() {
+  document.querySelectorAll("[data-trade-action][data-session-id]").forEach((btn) => {
+    if (!(btn instanceof HTMLButtonElement)) return;
+    const action = btn.dataset.tradeAction || "";
+    const sessionId = btn.dataset.sessionId || "";
+    const pending = isActionPending(action, sessionId);
+    btn.disabled = pending;
+    btn.setAttribute("aria-disabled", pending ? "true" : "false");
+    btn.setAttribute("aria-busy", pending ? "true" : "false");
+  });
+
+  if (els.marketTradeDealReject) {
+    const modalSessionId = getActiveTradeSessionId() || "";
+    const pending = isActionPending("reject-from-modal", modalSessionId);
+    els.marketTradeDealReject.disabled = pending;
+    els.marketTradeDealReject.setAttribute("aria-disabled", pending ? "true" : "false");
+    els.marketTradeDealReject.setAttribute("aria-busy", pending ? "true" : "false");
+  }
+}
+
+function shouldApplyResponseForScope(scope, requestId, sessionId = null, { requireModalOpen = false } = {}) {
+  if (!isScopedRequestCurrent(scope, requestId, sessionId)) return false;
+  if (!state.marketScreenActive) return false;
+  if (requireModalOpen && !isMarketUiActive()) return false;
+  if (sessionId != null && getActiveTradeSessionId() !== String(sessionId)) return false;
+  return true;
+}
 
 function toFriendlyRuleMessage(rawMessage) {
   const msg = String(rawMessage || "");
@@ -471,7 +551,7 @@ function extractTeamTradeAssets(summaryPayload, ownerTeamId) {
   return { picks, swaps, fixedAssets };
 }
 
-async function loadTradeDealPlayerPools(otherTeamId) {
+async function loadTradeDealPlayerPools(otherTeamId, { requestCtx = null } = {}) {
   const myTeamId = state.selectedTeamId;
   if (!myTeamId || !otherTeamId) return;
 
@@ -480,11 +560,19 @@ async function loadTradeDealPlayerPools(otherTeamId) {
     : { myTeam: { players: [], picks: [], swaps: [], fixedAssets: [] }, otherTeam: { players: [], picks: [], swaps: [], fixedAssets: [] } };
 
   try {
+    const signal = requestCtx?.signal;
+    const requestId = requestCtx?.requestId;
+    const scopedSessionId = requestCtx?.sessionId;
     const [myTeamDetail, otherTeamDetail, summary] = await Promise.all([
       fetchTeamDetail(myTeamId, { force: true }),
       fetchTeamDetail(otherTeamId, { force: true }),
-      fetchStateSummary(),
+      fetchStateSummary({ signal }),
     ]);
+
+    if (requestCtx && !shouldApplyResponseForScope("dealPlayerPool", requestId, scopedSessionId, { requireModalOpen: true })) {
+      return;
+    }
+
     const myAssets = extractTeamTradeAssets(summary, myTeamId);
     const otherAssets = extractTeamTradeAssets(summary, otherTeamId);
 
@@ -573,8 +661,11 @@ function setTradeDealSubmitPending(pending) {
   }
   const defaultLabel = submitBtn.dataset.defaultLabel || "제안 제출";
   submitBtn.disabled = nextPending;
+  submitBtn.setAttribute("aria-disabled", nextPending ? "true" : "false");
   submitBtn.setAttribute("aria-busy", nextPending ? "true" : "false");
   submitBtn.textContent = nextPending ? "제출 중..." : defaultLabel;
+
+  syncTradeActionButtonStates();
 }
 
 async function refreshMarketTradeAfterAccepted(otherTeamId) {
@@ -585,7 +676,7 @@ async function refreshMarketTradeAfterAccepted(otherTeamId) {
   await Promise.all([
     loadFaList(),
     loadTradeBlockList(),
-    loadMarketTradeInbox({ force: true }),
+    loadMarketTradeInbox({ force: true, reason: "after-accepted" }),
   ]);
 
   if (otherTeamId) {
@@ -601,12 +692,27 @@ async function submitTradeDealDraft() {
   const validationError = validateTradeDealDraftForCommit();
   if (validationError) throw new Error(validationError);
 
+  transitionMarketTradeSessionFsm("submitting", {
+    sessionId,
+    reason: "submitTradeDealDraft:start",
+    strict: false,
+  });
+
+  const requestCtx = beginScopedRequest("submitDeal", { sessionId });
+  const commitIdempotencyKey = createTradeIdempotencyKey("commit", sessionId);
+
   const result = await commitTradeNegotiationSession({
     sessionId,
     deal: state.marketTradeDealDraft,
     offerPrivacy: "PRIVATE",
     exposeToMedia: false,
+    signal: requestCtx.signal,
+    idempotencyKey: commitIdempotencyKey,
   });
+
+  if (!shouldApplyResponseForScope("submitDeal", requestCtx.requestId, requestCtx.sessionId, { requireModalOpen: true })) {
+    return result;
+  }
 
   const otherTeamId = String(state.marketTradeActiveSession?.other_team_id || "").toUpperCase();
   const latestSession = result?.session || state.marketTradeActiveSession || {};
@@ -624,13 +730,22 @@ async function submitTradeDealDraft() {
   const accepted = result?.accepted === true;
   const dealId = result?.deal_id || result?.deal?.deal_id || null;
   if (accepted && dealId) {
-    const submitOut = await submitCommittedTradeDeal({ dealId, force: true });
+    const submitOut = await submitCommittedTradeDeal({
+      dealId,
+      force: true,
+      idempotencyKey: createTradeIdempotencyKey("submit-committed", sessionId),
+    });
     if (els.marketTradeDealStatus) {
       els.marketTradeDealStatus.innerHTML = '<p class="subtitle">제출 결과: 수락 · 거래 반영 완료</p>';
     }
     setTradeDealEditorMessage(submitOut?.message || "수락된 제안이 실제 트레이드로 반영되었습니다.");
     await refreshMarketTradeAfterAccepted(otherTeamId);
   }
+  transitionMarketTradeSessionFsm("ready", {
+    sessionId,
+    reason: "submitTradeDealDraft:complete",
+    strict: false,
+  });
   return result;
 }
 
@@ -640,6 +755,12 @@ async function openTradeDealEditorFromSession(session, fallback = {}) {
   const otherTeamId = String(activeSession?.other_team_id || fallbackOtherTeamId || "").toUpperCase();
   const prefillPlayerId = fallback?.prefillPlayerId || null;
   const sessionId = activeSession?.session_id || fallback?.sessionId || null;
+
+  transitionMarketTradeSessionFsm("opening", {
+    sessionId,
+    reason: "openTradeDealEditorFromSession:start",
+    strict: false,
+  });
 
   const sync = syncMarketTradeModalSessionState(sessionId, { keepTabsOnReopen: true });
   state.marketTradeActiveSession = activeSession;
@@ -656,6 +777,7 @@ async function openTradeDealEditorFromSession(session, fallback = {}) {
   if (!els.marketTradeDealModal) return;
   els.marketTradeDealModal.classList.remove("hidden");
   document.body.classList.add("is-modal-open");
+  state.tradeDealModalOpen = true;
 
   if (els.marketTradeDealSession) {
     els.marketTradeDealSession.textContent = `세션: ${sessionId || "-"}`;
@@ -669,8 +791,19 @@ async function openTradeDealEditorFromSession(session, fallback = {}) {
   }
   setTradeDealSubmitPending(false);
   setTradeDealEditorMessage("");
-  await loadTradeDealPlayerPools(otherTeamId);
+  const requestCtx = beginScopedRequest("dealPlayerPool", { sessionId });
+  await loadTradeDealPlayerPools(otherTeamId, { requestCtx });
+  if (!shouldApplyResponseForScope("dealPlayerPool", requestCtx.requestId, requestCtx.sessionId, { requireModalOpen: true })) {
+    return;
+  }
+
   renderTradeDealEditor();
+  syncTradeActionButtonStates();
+  transitionMarketTradeSessionFsm("ready", {
+    sessionId,
+    reason: "openTradeDealEditorFromSession:ready",
+    strict: false,
+  });
 }
 
 function normalizeTeamIdUpper(value) {
@@ -1299,6 +1432,15 @@ function renderMarketTradeInbox() {
         }
         if (dateEl) dateEl.textContent = dateText;
 
+        if (openBtn instanceof HTMLButtonElement) {
+          openBtn.dataset.tradeAction = "open-session";
+          openBtn.dataset.sessionId = String(sessionId);
+        }
+        if (rejectBtn instanceof HTMLButtonElement) {
+          rejectBtn.dataset.tradeAction = "reject-session";
+          rejectBtn.dataset.sessionId = String(sessionId);
+        }
+
         openBtn?.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -1320,17 +1462,17 @@ function renderMarketTradeInbox() {
             <span>제안일 ${dateText}</span>
           </div>
           <div class="market-trade-inbox-item-actions">
-            <button type="button" class="btn btn-secondary" data-inbox-action="open" data-session-id="${sessionId}">협상</button>
-            <button type="button" class="btn btn-secondary" data-inbox-action="reject" data-session-id="${sessionId}">거절</button>
+            <button type="button" class="btn btn-secondary" data-trade-action="open-session" data-session-id="${sessionId}">협상</button>
+            <button type="button" class="btn btn-secondary" data-trade-action="reject-session" data-session-id="${sessionId}">거절</button>
           </div>
         `;
-        const openBtn = li.querySelector('button[data-inbox-action="open"]');
+        const openBtn = li.querySelector('button[data-trade-action="open-session"]');
         openBtn?.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
           openTradeInboxSession(row).catch((e) => alert(e.message));
         });
-        const rejectBtn = li.querySelector('button[data-inbox-action="reject"]');
+        const rejectBtn = li.querySelector('button[data-trade-action="reject-session"]');
         rejectBtn?.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -1342,6 +1484,8 @@ function renderMarketTradeInbox() {
     });
     groupsEl.appendChild(section);
   });
+
+  syncTradeActionButtonStates();
 }
 
 function groupInboxRowsByOtherTeam(rows) {
@@ -1374,7 +1518,7 @@ function shouldReloadMarketTradeInbox(force = false) {
   return Date.now() - state.marketTradeInboxLastLoadedAt > MARKET_TRADE_INBOX_CACHE_TTL_MS;
 }
 
-async function loadMarketTradeInbox({ force = false } = {}) {
+async function loadMarketTradeInbox({ force = false, reason = "" } = {}) {
   if (!shouldReloadMarketTradeInbox(force)) {
     renderMarketTradeInbox();
     return;
@@ -1382,6 +1526,7 @@ async function loadMarketTradeInbox({ force = false } = {}) {
 
   const previousRows = Array.isArray(state.marketTradeInboxRows) ? [...state.marketTradeInboxRows] : [];
   const previousGroups = Array.isArray(state.marketTradeInboxGrouped) ? [...state.marketTradeInboxGrouped] : [];
+  const requestCtx = beginScopedRequest("tradeInbox", { sessionId: getActiveTradeSessionId() });
   const previousViolations = Array.isArray(state.marketTradeContractViolations) ? [...state.marketTradeContractViolations] : [];
 
   setMarketTradeInboxLoading(true);
@@ -1391,7 +1536,14 @@ async function loadMarketTradeInbox({ force = false } = {}) {
       teamId: state.selectedTeamId,
       status: "ACTIVE",
       phase: "OPEN",
+      signal: requestCtx.signal,
     });
+
+    if (!shouldApplyResponseForScope("tradeInbox", requestCtx.requestId, requestCtx.sessionId, { requireModalOpen: false })) {
+      console.debug("[trade-inbox] late response dropped", { reason, requestId: requestCtx.requestId });
+      return;
+    }
+
     const rows = Array.isArray(payload?.rows)
       ? payload.rows
       : Array.isArray(payload?.sessions)
@@ -1416,6 +1568,7 @@ async function loadMarketTradeInbox({ force = false } = {}) {
     state.marketTradeInboxLastLoadedAt = Date.now();
     renderMarketTradeInbox();
   } catch (error) {
+    if (String(error?.message || "") === "REQUEST_ABORTED") return;
     state.marketTradeInboxRows = previousRows;
     state.marketTradeInboxGrouped = previousGroups;
     state.marketTradeContractViolations = previousViolations;
@@ -1433,30 +1586,52 @@ async function openTradeInboxSession(row) {
   const sessionId = row?.session_id;
   if (!sessionId) throw new Error("협상을 열 세션 ID가 없습니다.");
   if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
+  if (isActionPending("open-session", sessionId)) return;
+
+  const idempotencyKey = createTradeIdempotencyKey("open-session", sessionId);
+  setActionPending("open-session", sessionId, true, idempotencyKey);
+  syncTradeActionButtonStates();
+
+  transitionMarketTradeSessionFsm("opening", {
+    sessionId,
+    reason: "openTradeInboxSession:start",
+    strict: false,
+  });
 
   setLoading(true, "협상 세션을 여는 중...");
   try {
+    const requestCtx = beginScopedRequest("openSession", { sessionId });
     const result = await openTradeNegotiationSession({
       sessionId,
       teamId: state.selectedTeamId,
+      signal: requestCtx.signal,
+      idempotencyKey,
     });
+
+    if (!shouldApplyResponseForScope("openSession", requestCtx.requestId, requestCtx.sessionId, { requireModalOpen: false })) {
+      return;
+    }
+
     await openTradeDealEditorFromSession(result?.session || result || {}, {
       sessionId,
       otherTeamId: row?.other_team_id,
     });
-    loadMarketTradeInbox({ force: true }).catch(() => {});
+    await runScopedTask("tradeInboxRefresh", () => loadMarketTradeInbox({ force: true, reason: "post-open" }));
   } catch (error) {
     const msg = String(error?.message || "");
+    if (msg === "REQUEST_ABORTED") return;
     if (msg.includes("NEGOTIATION_ENDED_BY_AI")) {
       const currentRows = Array.isArray(state.marketTradeInboxRows) ? state.marketTradeInboxRows : [];
       state.marketTradeInboxRows = currentRows.filter((item) => String(item?.session_id || "") !== String(sessionId));
       state.marketTradeInboxGrouped = groupInboxRowsByOtherTeam(state.marketTradeInboxRows);
       renderMarketTradeInbox();
       state.marketTradeInboxLastLoadedAt = Date.now();
-      loadMarketTradeInbox({ force: true }).catch(() => {});
+      await runScopedTask("tradeInboxRefresh", () => loadMarketTradeInbox({ force: true, reason: "ai-ended" }));
     }
     throw new Error(toFriendlyRuleMessage(msg || "협상 세션을 열지 못했습니다."));
   } finally {
+    setActionPending("open-session", sessionId, false);
+    syncTradeActionButtonStates();
     setLoading(false);
   }
 }
@@ -1465,6 +1640,11 @@ async function rejectTradeInboxSession(row) {
   const sessionId = row?.session_id;
   if (!sessionId) throw new Error("거절할 세션 ID가 없습니다.");
   if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
+  if (isActionPending("reject-session", sessionId)) return;
+
+  const idempotencyKey = createTradeIdempotencyKey("reject-session", sessionId);
+  setActionPending("reject-session", sessionId, true, idempotencyKey);
+  syncTradeActionButtonStates();
 
   const previousRows = Array.isArray(state.marketTradeInboxRows) ? [...state.marketTradeInboxRows] : [];
   const previousGroups = Array.isArray(state.marketTradeInboxGrouped) ? [...state.marketTradeInboxGrouped] : [];
@@ -1476,20 +1656,26 @@ async function rejectTradeInboxSession(row) {
 
   setLoading(true, "제안을 거절하는 중...");
   try {
+    const requestCtx = beginScopedRequest("rejectSession", { sessionId });
     await rejectTradeNegotiationSession({
       sessionId,
       teamId: state.selectedTeamId,
       reason: "USER_REJECT",
+      signal: requestCtx.signal,
+      idempotencyKey,
     });
     state.marketTradeInboxLastLoadedAt = Date.now();
-    loadMarketTradeInbox({ force: true }).catch(() => {});
+    await runScopedTask("tradeInboxRefresh", () => loadMarketTradeInbox({ force: true, reason: "post-reject" }));
   } catch (error) {
+    if (String(error?.message || "") === "REQUEST_ABORTED") return;
     // rollback on failure
     state.marketTradeInboxRows = previousRows;
     state.marketTradeInboxGrouped = previousGroups;
     renderMarketTradeInbox();
     throw error;
   } finally {
+    setActionPending("reject-session", sessionId, false);
+    syncTradeActionButtonStates();
     setLoading(false);
   }
 }
@@ -1647,7 +1833,16 @@ function closeTradeDealEditorModal() {
   if (!els.marketTradeDealModal) return;
   els.marketTradeDealModal.classList.add("hidden");
   document.body.classList.remove("is-modal-open");
+  state.tradeDealModalOpen = false;
+  abortScopedRequest("dealPlayerPool");
+  abortScopedRequest("submitDeal");
+  transitionMarketTradeSessionFsm("closed", {
+    sessionId: getActiveTradeSessionId(),
+    reason: "closeTradeDealEditorModal",
+    strict: false,
+  });
   setTradeDealSubmitPending(false);
+  syncTradeActionButtonStates();
 }
 
 function renderTradeBlockRows(rows) {
@@ -1929,6 +2124,7 @@ async function loadFaList() {
 }
 
 async function openMarketSubTab(tab) {
+  return runScopedTask("marketSubTab", async () => {
   switchMarketSubTab(tab);
   if (!["fa", "trade-block", "trade-inbox"].includes(state.marketSubTab)) return;
 
@@ -1948,6 +2144,7 @@ async function openMarketSubTab(tab) {
   } finally {
     setLoading(false);
   }
+  });
 }
 
 function normalizeNegotiationStateFromSession(session, extra = {}) {
@@ -2204,11 +2401,14 @@ async function handleMarketDetailAction(action) {
 }
 
 async function showMarketScreen() {
+  return runScopedTask("showMarketScreen", async () => {
   if (!state.selectedTeamId) {
     alert("먼저 팀을 선택해주세요.");
     return;
   }
 
+  abortAllMarketTradeRequests();
+  state.marketScreenActive = true;
   state.playerDetailBackTarget = "market";
   switchMarketSubTab(state.marketSubTab || "fa");
   switchTradeBlockScope(state.marketTradeBlockScope || "other");
@@ -2225,21 +2425,50 @@ async function showMarketScreen() {
 
     els.marketTradeDealBackdrop?.addEventListener("click", closeTradeDealEditorModal);
     els.marketTradeDealCancel?.addEventListener("click", closeTradeDealEditorModal);
+    els.marketTradeDealReject?.addEventListener("click", async () => {
+      const sessionId = getActiveTradeSessionId();
+      if (!sessionId) return;
+      if (isActionPending("reject-from-modal", sessionId)) return;
+      const idempotencyKey = createTradeIdempotencyKey("reject-from-modal", sessionId);
+      setActionPending("reject-from-modal", sessionId, true, idempotencyKey);
+      syncTradeActionButtonStates();
+      setLoading(true, "협상을 거절하는 중...");
+      try {
+        const requestCtx = beginScopedRequest("rejectFromModal", { sessionId });
+        await rejectTradeNegotiationSession({
+          sessionId,
+          teamId: state.selectedTeamId,
+          reason: "USER_REJECT",
+          signal: requestCtx.signal,
+          idempotencyKey,
+        });
+        closeTradeDealEditorModal();
+        await runScopedTask("tradeInboxRefresh", () => loadMarketTradeInbox({ force: true, reason: "modal-reject" }));
+      } catch (e) {
+        if (String(e?.message || "") !== "REQUEST_ABORTED") {
+          alert(toFriendlyRuleMessage(e?.message || "협상 거절에 실패했습니다."));
+        }
+      } finally {
+        setActionPending("reject-from-modal", sessionId, false);
+        syncTradeActionButtonStates();
+        setLoading(false);
+      }
+    });
     bindTradeDealTabEvents();
-    els.marketTradeDealSubmit?.addEventListener("click", () => {
+    els.marketTradeDealSubmit?.addEventListener("click", async () => {
       if (state.marketTradeUi?.submitPending) return;
       setTradeDealSubmitPending(true);
       setLoading(true, "제안을 제출하는 중...");
-      submitTradeDealDraft()
-        .catch((e) => {
-          const friendly = toFriendlyCommitErrorMessage(e?.message || "");
-          setTradeDealEditorMessage(friendly);
-          alert(friendly);
-        })
-        .finally(() => {
-          setTradeDealSubmitPending(false);
-          setLoading(false);
-        });
+      try {
+        await submitTradeDealDraft();
+      } catch (e) {
+        const friendly = toFriendlyCommitErrorMessage(e?.message || "");
+        setTradeDealEditorMessage(friendly);
+        alert(friendly);
+      } finally {
+        setTradeDealSubmitPending(false);
+        setLoading(false);
+      }
     });
 
     state.marketTradeModalBound = true;
@@ -2273,6 +2502,7 @@ async function showMarketScreen() {
     });
     state.marketTradeBlockRosterModalBound = true;
   }
+  });
 }
 
 export {
