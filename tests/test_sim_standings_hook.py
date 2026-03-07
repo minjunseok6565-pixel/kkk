@@ -62,6 +62,7 @@ def test_apply_standings_cache_incremental_updates_applies_games() -> None:
 
 def test_api_advance_league_applies_incremental_hook(monkeypatch: pytest.MonkeyPatch) -> None:
     called: list[list[str]] = []
+    orchestration_called: list[dict[str, object]] = []
 
     monkeypatch.setattr(sim, "advance_league_until", lambda target_date_str, user_team_id=None: [{"game_id": "G1"}, {"game_id": "G2"}])
     monkeypatch.setattr(sim, "_run_monthly_checkpoints", lambda **_kwargs: ([], []))
@@ -72,16 +73,24 @@ def test_api_advance_league_applies_incremental_hook(monkeypatch: pytest.MonkeyP
         "_apply_standings_cache_incremental_updates",
         lambda *, game_ids: called.append([str(x) for x in game_ids]) or {"candidates": 2, "applied": 2, "missing": 0},
     )
+    monkeypatch.setattr(
+        sim,
+        "_run_daily_trade_orchestration",
+        lambda *, user_team_id: orchestration_called.append({"user_team_id": user_team_id}) or {"ok": True, "tick_date": "2025-11-02"},
+    )
 
     req = sim.AdvanceLeagueRequest(target_date="2025-11-02", user_team_id="BOS")
     out = asyncio.run(sim.api_advance_league(req))
 
     assert out["simulated_count"] == 2
     assert called == [["G1", "G2"]]
+    assert orchestration_called == [{"user_team_id": "BOS"}]
+    assert out["trade_orchestration"]["ok"] is True
 
 
 def test_api_progress_next_user_game_day_collects_all_game_ids(monkeypatch: pytest.MonkeyPatch) -> None:
     called: list[list[str]] = []
+    orchestration_called: list[dict[str, object]] = []
 
     monkeypatch.setattr(
         sim,
@@ -102,8 +111,41 @@ def test_api_progress_next_user_game_day_collects_all_game_ids(monkeypatch: pyte
         "_apply_standings_cache_incremental_updates",
         lambda *, game_ids: called.append([str(x) for x in game_ids]) or {"candidates": 4, "applied": 4, "missing": 0},
     )
+    monkeypatch.setattr(
+        sim,
+        "_run_daily_trade_orchestration",
+        lambda *, user_team_id: orchestration_called.append({"user_team_id": user_team_id}) or {"ok": True, "tick_date": "2025-11-02"},
+    )
 
     req = sim.ProgressNextUserGameDayRequest(user_team_id="BOS", mode="auto_if_needed")
     _ = asyncio.run(sim.api_progress_next_user_game_day(req))
 
     assert called == [["GA1", "GA2", "UG1", "OG1"]]
+    assert orchestration_called == [{"user_team_id": "BOS"}]
+
+
+def test_api_auto_advance_to_next_user_game_day_triggers_trade_orchestration(monkeypatch: pytest.MonkeyPatch) -> None:
+    orchestration_called: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        sim,
+        "auto_advance_to_next_user_game_day",
+        lambda _user_team_id: {
+            "auto_advance": {"simulated_game_ids": ["GA1", "GA2"]},
+        },
+    )
+    monkeypatch.setattr(sim, "_run_monthly_checkpoints", lambda **_kwargs: ([], []))
+    monkeypatch.setattr(sim.state, "get_current_date_as_date", lambda: __import__("datetime").date(2025, 11, 2))
+    monkeypatch.setattr(sim.state, "get_db_path", lambda: "dummy.db")
+    monkeypatch.setattr(sim, "_apply_standings_cache_incremental_updates", lambda *, game_ids: {"candidates": len(list(game_ids or [])), "applied": 0, "missing": 0})
+    monkeypatch.setattr(
+        sim,
+        "_run_daily_trade_orchestration",
+        lambda *, user_team_id: orchestration_called.append({"user_team_id": user_team_id}) or {"ok": True, "tick_date": "2025-11-02"},
+    )
+
+    req = sim.AutoAdvanceToNextUserGameDayRequest(user_team_id="BOS")
+    out = asyncio.run(sim.api_auto_advance_to_next_user_game_day(req))
+
+    assert orchestration_called == [{"user_team_id": "BOS"}]
+    assert out["trade_orchestration"]["ok"] is True
