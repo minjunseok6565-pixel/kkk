@@ -176,16 +176,19 @@ def select_targets_buy(
             if cd:
                 continue
 
+            listed = listing_meta_by_player.get(str(r.player_id), {}) if listing_meta_by_player else {}
+            is_public_listing = bool(listed) and str(listed.get("team_id") or "").upper() == from_team
+
             # CORE/비매물 컷(타깃 단계에서)
-            if not _is_seller_willing_to_move_player(r.player_id, seller_out):
+            # 단, 판매팀이 공개 Trade Block에 올린 선수는 구매자 관심 후보에 포함한다.
+            if not is_public_listing and not _is_seller_willing_to_move_player(r.player_id, seller_out):
                 continue
 
             # 가벼운 rank score는 정렬에만 사용
             rank = float(r.tag_strength) * (0.55 + 0.45 * w_need) + 0.02 * float(r.market_total)
             rank -= 0.015 * float(r.salary_m)
 
-            listed = listing_meta_by_player.get(str(r.player_id), {}) if listing_meta_by_player else {}
-            if listed and str(listed.get("team_id") or "").upper() == from_team:
+            if is_public_listing:
                 try:
                     base = float(getattr(config, "buy_target_listing_interest_boost_base", 0.25) or 0.0)
                     pri_scale = float(getattr(config, "buy_target_listing_interest_priority_scale", 0.35) or 0.0)
