@@ -30,6 +30,7 @@ from .promotion import promote_and_commit, compute_deal_key
 from .telemetry import build_tick_summary_payload, emit_tick_summary_event
 from .locks import trade_exec_serial_lock
 from . import policy
+from .listing_policy import apply_ai_proactive_listings
 from ..trade_rules import parse_trade_deadline, is_trade_window_open, offseason_trade_reopen_date
 
 
@@ -523,8 +524,21 @@ def _run_trade_orchestration_tick_impl(
                                         "player_id": str(pid),
                                         "listed_by": "AI_GM",
                                         "reason_code": "AI_MARKET_SIGNAL",
+                                        "origin": "FROM_PROPOSAL",
                                     },
                                 )
+                    except Exception:
+                        pass
+
+                if bool(getattr(cfg, "enable_trade_block", True)) and str(a.team_id).upper() not in human_ids:
+                    try:
+                        apply_ai_proactive_listings(
+                            team_id=str(a.team_id).upper(),
+                            tick_ctx=tick_ctx,
+                            trade_market=trade_market,
+                            today=today,
+                            config=getattr(cfg, "generator_config", None),
+                        )
                     except Exception:
                         pass
 

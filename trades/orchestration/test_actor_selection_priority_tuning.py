@@ -46,16 +46,13 @@ class ActorSelectionPriorityTuningTests(unittest.TestCase):
             max_active_teams=1,
             enable_threads=False,
             enable_trade_block=True,
-            trade_block_actor_weight_multiplier=1.2,
             trade_request_public_actor_weight_multiplier=1.2,
-            trade_request_public_no_listing_weight_multiplier=1.08,
-            trade_request_public_with_listing_weight_multiplier=1.06,
             actor_weight_multiplier_cap=3.0,
         )
         base.update(dict(overrides or {}))
         return OrchestrationConfig(**base)
 
-    def test_listing_plus_public_request_team_gets_actor_priority(self):
+    def test_public_request_team_gets_actor_priority(self):
         tick_ctx = self._tick_ctx(
             ["LAL", "NYK"],
             agency_state_by_player={"p1": {"trade_request_level": 2}},
@@ -66,8 +63,7 @@ class ActorSelectionPriorityTuningTests(unittest.TestCase):
              patch("trades.orchestration.actor_selection.policy.market_day_rhythm", return_value=(1.0, "NORMAL", {})), \
              patch("trades.orchestration.actor_selection.policy.compute_active_team_budget", return_value=1), \
              patch("trades.orchestration.actor_selection.policy.apply_day_rhythm_to_budget", return_value=1), \
-             patch("trades.orchestration.actor_selection.policy.assign_dynamic_max_results", side_effect=lambda picked, **_: picked), \
-             patch("trades.orchestration.actor_selection.get_active_listing_team_ids", return_value={"LAL"}):
+             patch("trades.orchestration.actor_selection.policy.assign_dynamic_max_results", side_effect=lambda picked, **_: picked):
             picked = select_trade_actors(
                 tick_ctx,
                 config=self._config(),
@@ -92,16 +88,13 @@ class ActorSelectionPriorityTuningTests(unittest.TestCase):
         }
 
         def _bd(ts):
-            # match by object identity via map scan
             for tid, obj in tick_ctx.team_situations.items():
                 if obj is ts:
                     return breakdown[tid]
             return {"activity_score": 0.0, "tags": []}
 
         cfg = self._config(
-            trade_block_actor_weight_multiplier=5.0,
             trade_request_public_actor_weight_multiplier=5.0,
-            trade_request_public_with_listing_weight_multiplier=2.0,
             actor_weight_multiplier_cap=1.0,
         )
 
@@ -109,8 +102,7 @@ class ActorSelectionPriorityTuningTests(unittest.TestCase):
              patch("trades.orchestration.actor_selection.policy.market_day_rhythm", return_value=(1.0, "NORMAL", {})), \
              patch("trades.orchestration.actor_selection.policy.compute_active_team_budget", return_value=1), \
              patch("trades.orchestration.actor_selection.policy.apply_day_rhythm_to_budget", return_value=1), \
-             patch("trades.orchestration.actor_selection.policy.assign_dynamic_max_results", side_effect=lambda picked, **_: picked), \
-             patch("trades.orchestration.actor_selection.get_active_listing_team_ids", return_value={"LAL"}):
+             patch("trades.orchestration.actor_selection.policy.assign_dynamic_max_results", side_effect=lambda picked, **_: picked):
             picked = select_trade_actors(
                 tick_ctx,
                 config=cfg,
@@ -121,7 +113,6 @@ class ActorSelectionPriorityTuningTests(unittest.TestCase):
 
         self.assertEqual(len(picked), 1)
         self.assertEqual(picked[0].team_id, "BOS")
-
 
     def test_public_request_team_count_uses_repo_batch_lookup(self):
         class _RepoStub:
@@ -140,8 +131,7 @@ class ActorSelectionPriorityTuningTests(unittest.TestCase):
              patch("trades.orchestration.actor_selection.policy.market_day_rhythm", return_value=(1.0, "NORMAL", {})), \
              patch("trades.orchestration.actor_selection.policy.compute_active_team_budget", return_value=1), \
              patch("trades.orchestration.actor_selection.policy.apply_day_rhythm_to_budget", return_value=1), \
-             patch("trades.orchestration.actor_selection.policy.assign_dynamic_max_results", side_effect=lambda picked, **_: picked), \
-             patch("trades.orchestration.actor_selection.get_active_listing_team_ids", return_value=set()):
+             patch("trades.orchestration.actor_selection.policy.assign_dynamic_max_results", side_effect=lambda picked, **_: picked):
             picked = select_trade_actors(
                 tick_ctx,
                 config=self._config(),

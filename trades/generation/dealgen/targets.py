@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import math
 import random
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -29,56 +30,51 @@ def _clamp01(x: Any) -> float:
     return xf
 
 
-def _active_public_listing_priority_by_player(
-    tick_ctx: TradeGenerationTickContext,
-    *,
-    team_id: str,
-) -> Dict[str, float]:
-    """Best-effort: active PUBLIC listing priority per player for a team.
-
-    SSOT preference:
-    1) tick-scoped `team_situation_ctx.trade_market` snapshot (same snapshot used by the running tick)
-    2) state fallback via load_trade_market() only when snapshot is unavailable
-    """
-    rows = None
+def _parse_iso_ymd(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if len(s) < 10:
+        return None
     try:
-        from trades.orchestration.market_state import list_team_trade_listings
-
-        market_snapshot = getattr(getattr(tick_ctx, "team_situation_ctx", None), "trade_market", None)
-        if isinstance(market_snapshot, dict):
-            rows = list_team_trade_listings(
-                market_snapshot,
-                team_id=str(team_id).upper(),
-                active_only=True,
-                today=getattr(tick_ctx, "current_date", None),
-            )
+        return date.fromisoformat(s[:10])
     except Exception:
-        rows = None
+        return None
 
-    if rows is None:
+
+def _active_public_listing_meta_by_player(
+    tick_ctx: TradeGenerationTickContext,
+) -> Dict[str, Dict[str, Any]]:
+    """Best-effort: active PUBLIC listing metadata per player (league-wide)."""
+    market = getattr(getattr(tick_ctx, "team_situation_ctx", None), "trade_market", None)
+    if not isinstance(market, dict):
         try:
-            from trades.orchestration.market_state import load_trade_market, list_team_trade_listings
+            from trades.orchestration.market_state import load_trade_market
 
             market = load_trade_market()
-            rows = list_team_trade_listings(
-                market,
-                team_id=str(team_id).upper(),
-                active_only=True,
-                today=getattr(tick_ctx, "current_date", None),
-            )
         except Exception:
             return {}
-
-    out: Dict[str, float] = {}
-    for r in rows or []:
-        if not isinstance(r, dict):
+    listings = market.get("listings") if isinstance(market.get("listings"), dict) else {}
+    today = getattr(tick_ctx, "current_date", None)
+    out: Dict[str, Dict[str, Any]] = {}
+    for pid, raw in (listings or {}).items():
+        if not isinstance(raw, dict):
             continue
-        if str(r.get("visibility") or "PUBLIC").upper() != "PUBLIC":
+        if str(raw.get("status") or "").upper() != "ACTIVE":
             continue
-        pid = str(r.get("player_id") or "")
-        if not pid:
+        if str(raw.get("visibility") or "PUBLIC").upper() != "PUBLIC":
             continue
-        out[pid] = _clamp01(r.get("priority"))
+        exp = _parse_iso_ymd(raw.get("expires_on"))
+        if isinstance(today, date) and exp is not None and today >= exp:
+            continue
+        player_id = str(raw.get("player_id") or pid or "")
+        if not player_id:
+            continue
+        out[player_id] = {
+            "priority": _clamp01(raw.get("priority")),
+            "team_id": str(raw.get("team_id") or "").upper(),
+            "updated_at": str(raw.get("updated_at") or raw.get("created_at") or ""),
+        }
     return out
 
 
@@ -140,6 +136,10 @@ def select_targets_buy(
     seller_out_cache: Dict[str, Optional[TeamOutgoingCatalog]] = {}
     seller_cooldown_cache: Dict[str, bool] = {}
 
+    listing_meta_by_player: Dict[str, Dict[str, Any]] = {}
+    if bool(getattr(config, "buy_target_listing_interest_enabled", True)):
+        listing_meta_by_player = _active_public_listing_meta_by_player(tick_ctx)
+
     out: List[TargetCandidate] = []
     for tag in tags:
         refs: Sequence[IncomingPlayerRef] = catalog.incoming_by_need_tag.get(tag, tuple())
@@ -183,6 +183,32 @@ def select_targets_buy(
             # 가벼운 rank score는 정렬에만 사용
             rank = float(r.tag_strength) * (0.55 + 0.45 * w_need) + 0.02 * float(r.market_total)
             rank -= 0.015 * float(r.salary_m)
+
+            listed = listing_meta_by_player.get(str(r.player_id), {}) if listing_meta_by_player else {}
+            if listed and str(listed.get("team_id") or "").upper() == from_team:
+                try:
+                    base = float(getattr(config, "buy_target_listing_interest_boost_base", 0.25) or 0.0)
+                    pri_scale = float(getattr(config, "buy_target_listing_interest_priority_scale", 0.35) or 0.0)
+                    need_scale = float(getattr(config, "buy_target_listing_interest_need_weight_scale", 0.25) or 0.0)
+                    cap = float(getattr(config, "buy_target_listing_interest_cap", 0.85) or 0.0)
+                    half_life = float(getattr(config, "buy_target_listing_interest_recency_half_life_days", 7.0) or 0.0)
+                except Exception:
+                    base, pri_scale, need_scale, cap, half_life = 0.25, 0.35, 0.25, 0.85, 7.0
+
+                pr = _clamp01(listed.get("priority"))
+                raw_boost = max(0.0, base + pri_scale * pr)
+                need_factor = 1.0 + max(0.0, need_scale) * min(max(float(w_need), 0.0), 1.5)
+
+                recency = 1.0
+                if half_life > 0.0 and isinstance(getattr(tick_ctx, "current_date", None), date):
+                    d_upd = _parse_iso_ymd(listed.get("updated_at"))
+                    if d_upd is not None:
+                        age_days = max(0, (tick_ctx.current_date - d_upd).days)
+                        recency = math.pow(0.5, float(age_days) / float(half_life))
+
+                interest_boost = raw_boost * need_factor * recency
+                rank += min(max(0.0, interest_boost), max(0.0, cap))
+
             rank += rng.random() * 0.01
             out.append(
                 TargetCandidate(
@@ -221,7 +247,8 @@ def select_targets_sell(
     v2 정합 로직:
     - locked(allow_locked 예외 포함) 선필터
     - recent_signing_banned_until 선필터
-    - 정렬: bucket priority -> market signal boost(desc) -> surplus_score(desc) -> expiring(desc) -> market_total(asc) -> player_id
+    - CORE: SOFT_SELL에서는 제외, SELL에서는 아주 드물게(4%) 허용
+    - 정렬: bucket priority -> public request signal(desc) -> surplus_score(desc) -> expiring(desc) -> market_total(asc) -> player_id
     - 상위 head만 소폭 셔플해 매번 같은 쇼핑리스트가 되지 않게 한다
     """
 
@@ -249,7 +276,6 @@ def select_targets_sell(
 
     rows: List[Tuple[Tuple[int, float, float, float, float, str], SellAssetCandidate]] = []
 
-    listed_priority_by_player = _active_public_listing_priority_by_player(tick_ctx, team_id=seller_u)
     trade_request_level_by_player = _public_trade_request_level_by_player(tick_ctx)
 
     for pid, c in (out_cat.players or {}).items():
@@ -287,20 +313,13 @@ def select_targets_sell(
             top_tags=tuple(getattr(c, "top_tags", None) or ()),
         )
 
-        listed_pri = _clamp01(listed_priority_by_player.get(str(pid), 0.0))
-        is_listed = listed_pri > 0.0
         tr_level = int(trade_request_level_by_player.get(str(pid), 0) or 0)
         is_public_request = tr_level >= 2
 
         signal_boost = 0.0
-        if is_listed:
-            # Listing priority acts as a scalar but preserves a meaningful floor.
-            signal_boost += float(config.listed_player_priority_boost) * (0.65 + 0.35 * listed_pri)
         if is_public_request:
             signal_boost += float(config.public_request_priority_boost)
-        if is_listed and is_public_request:
-            signal_boost += float(config.listed_public_request_synergy_boost)
-        signal_boost = min(max(0.0, signal_boost), max(0.0, float(config.priority_signal_boost_cap)))
+        signal_boost = min(max(0.0, signal_boost), max(0.0, float(config.public_request_priority_boost_cap)))
 
         sort_key = (pri, -signal_boost, -surplus, -exp, value, str(pid))
         rows.append((sort_key, sale_cand))
@@ -392,19 +411,6 @@ def select_buyers_for_sale_asset(
     # 최대 ~10팀만
     out = [(buyer_id, tag) for _, buyer_id, tag in rows[:10]]
     return out
-
-
-def _parse_iso_ymd(value: object) -> Optional[date]:
-    """YYYY-MM-DD (or datetime ISO) -> date. 실패 시 None."""
-    if value is None:
-        return None
-    s = str(value).strip()
-    if len(s) < 10:
-        return None
-    try:
-        return date.fromisoformat(s[:10])
-    except Exception:
-        return None
 
 
 def _is_ban_active(current_date: date, until_iso: Optional[str]) -> bool:

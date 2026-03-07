@@ -2,11 +2,11 @@ import random
 import unittest
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from trades.generation.asset_catalog import TeamOutgoingCatalog
 from trades.generation.dealgen.targets import select_targets_sell
 from trades.generation.dealgen.types import DealGeneratorBudget, DealGeneratorConfig
+
 
 class _DeterministicRng:
     def random(self):
@@ -62,76 +62,45 @@ class SellTargetPrioritySignalTests(unittest.TestCase):
             max_repairs=1,
         )
 
-    def test_listed_player_gets_priority_boost(self):
-        cfg = DealGeneratorConfig()
-        tick_ctx = _TickCtxStub()
-        catalog = self._catalog({"p1": self._player("p1"), "p2": self._player("p2")})
-
-        with patch(
-            "trades.generation.dealgen.targets._active_public_listing_priority_by_player",
-            return_value={"p2": 1.0},
-        ):
-            out = select_targets_sell(
-                "LAL",
-                tick_ctx,
-                catalog,
-                cfg,
-                budget=self._budget(),
-                rng=random.Random(7),
-                banned_players=set(),
-            )
-
-        self.assertEqual(out[0].player_id, "p2")
-
-    def test_public_trade_request_boost_applies_without_listing(self):
+    def test_public_trade_request_boost_applies(self):
         cfg = DealGeneratorConfig()
         tick_ctx = _TickCtxStub(agency_state_by_player={"p2": {"trade_request_level": 2}})
         catalog = self._catalog({"p1": self._player("p1"), "p2": self._player("p2")})
 
-        with patch(
-            "trades.generation.dealgen.targets._active_public_listing_priority_by_player",
-            return_value={},
-        ):
-            out = select_targets_sell(
-                "LAL",
-                tick_ctx,
-                catalog,
-                cfg,
-                budget=self._budget(),
-                rng=random.Random(11),
-                banned_players=set(),
-            )
+        out = select_targets_sell(
+            "LAL",
+            tick_ctx,
+            catalog,
+            cfg,
+            budget=self._budget(),
+            rng=random.Random(11),
+            banned_players=set(),
+        )
 
         self.assertEqual(out[0].player_id, "p2")
 
-    def test_signal_boost_capped_to_preserve_sort_stability(self):
+    def test_public_request_signal_boost_cap_preserves_sort_stability(self):
         cfg = DealGeneratorConfig(
-            listed_player_priority_boost=10.0,
             public_request_priority_boost=10.0,
-            listed_public_request_synergy_boost=10.0,
-            priority_signal_boost_cap=0.5,
+            public_request_priority_boost_cap=0.5,
         )
         tick_ctx = _TickCtxStub(agency_state_by_player={"p1": {"trade_request_level": 2}, "p2": {"trade_request_level": 2}})
         catalog = self._catalog({"p1": self._player("p1", surplus=0.6), "p2": self._player("p2", surplus=0.2)})
 
-        with patch(
-            "trades.generation.dealgen.targets._active_public_listing_priority_by_player",
-            return_value={"p1": 1.0, "p2": 1.0},
-        ):
-            out = select_targets_sell(
-                "LAL",
-                tick_ctx,
-                catalog,
-                cfg,
-                budget=self._budget(),
-                rng=_DeterministicRng(),
-                banned_players=set(),
-            )
+        out = select_targets_sell(
+            "LAL",
+            tick_ctx,
+            catalog,
+            cfg,
+            budget=self._budget(),
+            rng=_DeterministicRng(),
+            banned_players=set(),
+        )
 
         # Both receive the same capped signal boost, so existing quality key (surplus) keeps order.
         self.assertEqual(out[0].player_id, "p1")
 
-    def test_uses_tick_trade_market_snapshot_before_global_state(self):
+    def test_listing_signal_does_not_affect_sell_target_order(self):
         cfg = DealGeneratorConfig()
         tick_ctx = _TickCtxStub()
         tick_ctx.team_situation_ctx = SimpleNamespace(
@@ -154,20 +123,19 @@ class SellTargetPrioritySignalTests(unittest.TestCase):
                 }
             }
         )
-        catalog = self._catalog({"p1": self._player("p1"), "p2": self._player("p2")})
+        catalog = self._catalog({"p1": self._player("p1", surplus=0.9), "p2": self._player("p2", surplus=0.1)})
 
-        with patch("trades.orchestration.market_state.load_trade_market", side_effect=RuntimeError("must not be called")):
-            out = select_targets_sell(
-                "LAL",
-                tick_ctx,
-                catalog,
-                cfg,
-                budget=self._budget(),
-                rng=random.Random(13),
-                banned_players=set(),
-            )
+        out = select_targets_sell(
+            "LAL",
+            tick_ctx,
+            catalog,
+            cfg,
+            budget=self._budget(),
+            rng=_DeterministicRng(),
+            banned_players=set(),
+        )
 
-        self.assertEqual(out[0].player_id, "p2")
+        self.assertEqual(out[0].player_id, "p1")
 
 
 if __name__ == "__main__":
