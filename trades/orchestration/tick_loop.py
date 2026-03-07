@@ -30,10 +30,17 @@ from .promotion import promote_and_commit, compute_deal_key
 from .telemetry import build_tick_summary_payload, emit_tick_summary_event
 from .locks import trade_exec_serial_lock
 from . import policy
+from .listing_policy import apply_ai_proactive_listings
 from ..trade_rules import parse_trade_deadline, is_trade_window_open, offseason_trade_reopen_date
 
 
-def _allow_state_mutation(current_date_override: Optional[date]) -> bool:
+def _allow_state_mutation(
+    current_date_override: Optional[date],
+    *,
+    allow_backfill_state_mutation: bool = False,
+) -> bool:
+    if bool(allow_backfill_state_mutation):
+        return True
     ssot = state.get_current_date_as_date()
     if current_date_override is None:
         return True
@@ -98,6 +105,7 @@ def run_trade_orchestration_tick(
     generator: Optional[DealGenerator] = None,
     validate_integrity: bool = False,
     dry_run: bool = False,
+    allow_backfill_state_mutation: bool = False,
 ) -> TickReport:
     """
     Entry point for GM trade-orchestration ticks.
@@ -119,9 +127,13 @@ def run_trade_orchestration_tick(
             generator=generator,
             validate_integrity=validate_integrity,
             dry_run=dry_run,
+            allow_backfill_state_mutation=bool(allow_backfill_state_mutation),
         )
 
-    allow_mut = _allow_state_mutation(current_date)
+    allow_mut = _allow_state_mutation(
+        current_date,
+        allow_backfill_state_mutation=bool(allow_backfill_state_mutation),
+    )
     if allow_mut and not dry_run:
         today = current_date or state.get_current_date_as_date()
         today_iso = today.isoformat()
@@ -135,6 +147,7 @@ def run_trade_orchestration_tick(
                 generator=generator,
                 validate_integrity=validate_integrity,
                 dry_run=dry_run,
+                allow_backfill_state_mutation=bool(allow_backfill_state_mutation),
             )
 
     return _run_trade_orchestration_tick_impl(
@@ -146,6 +159,7 @@ def run_trade_orchestration_tick(
         generator=generator,
         validate_integrity=validate_integrity,
         dry_run=dry_run,
+        allow_backfill_state_mutation=bool(allow_backfill_state_mutation),
     )
 
 
@@ -159,6 +173,7 @@ def _run_trade_orchestration_tick_impl(
     generator: Optional[DealGenerator] = None,
     validate_integrity: bool = False,
     dry_run: bool = False,
+    allow_backfill_state_mutation: bool = False,
 ) -> TickReport:
     cfg = config or OrchestrationConfig()
     today = current_date or state.get_current_date_as_date()
@@ -172,8 +187,12 @@ def _run_trade_orchestration_tick_impl(
         report.skip_reason = "DISABLED"
         return report
 
-    allow_mut = _allow_state_mutation(current_date)
+    allow_mut = _allow_state_mutation(
+        current_date,
+        allow_backfill_state_mutation=bool(allow_backfill_state_mutation),
+    )
     report.meta["allow_state_mutation"] = bool(allow_mut)
+    report.meta["allow_backfill_state_mutation"] = bool(allow_backfill_state_mutation)
 
     if allow_mut and not dry_run:
         last = _get_last_gm_tick_date()
@@ -505,8 +524,21 @@ def _run_trade_orchestration_tick_impl(
                                         "player_id": str(pid),
                                         "listed_by": "AI_GM",
                                         "reason_code": "AI_MARKET_SIGNAL",
+                                        "origin": "FROM_PROPOSAL",
                                     },
                                 )
+                    except Exception:
+                        pass
+
+                if bool(getattr(cfg, "enable_trade_block", True)) and str(a.team_id).upper() not in human_ids:
+                    try:
+                        apply_ai_proactive_listings(
+                            team_id=str(a.team_id).upper(),
+                            tick_ctx=tick_ctx,
+                            trade_market=trade_market,
+                            today=today,
+                            config=getattr(cfg, "generator_config", None),
+                        )
                     except Exception:
                         pass
 

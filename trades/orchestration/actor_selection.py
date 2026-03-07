@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from .types import ActorPlan, OrchestrationConfig
 from . import policy
-from .market_state import get_active_thread_team_ids, get_active_listing_team_ids
+from .market_state import get_active_thread_team_ids
 
 
 def _safe_float(x: Any, default: float = 0.0) -> float:
@@ -95,7 +95,6 @@ def select_trade_actors(
 
     # Threads boost: 접촉 중인 팀은 며칠간 더 자주 시장에 등장하도록 한다.
     active_thread_team_ids: Set[str] = set()
-    active_listing_team_ids: Set[str] = set()
     public_request_counts_by_team = _public_trade_request_counts_by_team(
         tick_ctx,
         excluded_team_ids=excluded,
@@ -110,13 +109,6 @@ def select_trade_actors(
                 )
             except Exception:
                 active_thread_team_ids = set()
-        if bool(getattr(config, "enable_trade_block", True)):
-            try:
-                active_listing_team_ids = {
-                    t for t in get_active_listing_team_ids(trade_market, today=today) if t not in excluded
-                }
-            except Exception:
-                active_listing_team_ids = set()
 
     try:
         tier_w_high = float(getattr(config, "pressure_tier_weight_multiplier_high", 1.15) or 1.0)
@@ -235,32 +227,11 @@ def select_trade_actors(
         thread_mult = 1.0
 
     try:
-        listing_mult = float(getattr(config, "trade_block_actor_weight_multiplier", 1.2) or 1.0)
-    except Exception:
-        listing_mult = 1.0
-    if listing_mult <= 0:
-        listing_mult = 1.0
-
-    try:
         public_req_mult = float(getattr(config, "trade_request_public_actor_weight_multiplier", 1.15) or 1.0)
     except Exception:
         public_req_mult = 1.0
     if public_req_mult <= 0:
         public_req_mult = 1.0
-
-    try:
-        public_req_no_listing_mult = float(getattr(config, "trade_request_public_no_listing_weight_multiplier", 1.08) or 1.0)
-    except Exception:
-        public_req_no_listing_mult = 1.0
-    if public_req_no_listing_mult <= 0:
-        public_req_no_listing_mult = 1.0
-
-    try:
-        public_req_with_listing_mult = float(getattr(config, "trade_request_public_with_listing_weight_multiplier", 1.06) or 1.0)
-    except Exception:
-        public_req_with_listing_mult = 1.0
-    if public_req_with_listing_mult <= 0:
-        public_req_with_listing_mult = 1.0
 
     try:
         actor_weight_cap = float(getattr(config, "actor_weight_multiplier_cap", 3.0) or 3.0)
@@ -278,18 +249,11 @@ def select_trade_actors(
             w *= tier_w_rush
         if p.team_id in active_thread_team_ids:
             w *= thread_mult
-        if p.team_id in active_listing_team_ids:
-            w *= listing_mult
-
         public_req_count = int(public_request_counts_by_team.get(str(p.team_id).upper(), 0) or 0)
         if public_req_count > 0:
             # Count-aware mild scaling (1,2,3+ requests) without runaway effects.
             req_factor = min(1.0 + (0.20 * min(public_req_count - 1, 2)), 1.4)
             w *= (1.0 + (public_req_mult - 1.0) * req_factor)
-            if p.team_id in active_listing_team_ids:
-                w *= public_req_with_listing_mult
-            else:
-                w *= public_req_no_listing_mult
 
         base_w = max(0.001, float(p.activity_score or 0.0))
         max_w = base_w * actor_weight_cap
