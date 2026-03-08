@@ -166,7 +166,6 @@ class DealGeneratorConfig:
     ai_proactive_listing_ttl_days_sell: int = 12
     ai_proactive_listing_ttl_days_soft_sell: int = 7
     ai_proactive_listing_ttl_days_default: int = 5
-    ai_proactive_listing_min_score: float = 0.25
     ai_proactive_listing_priority_base: float = 0.45
     ai_proactive_listing_priority_span: float = 0.35
 
@@ -488,4 +487,3 @@ def parse_trade_error(err: TradeError) -> RuleFailure:
         rule_id=rule_id,
         details=details,
     )
-
