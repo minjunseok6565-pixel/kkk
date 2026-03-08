@@ -366,7 +366,7 @@ def _split_young_candidates(
                 return False
         return True
 
-    # Base pool from non-core-ish buckets (same as existing v1 youngish selection)
+    # Base pool from outgoing player buckets (same as existing v1 youngish selection)
     base: List[PlayerTradeCandidate] = []
     for b in ("SURPLUS_LOW_FIT", "SURPLUS_REDUNDANT", "FILLER_CHEAP", "CONSOLIDATE"):
         for pid in out.player_ids_by_bucket.get(b, tuple()):

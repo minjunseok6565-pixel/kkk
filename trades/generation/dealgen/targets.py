@@ -147,7 +147,7 @@ def select_targets_buy(
             refs = catalog.incoming_cheap_by_need_tag.get(tag, tuple())
         w_need = float(need_map.get(tag, 0.0) or 0.0)
 
-        # CORE가 섞여 있을 수 있으므로, 후보를 먼저 자르지 말고 일정 범위 내에서 "채울 때까지" 스캔한다.
+        # 후보를 먼저 자르지 말고 일정 범위 내에서 "채울 때까지" 스캔한다.
         need_n = int(config.incoming_pool_per_tag)
         scan_limit = min(len(refs), need_n * 3)  # 3배 스캔 상한(고정)
 
@@ -248,7 +248,6 @@ def select_targets_sell(
     v2 정합 로직:
     - locked(allow_locked 예외 포함) 선필터
     - recent_signing_banned_until 선필터
-    - CORE: SOFT_SELL에서는 제외, SELL에서는 아주 드물게(4%) 허용
     - 정렬: bucket priority -> public request signal(desc) -> surplus_score(desc) -> expiring(desc) -> market_total(asc) -> player_id
     - 상위 head만 소폭 셔플해 매번 같은 쇼핑리스트가 되지 않게 한다
     """

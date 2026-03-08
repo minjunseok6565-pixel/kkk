@@ -29,7 +29,7 @@ class SellTargetPrioritySignalTests(unittest.TestCase):
     def _catalog(self, players):
         out_cat = TeamOutgoingCatalog(
             team_id="LAL",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple(players.keys()), "CORE": tuple()},
+            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple(players.keys())},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players=players,
