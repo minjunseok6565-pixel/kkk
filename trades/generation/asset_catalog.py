@@ -770,7 +770,7 @@ def build_trade_asset_catalog(
             if rs >= 0.55:
                 redundant_scored.append((rs, c))
         redundant_scored.sort(
-            key=lambda t: (-t[0], t[1].market.total, t[1].fit_vs_team, t[1].player_id)
+            key=lambda t: (t[1].market.total, -t[0], t[1].fit_vs_team, t[1].player_id)
         )
         redundant_ids = [c.player_id for _, c in redundant_scored[: max(0, caps.get("SURPLUS_REDUNDANT", 0))]]
 
