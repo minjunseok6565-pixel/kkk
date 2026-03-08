@@ -105,7 +105,6 @@ def _is_player_in_proactive_cooldown(
 
 _PROACTIVE_ALLOWED_BUCKETS: Tuple[str, ...] = (
     "VETERAN_SALE",
-    "EXPIRING",
     "SURPLUS_LOW_FIT",
     "SURPLUS_REDUNDANT",
     "FILLER_BAD_CONTRACT",

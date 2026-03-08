@@ -215,7 +215,7 @@ def _repair_salary_matching(
     """SalaryMatchingRule 실패 수리.
 
     가장 안전한 수리:
-    - failing_team outgoing에 filler 1명을 추가(FILLER_CHEAP -> EXPIRING -> FILLER_BAD_CONTRACT)
+    - failing_team outgoing에 filler 1명을 추가(FILLER_CHEAP -> FILLER_BAD_CONTRACT)
 
     단, SECOND_APRON 팀은 post-2024 CBA 기준으로 outgoing salary aggregation이 금지되므로
     (incoming이 단일 outgoing 계약으로 매칭 가능해야 함) 여기서는 보수적으로 제한된 수리만 시도한다.
@@ -265,7 +265,7 @@ def _repair_salary_matching(
     allow_solo_only = (len(already) == 0)
 
     # 후보 filler를 버킷에서 전수 스캔하고, "salary matching을 실제로 통과시키는" 후보만 남긴다.
-    buckets: Tuple[BucketId, ...] = ("FILLER_CHEAP", "EXPIRING", "FILLER_BAD_CONTRACT")
+    buckets: Tuple[BucketId, ...] = ("FILLER_CHEAP", "FILLER_BAD_CONTRACT")
     seen: Set[str] = set()
     passing: List[Tuple[int, float, str]] = []  # (salary_d, market_total, player_id)
 
@@ -449,7 +449,6 @@ def _repair_second_apron_salary_mismatch(
 
         scan_buckets: Tuple[BucketId, ...] = (
             "FILLER_BAD_CONTRACT",
-            "EXPIRING",
             "FILLER_CHEAP",
             "CONSOLIDATE",
             "SURPLUS_REDUNDANT",
@@ -556,7 +555,6 @@ def _repair_second_apron_salary_mismatch(
 
         scan_buckets2: Tuple[BucketId, ...] = (
             "FILLER_CHEAP",
-            "EXPIRING",
             "FILLER_BAD_CONTRACT",
             "SURPLUS_REDUNDANT",
             "SURPLUS_LOW_FIT",
@@ -689,7 +687,7 @@ def _repair_roster_limit(cand: DealCandidate, problem_team: str, catalog: TradeA
     # 낮은 market을 우선으로 보내되, return-ban / solo-only 조건을 반영해서 후보를 고른다.
     best_pid: Optional[str] = None
     best_key: Optional[Tuple[float, float, str]] = None  # (market_total, salary_m, pid)
-    for b in ("FILLER_CHEAP", "EXPIRING", "FILLER_BAD_CONTRACT"):
+    for b in ("FILLER_CHEAP", "FILLER_BAD_CONTRACT"):
         for pid in prob_out.player_ids_by_bucket.get(b, tuple()):
             pid = str(pid)
             if pid in already:

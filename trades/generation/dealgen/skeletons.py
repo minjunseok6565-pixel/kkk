@@ -806,7 +806,7 @@ def _top_k_fillers_by_salary_gap(
     receiver = str(receiver_team_id).upper() if receiver_team_id else None
 
     ids: List[str] = []
-    for b in ("FILLER_CHEAP", "EXPIRING", "FILLER_BAD_CONTRACT"):
+    for b in ("FILLER_CHEAP", "FILLER_BAD_CONTRACT"):
         ids.extend(list(out.player_ids_by_bucket.get(b, tuple())))
 
     scored: List[Tuple[float, float, str]] = []
