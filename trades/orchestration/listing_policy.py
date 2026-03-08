@@ -105,7 +105,6 @@ def _is_player_in_proactive_cooldown(
 
 _PROACTIVE_ALLOWED_BUCKETS: Tuple[str, ...] = (
     "VETERAN_SALE",
-    "EXPIRING",
     "SURPLUS_LOW_FIT",
     "SURPLUS_REDUNDANT",
     "FILLER_BAD_CONTRACT",
@@ -122,6 +121,86 @@ def _bucket_priority_key(player: Any) -> Tuple[int, float]:
     return len(_PROACTIVE_ALLOWED_BUCKETS), -max(0.0, _safe_float(getattr(player, "surplus_score", 0.0), 0.0))
 
 
+def _should_run_proactive_listing_today(
+    *,
+    trade_market: Dict[str, Any],
+    team_id: str,
+    today: date,
+    config: Any,
+) -> bool:
+    cadence = str(getattr(config, "ai_proactive_listing_cadence", "DAILY") or "DAILY").upper()
+    if cadence != "WEEKLY":
+        return True
+
+    anchor = int(getattr(config, "ai_proactive_listing_anchor_weekday", 0) or 0)
+    anchor = max(0, min(6, anchor))
+    if int(today.weekday()) != anchor:
+        return False
+
+    meta = trade_market.get("proactive_listing_meta") if isinstance(trade_market.get("proactive_listing_meta"), dict) else {}
+    team_meta = meta.get(str(team_id).upper()) if isinstance(meta, dict) else None
+    last_iso = team_meta.get("last_eval_at") if isinstance(team_meta, dict) else None
+    last_d = _parse_iso_ymd(last_iso)
+    if last_d is not None and (today - last_d).days < 7:
+        return False
+    return True
+
+
+def _stamp_proactive_listing_eval(*, trade_market: Dict[str, Any], team_id: str, today: date) -> None:
+    meta = trade_market.get("proactive_listing_meta")
+    if not isinstance(meta, dict):
+        meta = {}
+        trade_market["proactive_listing_meta"] = meta
+
+    tid = str(team_id).upper()
+    cur = meta.get(tid)
+    if not isinstance(cur, dict):
+        cur = {}
+    cur["last_eval_at"] = today.isoformat()
+    meta[tid] = cur
+
+
+def _resolve_bucket_threshold(*, bucket: str, team_situation: Any, config: Any) -> float:
+    posture = str(getattr(team_situation, "trade_posture", "STAND_PAT") or "STAND_PAT").upper()
+    horizon = str(getattr(team_situation, "time_horizon", "RE_TOOL") or "RE_TOOL").upper()
+    urgency = _clamp01(getattr(team_situation, "urgency", 0.0))
+    constraints = getattr(team_situation, "constraints", None)
+    cooldown_active = bool(getattr(constraints, "cooldown_active", False))
+
+    table = getattr(config, "ai_proactive_listing_bucket_thresholds", {}) or {}
+    row = table.get(posture, {}) if isinstance(table, dict) else {}
+    base = _safe_float(
+        (row.get(bucket) if isinstance(row, dict) else None),
+        _safe_float(getattr(config, "ai_proactive_listing_threshold_default", 0.55), 0.55),
+    )
+
+    if horizon == "WIN_NOW" and bucket in {"SURPLUS_LOW_FIT", "SURPLUS_REDUNDANT"}:
+        base += _safe_float(getattr(config, "ai_proactive_listing_threshold_horizon_win_now_delta", -0.03), -0.03)
+    elif horizon == "REBUILD" and bucket == "VETERAN_SALE":
+        base += _safe_float(getattr(config, "ai_proactive_listing_threshold_horizon_rebuild_delta", -0.05), -0.05)
+
+    u_cut = _safe_float(getattr(config, "ai_proactive_listing_threshold_urgency_cut", 0.75), 0.75)
+    if urgency >= u_cut:
+        base += _safe_float(getattr(config, "ai_proactive_listing_threshold_urgency_delta", -0.03), -0.03)
+
+    if cooldown_active:
+        base += _safe_float(getattr(config, "ai_proactive_listing_threshold_cooldown_active_delta", 0.05), 0.05)
+
+    lo = _safe_float(getattr(config, "ai_proactive_listing_threshold_min", 0.10), 0.10)
+    hi = _safe_float(getattr(config, "ai_proactive_listing_threshold_max", 0.95), 0.95)
+    if lo > hi:
+        lo, hi = hi, lo
+    return max(lo, min(hi, base))
+
+
+def _passes_listing_threshold(*, player: Any, bucket: str, team_situation: Any, config: Any) -> bool:
+    if not bool(getattr(config, "ai_proactive_listing_threshold_enabled", True)):
+        return True
+    score = _clamp01(getattr(player, "surplus_score", 0.0))
+    threshold = _resolve_bucket_threshold(bucket=bucket, team_situation=team_situation, config=config)
+    return float(score) >= float(threshold)
+
+
 def apply_ai_proactive_listings(
     *,
     team_id: str,
@@ -133,6 +212,14 @@ def apply_ai_proactive_listings(
     tid = str(team_id).upper()
 
     if not bool(getattr(config, "ai_proactive_listing_enabled", True)):
+        return []
+
+    if not _should_run_proactive_listing_today(
+        trade_market=trade_market,
+        team_id=tid,
+        today=today,
+        config=config,
+    ):
         return []
 
     team_active_cap = int(getattr(config, "ai_proactive_listing_team_active_cap", 4) or 4)
@@ -161,7 +248,9 @@ def apply_ai_proactive_listings(
     if not isinstance(players, dict) or not players:
         return []
 
-    posture = str(getattr(tick_ctx.get_team_situation(tid), "trade_posture", "STAND_PAT") or "STAND_PAT").upper()
+    team_situation = tick_ctx.get_team_situation(tid)
+    posture = str(getattr(team_situation, "trade_posture", "STAND_PAT") or "STAND_PAT").upper()
+
     ttl_days = int(getattr(config, "ai_proactive_listing_ttl_days_default", 5) or 5)
     if posture == "SELL":
         ttl_days = int(getattr(config, "ai_proactive_listing_ttl_days_sell", 12) or ttl_days)
@@ -172,6 +261,7 @@ def apply_ai_proactive_listings(
     pri_span = float(getattr(config, "ai_proactive_listing_priority_span", 0.35) or 0.0)
 
     candidate_ids: List[str] = []
+    candidate_bucket_by_pid: Dict[str, str] = {}
     player_ids_by_bucket = getattr(out_team, "player_ids_by_bucket", {}) or {}
     if isinstance(player_ids_by_bucket, dict):
         seen: set[str] = set()
@@ -184,6 +274,7 @@ def apply_ai_proactive_listings(
                     continue
                 seen.add(p)
                 candidate_ids.append(p)
+                candidate_bucket_by_pid[p] = str(b)
 
     rows: List[Tuple[Tuple[int, float, str], str]] = []
     for p in candidate_ids:
@@ -211,10 +302,22 @@ def apply_ai_proactive_listings(
         ):
             continue
 
+        bucket = str(candidate_bucket_by_pid.get(p) or "").upper()
+        if not bucket:
+            continue
+        if not _passes_listing_threshold(
+            player=player,
+            bucket=bucket,
+            team_situation=team_situation,
+            config=config,
+        ):
+            continue
+
         pri_idx, pri_surplus = _bucket_priority_key(player)
         rows.append(((pri_idx, pri_surplus, p), p))
 
     if not rows:
+        _stamp_proactive_listing_eval(trade_market=trade_market, team_id=tid, today=today)
         return []
 
     rows.sort(key=lambda x: x[0])
@@ -251,4 +354,5 @@ def apply_ai_proactive_listings(
         )
         listed.append(pid)
 
+    _stamp_proactive_listing_eval(trade_market=trade_market, team_id=tid, today=today)
     return listed

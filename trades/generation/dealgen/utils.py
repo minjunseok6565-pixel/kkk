@@ -766,7 +766,6 @@ def _pick_return_player_salaryish_with_need(
     # v2의 "match" 후보 풀 감각을 v1에 맞게 최소 구현:
     # (즉시전력/가치자산/샐매 가능 바디가 섞이되 CORE는 포함하지 않음)
     buckets: Tuple[BucketId, ...] = (
-        "EXPIRING",
         "SURPLUS_LOW_FIT",
         "SURPLUS_REDUNDANT",
         "CONSOLIDATE",
@@ -853,7 +852,7 @@ def _pick_filler_player_for_salary(
     receiver = str(receiver_team_id).upper() if receiver_team_id else None
 
     ids: List[str] = []
-    for b in ("FILLER_CHEAP", "EXPIRING", "FILLER_BAD_CONTRACT"):
+    for b in ("FILLER_CHEAP", "FILLER_BAD_CONTRACT"):
         ids.extend(list(out.player_ids_by_bucket.get(b, tuple())))
 
     best: Optional[str] = None
