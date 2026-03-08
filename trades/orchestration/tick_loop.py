@@ -22,8 +22,6 @@ from .market_state import (
     get_human_controlled_team_ids,
     set_human_controlled_team_ids,
     get_active_thread_team_ids,
-    upsert_trade_listing,
-    record_market_event,
 )
 from .actor_selection import select_trade_actors
 from .promotion import promote_and_commit, compute_deal_key
@@ -60,40 +58,6 @@ def _stable_seed_int(*parts: str) -> int:
     raw = "|".join([str(p) for p in parts]).encode("utf-8")
     digest = hashlib.sha1(raw).digest()
     return int.from_bytes(digest[:8], "big", signed=False)
-
-
-def _extract_outgoing_player_ids_for_team_from_prop(prop: Any, team_id: str) -> List[str]:
-    try:
-        from ..models import canonicalize_deal, serialize_deal
-
-        deal_payload = serialize_deal(canonicalize_deal(getattr(prop, "deal", prop)))
-    except Exception:
-        return []
-    out: List[str] = []
-    src = str(team_id).upper()
-    for leg in (deal_payload.get("legs") or []):
-        if not isinstance(leg, dict):
-            continue
-        if str(leg.get("from_team") or "").upper() != src:
-            continue
-        for a in (leg.get("assets") or []):
-            if not isinstance(a, dict):
-                continue
-            if str(a.get("kind") or "").upper() != "PLAYER":
-                continue
-            pid = a.get("player_id")
-            if pid:
-                out.append(str(pid))
-    # dedupe stable
-    uniq: List[str] = []
-    seen: Set[str] = set()
-    for pid in out:
-        if pid in seen:
-            continue
-        seen.add(pid)
-        uniq.append(pid)
-    return uniq
-
 
 def run_trade_orchestration_tick(
     *,
@@ -496,39 +460,6 @@ def _run_trade_orchestration_tick_impl(
                         initiator_by_deal_id[did] = str(a.team_id).upper()
                     except Exception:
                         continue
-
-                # AI teams can proactively place likely outgoing assets on trade block.
-                if bool(getattr(cfg, "enable_trade_block", True)) and str(a.team_id).upper() not in human_ids:
-                    try:
-                        if props:
-                            sample_prop = props[0]
-                            outgoing = _extract_outgoing_player_ids_for_team_from_prop(sample_prop, str(a.team_id).upper())
-                            if outgoing:
-                                pid = outgoing[0]
-                                upsert_trade_listing(
-                                    trade_market,
-                                    today=today,
-                                    player_id=pid,
-                                    team_id=str(a.team_id).upper(),
-                                    listed_by="AI_GM",
-                                    visibility="PUBLIC",
-                                    priority=0.55,
-                                    reason_code="AI_MARKET_SIGNAL",
-                                )
-                                record_market_event(
-                                    trade_market,
-                                    today=today,
-                                    event_type="TRADE_BLOCK_LISTED",
-                                    payload={
-                                        "team_id": str(a.team_id).upper(),
-                                        "player_id": str(pid),
-                                        "listed_by": "AI_GM",
-                                        "reason_code": "AI_MARKET_SIGNAL",
-                                        "origin": "FROM_PROPOSAL",
-                                    },
-                                )
-                    except Exception:
-                        pass
 
                 if bool(getattr(cfg, "enable_trade_block", True)) and str(a.team_id).upper() not in human_ids:
                     try:

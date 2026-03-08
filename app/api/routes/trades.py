@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta, datetime
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 import sqlite3
@@ -29,7 +29,6 @@ from trades.orchestration.market_state import (
     bump_relationship,
     get_rel_meta_date_iso,
     is_private_leak_publicized,
-    mark_private_leak_publicized,
 )
 from app.schemas.trades import (
     TradeBlockListRequest,
@@ -1211,34 +1210,6 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
             market = load_trade_market()
             today = in_game_date
 
-            # PUBLIC: proposer(=user team) outgoing players auto-list
-            if offer_privacy == "PUBLIC":
-                outgoing = _extract_outgoing_player_ids_for_team(deal_serialized, from_team_id=session["user_team_id"])
-                ttl = int(getattr(cfg, "trade_block_auto_list_days_public_offer", 10) or 10)
-                if ttl <= 0:
-                    ttl = 1
-                for pid in outgoing:
-                    upsert_trade_listing(
-                        market,
-                        today=today,
-                        player_id=pid,
-                        team_id=session["user_team_id"],
-                        listed_by="AUTO_PUBLIC_OFFER",
-                        visibility="PUBLIC",
-                        priority=0.6,
-                        reason_code="PUBLIC_OFFER",
-                        expires_on=(today + timedelta(days=ttl+1)).isoformat(),
-                        source={"session_id": req.session_id, "offer_privacy": "PUBLIC"},
-                    )
-                    leaked_player_ids.append(pid)
-                if outgoing:
-                    record_market_event(
-                        market,
-                        today=today,
-                        event_type="TRADE_BLOCK_AUTO_LISTED_FROM_PUBLIC_OFFER",
-                        payload={"session_id": req.session_id, "team_id": str(session["user_team_id"]).upper(), "player_ids": outgoing},
-                    )
-
             # PRIVATE: never auto-list. If user explicitly exposes, emit leak + relationship hit.
             if offer_privacy == "PRIVATE" and expose_to_media:
                 mem = load_trade_memory()
@@ -1282,49 +1253,6 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                             "player_ids": leaked_player_ids,
                         },
                     )
-
-                    # Leak -> public conversion (idempotent per session).
-                    if leaked_player_ids and not is_private_leak_publicized(market, session_id=str(req.session_id)):
-                        ttl = int(getattr(cfg, "trade_block_auto_list_days_public_offer", 10) or 10)
-                        if ttl <= 0:
-                            ttl = 1
-                        for pid in leaked_player_ids:
-                            upsert_trade_listing(
-                                market,
-                                today=today,
-                                player_id=pid,
-                                team_id=session["user_team_id"],
-                                listed_by="AUTO_PRIVATE_LEAK",
-                                visibility="PUBLIC",
-                                priority=0.62,
-                                reason_code="PRIVATE_OFFER_LEAK_PUBLICIZED",
-                                expires_on=(today + timedelta(days=ttl + 1)).isoformat(),
-                                source={
-                                    "session_id": req.session_id,
-                                    "offer_privacy": "PRIVATE",
-                                    "publicized_from": "LEAK",
-                                },
-                            )
-                        record_market_event(
-                            market,
-                            today=today,
-                            event_type="TRADE_OFFER_PUBLICIZED_FROM_LEAK",
-                            payload={
-                                "session_id": req.session_id,
-                                "user_team_id": str(session["user_team_id"]).upper(),
-                                "other_team_id": str(session["other_team_id"]).upper(),
-                                "player_ids": leaked_player_ids,
-                            },
-                        )
-                        mark_private_leak_publicized(
-                            market,
-                            session_id=str(req.session_id),
-                            today=today,
-                            player_ids=leaked_player_ids,
-                            user_team_id=str(session["user_team_id"]).upper(),
-                            other_team_id=str(session["other_team_id"]).upper(),
-                            leaked_by="USER",
-                        )
 
                     trust_penalty = _clamp_int(
                         getattr(cfg, "user_leak_trust_penalty", 35),

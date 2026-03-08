@@ -103,30 +103,23 @@ def _is_player_in_proactive_cooldown(
     return (today - latest).days < int(cooldown_days)
 
 
-def _candidate_score(player: Any, *, trade_request_level: int) -> float:
+_PROACTIVE_ALLOWED_BUCKETS: Tuple[str, ...] = (
+    "VETERAN_SALE",
+    "EXPIRING",
+    "SURPLUS_LOW_FIT",
+    "SURPLUS_REDUNDANT",
+    "FILLER_BAD_CONTRACT",
+    "FILLER_CHEAP",
+    "CONSOLIDATE",
+)
+
+
+def _bucket_priority_key(player: Any) -> Tuple[int, float]:
     buckets = {str(b).upper() for b in (getattr(player, "buckets", None) or tuple())}
-    bucket_w = 0.0
-    if "VETERAN_SALE" in buckets:
-        bucket_w = max(bucket_w, 0.55)
-    if "EXPIRING" in buckets:
-        bucket_w = max(bucket_w, 0.45)
-    if "SURPLUS_LOW_FIT" in buckets:
-        bucket_w = max(bucket_w, 0.42)
-    if "SURPLUS_REDUNDANT" in buckets:
-        bucket_w = max(bucket_w, 0.36)
-    if "FILLER_BAD_CONTRACT" in buckets:
-        bucket_w = max(bucket_w, 0.30)
-    if "FILLER_CHEAP" in buckets:
-        bucket_w = max(bucket_w, 0.22)
-
-    surplus = max(0.0, _safe_float(getattr(player, "surplus_score", 0.0), 0.0))
-    exp = 0.15 if bool(getattr(player, "is_expiring", False)) else 0.0
-
-    req = 0.0
-    if int(trade_request_level or 0) >= 2:
-        req = 0.12 + 0.06 * min(int(trade_request_level) - 2, 2)
-
-    return bucket_w + 0.35 * min(surplus, 1.0) + exp + req
+    for idx, b in enumerate(_PROACTIVE_ALLOWED_BUCKETS):
+        if b in buckets:
+            return idx, -max(0.0, _safe_float(getattr(player, "surplus_score", 0.0), 0.0))
+    return len(_PROACTIVE_ALLOWED_BUCKETS), -max(0.0, _safe_float(getattr(player, "surplus_score", 0.0), 0.0))
 
 
 def apply_ai_proactive_listings(
@@ -168,10 +161,6 @@ def apply_ai_proactive_listings(
     if not isinstance(players, dict) or not players:
         return []
 
-    provider = getattr(tick_ctx, "provider", None)
-    agency = getattr(provider, "agency_state_by_player", {}) if provider is not None else {}
-    agency = agency if isinstance(agency, dict) else {}
-
     posture = str(getattr(tick_ctx.get_team_situation(tid), "trade_posture", "STAND_PAT") or "STAND_PAT").upper()
     ttl_days = int(getattr(config, "ai_proactive_listing_ttl_days_default", 5) or 5)
     if posture == "SELL":
@@ -179,19 +168,32 @@ def apply_ai_proactive_listings(
     elif posture == "SOFT_SELL":
         ttl_days = int(getattr(config, "ai_proactive_listing_ttl_days_soft_sell", 7) or ttl_days)
 
-    min_score = float(getattr(config, "ai_proactive_listing_min_score", 0.25) or 0.0)
     pri_base = float(getattr(config, "ai_proactive_listing_priority_base", 0.45) or 0.0)
     pri_span = float(getattr(config, "ai_proactive_listing_priority_span", 0.35) or 0.0)
 
-    rows: List[Tuple[float, str]] = []
-    for pid, player in players.items():
-        p = str(pid)
+    candidate_ids: List[str] = []
+    player_ids_by_bucket = getattr(out_team, "player_ids_by_bucket", {}) or {}
+    if isinstance(player_ids_by_bucket, dict):
+        seen: set[str] = set()
+        for b in _PROACTIVE_ALLOWED_BUCKETS:
+            for pid in player_ids_by_bucket.get(b, tuple()) or tuple():
+                p = str(pid)
+                if not p or p in seen:
+                    continue
+                if p not in players:
+                    continue
+                seen.add(p)
+                candidate_ids.append(p)
+
+    rows: List[Tuple[Tuple[int, float, str], str]] = []
+    for p in candidate_ids:
+        player = players.get(p)
+        if player is None:
+            continue
         if not p:
             continue
         if p in active_pids:
             continue
-
-        buckets = {str(b).upper() for b in (getattr(player, "buckets", None) or tuple())}
 
         lock = getattr(player, "lock", None)
         if bool(getattr(lock, "is_locked", False)):
@@ -209,20 +211,19 @@ def apply_ai_proactive_listings(
         ):
             continue
 
-        tr = int(_safe_float((agency.get(p) or {}).get("trade_request_level"), 0.0)) if isinstance(agency.get(p), dict) else 0
-        score = _candidate_score(player, trade_request_level=tr)
-        if score < min_score:
-            continue
-        rows.append((score, p))
+        pri_idx, pri_surplus = _bucket_priority_key(player)
+        rows.append(((pri_idx, pri_surplus, p), p))
 
     if not rows:
         return []
 
-    rows.sort(key=lambda x: (-x[0], x[1]))
+    rows.sort(key=lambda x: x[0])
     listed: List[str] = []
 
-    for score, pid in rows[:remaining]:
-        priority = _clamp01(pri_base + pri_span * min(max(score, 0.0), 1.0))
+    for rank, pid in rows[:remaining]:
+        rank_idx, _, _ = rank
+        bucket_weight = max(0.0, 1.0 - (float(rank_idx) * 0.1))
+        priority = _clamp01(pri_base + pri_span * min(max(bucket_weight, 0.0), 1.0))
         upsert_trade_listing(
             trade_market,
             today=today,

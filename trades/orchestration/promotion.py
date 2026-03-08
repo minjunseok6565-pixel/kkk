@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import date, timedelta
+from datetime import date
 from typing import Any, Dict, List, Optional, Sequence, Set
 
 import state
@@ -25,12 +25,10 @@ from .types import OrchestrationConfig, PromotionResult
 from . import policy
 from .market_state import (
     add_team_cooldown,
-    upsert_trade_listing,
     bump_relationship,
     record_market_event,
     get_rel_meta_date_iso,
     is_private_leak_publicized,
-    mark_private_leak_publicized,
     touch_thread,
     apply_trade_executed_effects,
 )
@@ -788,59 +786,6 @@ def promote_and_commit(
                                 "player_ids": leaked_player_ids,
                             },
                         )
-
-                        # Leak -> public conversion (idempotent, parity with user path)
-                        if bool(getattr(config, "enable_ai_leak_publicize", True)) and leaked_player_ids and not is_private_leak_publicized(
-                            trade_market,
-                            session_id=str(sess_id),
-                            deal_id=str(deal_key),
-                        ):
-                            ttl = int(getattr(config, "trade_block_auto_list_days_public_offer", 10) or 10)
-                            if ttl <= 0:
-                                ttl = 1
-                            for pid in leaked_player_ids:
-                                upsert_trade_listing(
-                                    trade_market,
-                                    today=today,
-                                    player_id=pid,
-                                    team_id=proposer_team_id,
-                                    listed_by="AUTO_PRIVATE_LEAK",
-                                    visibility="PUBLIC",
-                                    priority=0.62,
-                                    reason_code="PRIVATE_OFFER_LEAK_PUBLICIZED",
-                                    expires_on=(today + timedelta(days=ttl + 1)).isoformat(),
-                                    source={
-                                        "session_id": sess_id,
-                                        "deal_id": deal_key,
-                                        "offer_privacy": "PRIVATE",
-                                        "publicized_from": "LEAK",
-                                        "leaked_by": "AI",
-                                    },
-                                )
-                            record_market_event(
-                                trade_market,
-                                today=today,
-                                event_type="TRADE_OFFER_PUBLICIZED_FROM_LEAK",
-                                payload={
-                                    "deal_id": deal_key,
-                                    "session_id": sess_id,
-                                    "user_team_id": recipient_team_id,
-                                    "other_team_id": proposer_team_id,
-                                    "player_ids": leaked_player_ids,
-                                    "publicized_from": "LEAK",
-                                    "leaked_by": "AI",
-                                },
-                            )
-                            mark_private_leak_publicized(
-                                trade_market,
-                                session_id=str(sess_id),
-                                deal_id=str(deal_key),
-                                today=today,
-                                player_ids=leaked_player_ids,
-                                user_team_id=recipient_team_id,
-                                other_team_id=proposer_team_id,
-                                leaked_by="AI",
-                            )
 
                         offer_meta["publicized_from_leak"] = bool(
                             is_private_leak_publicized(trade_market, session_id=str(sess_id), deal_id=str(deal_key))
