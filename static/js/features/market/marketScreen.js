@@ -35,9 +35,19 @@ function isMarketUiActive() {
 }
 
 function createTradeIdempotencyKey(action, sessionId = null) {
-  const normalizedAction = String(action || "action").trim() || "action";
-  const normalizedSessionId = sessionId == null ? "none" : String(sessionId);
-  return `${normalizedSessionId}:${normalizedAction}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+  // Backend schema constraint: ^[A-Za-z0-9_-]{8,128}$
+  const sanitizeToken = (value, fallback) => {
+    const text = String(value == null ? "" : value).trim();
+    const cleaned = text.replace(/[^A-Za-z0-9_-]/g, "_");
+    return cleaned || fallback;
+  };
+
+  const normalizedAction = sanitizeToken(action, "action");
+  const normalizedSessionId = sanitizeToken(sessionId, "none");
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 10);
+  const key = `${normalizedSessionId}-${normalizedAction}-${ts}-${rand}`;
+  return key.slice(0, 128);
 }
 
 function runScopedTask(scope, runner) {
