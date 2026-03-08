@@ -173,7 +173,6 @@ class LockInfo:
 
 
 BucketId = Literal[
-    "CORE",
     "FILLER_BAD_CONTRACT",
     "FILLER_CHEAP",
     "SURPLUS_LOW_FIT",
@@ -425,7 +424,6 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
             "EXPIRING": 6,
             "VETERAN_SALE": 5,
             "CONSOLIDATE": 0,
-            "CORE": 0,
         }
     if p in {"AGGRESSIVE_BUY"}:
         return {
@@ -436,7 +434,6 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
             "EXPIRING": 5,
             "VETERAN_SALE": 0,
             "CONSOLIDATE": 7,
-            "CORE": 0,
         }
     if p in {"SOFT_BUY"}:
         return {
@@ -447,7 +444,6 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
             "EXPIRING": 5,
             "VETERAN_SALE": 0,
             "CONSOLIDATE": 5,
-            "CORE": 0,
         }
     # STAND_PAT / unknown
     return {
@@ -458,7 +454,6 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
         "EXPIRING": 5,
         "VETERAN_SALE": 0,
         "CONSOLIDATE": 3,
-        "CORE": 0,
     }
 
 
@@ -740,8 +735,6 @@ def build_trade_asset_catalog(
             and not (c.recent_signing_banned_until and _parse_iso_date(c.recent_signing_banned_until) and current_date < _parse_iso_date(c.recent_signing_banned_until))  # type: ignore[arg-type]
         ]
 
-        core_ids: Tuple[str, ...] = tuple()
-
         # Precompute redundant score (supply * (1 - need))
         def redundancy_score(c: PlayerTradeCandidate) -> float:
             nm = dc.need_map or {}
@@ -828,7 +821,6 @@ def build_trade_asset_catalog(
 
         # --- Record bucket membership into candidate objects (for debugging/consistency)
         bucket_members: Dict[BucketId, List[str]] = {
-            "CORE": list(core_ids),
             "FILLER_BAD_CONTRACT": list(filler_bad_ids),
             "FILLER_CHEAP": list(filler_cheap_ids),
             "SURPLUS_LOW_FIT": list(low_fit_ids),
@@ -879,8 +871,6 @@ def build_trade_asset_catalog(
                 out.append(pid)
                 selected.add(pid)
             outgoing_player_ids_by_bucket[b] = tuple(out)
-        # Keep key for schema compatibility.
-        outgoing_player_ids_by_bucket["CORE"] = tuple(core_ids)
 
         # --- Picks (movable, locks + max_years + Stepien "safe alone")
         picks: Dict[str, PickTradeCandidate] = {}

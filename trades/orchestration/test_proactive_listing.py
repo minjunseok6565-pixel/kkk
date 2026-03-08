@@ -42,7 +42,7 @@ class ProactiveListingTests(unittest.TestCase):
         trade_market = {"listings": {}, "events": []}
         listed = apply_ai_proactive_listings(
             team_id="LAL",
-            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_LOW_FIT": ("p1",), "CORE": tuple()}),
+            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_LOW_FIT": ("p1",)}),
             trade_market=trade_market,
             today=date(2026, 2, 1),
             config=self._cfg(),
@@ -51,10 +51,10 @@ class ProactiveListingTests(unittest.TestCase):
         self.assertIn("p1", trade_market["listings"])
         self.assertEqual(trade_market["events"][-1]["payload"].get("origin"), "PROACTIVE")
 
-    def test_proactive_listing_excludes_core_and_blocks_locked(self):
+    def test_proactive_listing_excludes_non_allowed_and_blocks_locked(self):
         players = {
-            "core": SimpleNamespace(
-                buckets=("CORE",),
+            "not_allowed": SimpleNamespace(
+                buckets=("UNKNOWN_BUCKET",),
                 lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=1.0,
@@ -73,14 +73,14 @@ class ProactiveListingTests(unittest.TestCase):
             team_id="LAL",
             tick_ctx=self._tick_ctx(
                 players,
-                player_ids_by_bucket={"CORE": ("core",), "SURPLUS_LOW_FIT": ("locked",)},
+                player_ids_by_bucket={"UNKNOWN_BUCKET": ("not_allowed",), "SURPLUS_LOW_FIT": ("locked",)},
             ),
             trade_market=trade_market,
             today=date(2026, 2, 1),
             config=self._cfg(ai_proactive_listing_team_daily_cap=2),
         )
         self.assertEqual(listed, [])
-        self.assertNotIn("core", listed)
+        self.assertNotIn("not_allowed", listed)
         self.assertNotIn("locked", listed)
 
     def test_proactive_listing_respects_player_cooldown(self):
