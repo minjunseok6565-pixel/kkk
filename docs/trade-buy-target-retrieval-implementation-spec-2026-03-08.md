@@ -41,13 +41,18 @@
    - `buy_target_expand_tier2_enabled: bool = True`
    - `buy_target_expand_tier2_budget_share: float = 0.35`
    - `buy_target_retrieval_iteration_cap: int = 400`
-4. 점수 정규화/need 가중치 config 추가
-   - `buy_target_need_weight_scale: float = 0.55`
+4. 점수 정규화/need 가중치 config 추가 (contract-aware)
    - `buy_target_need_mismatch_floor: float = -0.20`
-   - `buy_target_market_weight: float = 0.30`
-   - `buy_target_fit_weight: float = 0.45`
-   - `buy_target_salary_penalty_weight: float = 0.20`
-   - `buy_target_salary_penalty_cap: float = 0.35`
+   - `buy_target_player_core_weight_fit: float = 0.50`
+   - `buy_target_player_core_weight_market: float = 0.35`
+   - `buy_target_player_core_weight_need: float = 0.35`
+   - `buy_target_contract_gap_softness_cap_share: float = 0.060`
+   - `buy_target_contract_base_weight: float = 0.30`
+   - `buy_target_contract_apron_mult_*`
+   - `buy_target_contract_posture_mult_*`
+   - `buy_target_contract_deadline_mult_min/max`
+   - `buy_target_contract_team_sensitivity_min/max`
+   - `buy_target_pre_score_contract_weight: float = 0.18`
 5. 레거시 설정 정리
    - `incoming_pool_per_tag` 등 need-tag 탐색 전용 파라미터는 삭제한다.
 
@@ -107,7 +112,7 @@
 - Tier 1 (cheap non-listed)
   - `incoming_all_players`를 훑으며 listed 제외 후보를 cheap pre-score로 상위 추림.
   - cheap pre-score:
-    - `0.55*market_norm + 0.45*need_similarity - salary_soft_penalty`
+    - `0.62*basketball_norm + 0.38*need_similarity + pre_score_contract_weight*contract_gap_score`
 - Tier 2 (expanded non-listed)
   - `buy_target_expand_tier2_enabled`가 true이고 deadline/urgency가 높을 때만 가동.
   - Tier1에서 안 뽑힌 잔여 후보 일부를 teams_cap / players_cap / iteration_cap 내에서 확장.
@@ -121,13 +126,16 @@
 
 ##### 5) Ranking 상세 (need는 가중치)
 - 최종 점수 `rank`:
-  - `rank = w_fit*fit_norm + w_market*market_norm - salary_penalty + need_bonus + listed_bonus + noise`
+  - `rank = player_core + contract_term + listed_bonus + noise`
+  - `player_core = w_fit*fit + w_market*basketball_norm + need_term`
+  - `contract_term = contract_base_weight * tanh(contract_gap/softness) * team_sensitivity`
 - need bonus
   - `need_similarity = Σ_tag (team_need[tag] * player_supply[tag]) / Σ_tag team_need[tag]`
   - `need_bonus = need_weight_scale * (need_similarity - 0.5)`
   - 하한: `need_mismatch_floor`
-- salary penalty
-  - `salary_penalty = min(salary_penalty_cap, salary_penalty_weight * salary_norm)`
+- contract/team sensitivity
+  - `contract_gap = expected_cap_share_avg - actual_cap_share_avg`
+  - `team_sensitivity`는 apron/posture/deadline multiplier를 곱하고 min/max clamp 적용
 - listed bonus
   - `buy_target_listing_interest_*` 계산은 유지하되 retrieval 우선권이 이미 있으므로 cap 과도시 clamp.
 

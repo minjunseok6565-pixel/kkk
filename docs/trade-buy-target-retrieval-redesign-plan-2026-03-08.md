@@ -112,7 +112,7 @@
 
 ### 4-3. 스코어 정규화 가드
 - need/market/salary 항을 동일 스케일로 정규화.
-- 특정 항(예: salary penalty)이 전체 점수를 지배하지 않도록 clamp.
+- 특정 항(예: contract term)이 전체 점수를 지배하지 않도록 clamp.
 
 ### 4-4. 다양성/반복 억제 가드
 - 동일 player/team 반복 노출 soft penalty 강화.
@@ -142,8 +142,8 @@
 - `buy_target_need_mismatch_floor`
 - `buy_target_market_weight`
 - `buy_target_fit_weight`
-- `buy_target_salary_penalty_weight`
-- `buy_target_salary_penalty_cap`
+- `buy_target_contract_base_weight`
+- `buy_target_contract_team_sensitivity_max`
 
 ### 운영상 재튜닝 포인트
 - `buy_target_listing_interest_*`는 retrieval 우선권 + rank 보정을 함께 고려해 조정

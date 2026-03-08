@@ -12,7 +12,7 @@
 2. **Tier 1 (non-listed seed)**: cheap pre-score 기반 non-listed 핵심 후보 선정
 3. **Tier 2 (optional expand)**: budget/pressure 허용 시 non-listed 확장
 4. **Quota merge**: listed 최소 보장 + listed 최대 비중 + non-listed 쿼터 보장
-5. **Final rank**: fit/market/salary/need/listing boost 조합으로 최종 정렬
+5. **Final rank**: player core(순수가치)/contract/team sensitivity/listing boost 조합으로 최종 정렬
 
 핵심: 기존 need-tag 고정 스캔(`scan_limit = need_n * 3`)은 사용하지 않습니다.
 
@@ -47,12 +47,26 @@
   - 최대 타깃 수 대비 Tier2 확장 비중.
 
 ### 2-4. 랭킹 가중치 관련
-- `buy_target_fit_weight`
-- `buy_target_market_weight`
-- `buy_target_need_weight_scale`
+- `buy_target_player_core_weight_fit`
+- `buy_target_player_core_weight_market`
+- `buy_target_player_core_weight_need`
 - `buy_target_need_mismatch_floor`
-- `buy_target_salary_penalty_weight`
-- `buy_target_salary_penalty_cap`
+- `buy_target_contract_gap_softness_cap_share`
+- `buy_target_contract_base_weight`
+- `buy_target_contract_apron_mult_below_cap`
+- `buy_target_contract_apron_mult_over_cap`
+- `buy_target_contract_apron_mult_above_1st`
+- `buy_target_contract_apron_mult_above_2nd`
+- `buy_target_contract_posture_mult_aggressive_buy`
+- `buy_target_contract_posture_mult_soft_buy`
+- `buy_target_contract_posture_mult_stand_pat`
+- `buy_target_contract_posture_mult_soft_sell`
+- `buy_target_contract_posture_mult_sell`
+- `buy_target_contract_deadline_mult_min`
+- `buy_target_contract_deadline_mult_max`
+- `buy_target_contract_team_sensitivity_min`
+- `buy_target_contract_team_sensitivity_max`
+- `buy_target_pre_score_contract_weight`
 
 ### 2-5. listing boost 관련
 - `buy_target_listing_interest_boost_base`
@@ -82,8 +96,8 @@
 - 과부하 시 `iteration_cap`과 `tier2_budget_share`를 먼저 낮춤
 
 ### Step D. 점수식 조정
-- `fit/market/need/salary` 가중치 미세조정
-- 특정 자산군(고연봉 스타/유망주)이 과대/과소 평가되는지 점검
+- `player core / contract / team sensitivity` 가중치 미세조정
+- 특정 자산군(언더페이드 브레이크아웃/오버페이드 롤플레이어/맥스급 스타)이 과대/과소 평가되는지 점검
 
 ---
 
@@ -116,10 +130,10 @@
 - `buy_target_listed_max_share` ↓
 - `buy_target_listed_min_quota` 과도값이면 ↓
 
-### 증상 D: 고연봉 스타가 계속 후순위
-- `buy_target_salary_penalty_weight` ↓
-- `buy_target_salary_penalty_cap` ↓
-- `buy_target_market_weight` ↑
+### 증상 D: 계약 가치가 과하게 지배됨(또는 너무 약함)
+- 계약 영향이 너무 강함: `buy_target_contract_base_weight` ↓, `buy_target_pre_score_contract_weight` ↓
+- 계약 영향이 너무 약함: `buy_target_contract_base_weight` ↑, `buy_target_pre_score_contract_weight` ↑
+- apron 팀에서만 계약 압박을 강화하고 싶으면 `buy_target_contract_apron_mult_above_1st/above_2nd` ↑
 
 ### 증상 E: 팀 니즈 색깔이 약함
 - `buy_target_need_weight_scale` ↑
