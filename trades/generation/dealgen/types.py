@@ -187,7 +187,7 @@ class DealGeneratorConfig:
     ai_proactive_listing_priority_span: float = 0.35
 
     # proactive listing cadence (listing only; proposal generation cadence is unchanged)
-    ai_proactive_listing_cadence: str = "DAILY"  # DAILY | WEEKLY
+    ai_proactive_listing_cadence: str = "WEEKLY"  # DAILY | WEEKLY
     ai_proactive_listing_anchor_weekday: int = 0  # 0=Mon .. 6=Sun
 
     # proactive listing threshold gating
