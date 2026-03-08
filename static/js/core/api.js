@@ -199,17 +199,19 @@ async function rejectTradeNegotiationSession({ sessionId, teamId, reason = "USER
   });
 }
 
-async function startTradeNegotiationSession({ userTeamId, otherTeamId, defaultOfferPrivacy = "PRIVATE" } = {}) {
+async function startTradeNegotiationSession({ userTeamId, otherTeamId, defaultOfferPrivacy = "PRIVATE", signal = undefined, idempotencyKey = "" } = {}) {
   if (!userTeamId) throw new Error("user_team_id가 필요합니다.");
   if (!otherTeamId) throw new Error("other_team_id가 필요합니다.");
   return fetchJson("/api/trade/negotiation/start", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: withIdempotencyHeader({ "Content-Type": "application/json" }, idempotencyKey),
     body: JSON.stringify({
       user_team_id: userTeamId,
       other_team_id: otherTeamId,
       default_offer_privacy: defaultOfferPrivacy,
+      idempotency_key: idempotencyKey || null,
     }),
+    signal,
   });
 }
 

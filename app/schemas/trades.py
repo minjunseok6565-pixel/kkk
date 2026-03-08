@@ -21,6 +21,7 @@ class TradeNegotiationStartRequest(BaseModel):
     user_team_id: str
     other_team_id: str
     default_offer_privacy: str = "PRIVATE"
+    idempotency_key: IdempotencyKey | None = None
 
 
 class TradeNegotiationCommitRequest(BaseModel):

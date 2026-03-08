@@ -1293,9 +1293,31 @@ async def api_trade_submit_committed(req: TradeSubmitCommittedRequest):
 @router.post("/api/trade/negotiation/start")
 async def api_trade_negotiation_start(req: TradeNegotiationStartRequest):
     try:
-        in_game_date = state.get_current_date_as_date()
+        idem_key = _normalize_idempotency_key(getattr(req, "idempotency_key", None))
+        user_team_id = str(req.user_team_id or "").upper().strip()
+        other_team_id = str(req.other_team_id or "").upper().strip()
+        if not user_team_id or not other_team_id:
+            raise TradeError("NEGOTIATION_BAD_QUERY", "user_team_id and other_team_id are required")
+
+        scope = "negotiation-start"
+        synthetic_session_id = f"{user_team_id}:{other_team_id}"
+        payload_hash = _hash_payload({
+            "user_team_id": user_team_id,
+            "other_team_id": other_team_id,
+            "default_offer_privacy": getattr(req, "default_offer_privacy", "PRIVATE"),
+        })
+        replay = _idempotency_replay_guard(
+            scope=scope,
+            session_id=synthetic_session_id,
+            team_id=user_team_id,
+            key=idem_key,
+            payload_hash=payload_hash,
+        )
+        if isinstance(replay, dict):
+            return replay
+
         session = negotiation_store.create_session(
-            user_team_id=req.user_team_id, other_team_id=req.other_team_id
+            user_team_id=user_team_id, other_team_id=other_team_id
         )
         # AI-driven auto-end policy is now the primary mechanism for stale sessions.
         negotiation_store.touch_ai_action(session["session_id"])
@@ -1310,7 +1332,23 @@ async def api_trade_negotiation_start(req: TradeNegotiationStartRequest):
         session.setdefault("market_context", {})
         if isinstance(session["market_context"], dict):
             session["market_context"]["offer_meta"] = {"offer_privacy": default_privacy, "leak_status": "NONE"}
-        return {"ok": True, "session": session}
+
+        response = {
+            "ok": True,
+            "session": session,
+            "idempotent": False,
+        }
+        if idem_key:
+            response["idempotency_key"] = idem_key
+            _store_idempotency_response(
+                scope=scope,
+                session_id=synthetic_session_id,
+                team_id=user_team_id,
+                key=idem_key,
+                payload_hash=payload_hash,
+                response_payload=response,
+            )
+        return response
     except TradeError as exc:
         return _trade_error_response(exc)
 
@@ -1380,7 +1418,6 @@ async def api_trade_negotiation_open(req: TradeNegotiationOpenRequest):
         if not isinstance(updated, dict):
             updated = negotiation_store.get_session(req.session_id)
 
-        response = {
         db_path = state.get_db_path()
         contract_violations: List[Dict[str, Any]] = []
         if isinstance(updated.get("last_offer"), dict):
@@ -1402,7 +1439,7 @@ async def api_trade_negotiation_open(req: TradeNegotiationOpenRequest):
             updated["draft_deal"] = canonical_draft
             contract_violations.extend(violations)
 
-        return {
+        response = {
             "ok": True,
             "session": updated,
             "opened": True,

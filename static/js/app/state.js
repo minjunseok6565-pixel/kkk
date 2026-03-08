@@ -32,6 +32,7 @@ const state = {
   marketTradeInboxRows: [],
   marketTradeInboxGrouped: [],
   marketTradeContractViolations: [],
+  marketTradeContractViolationSeen: {},
   marketTradeInboxLoading: false,
   marketTradeInboxLastLoadedAt: 0,
   marketScreenActive: false,
@@ -221,8 +222,24 @@ function resetMarketTradeInboxState() {
   state.marketTradeInboxRows = [];
   state.marketTradeInboxGrouped = [];
   state.marketTradeContractViolations = [];
+  state.marketTradeContractViolationSeen = {};
   state.marketTradeInboxLoading = false;
   state.marketTradeInboxLastLoadedAt = 0;
+}
+
+function resetTradeDealModalContext({ includeSession = true, includeTabs = true } = {}) {
+  if (includeSession) {
+    state.marketTradeActiveSession = null;
+    state.marketTradeSessionFsm = getInitialMarketTradeSessionFsm();
+  }
+  state.marketTradeDealDraft = createEmptyMarketTradeDealDraft();
+  state.marketTradeAssetPool = createEmptyMarketTradeAssetPool();
+  state.marketTradeInitialOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
+  state.marketTradeLatestOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
+  state.marketTradeUi = createEmptyMarketTradeUi();
+  if (includeTabs) {
+    state.marketTradeDealTabs = createDefaultMarketTradeDealTabs();
+  }
 }
 
 function resetMarketTradeDealState() {
@@ -233,12 +250,8 @@ function resetMarketTradeDealState() {
   state.marketTradePendingActions = {};
   state.marketTaskQueueByScope = {};
   state.marketTradeContractViolations = [];
-  state.marketTradeInitialOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
-  state.marketTradeLatestOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
-  state.marketTradeDealDraft = createEmptyMarketTradeDealDraft();
-  state.marketTradeDealTabs = createDefaultMarketTradeDealTabs();
-  state.marketTradeAssetPool = createEmptyMarketTradeAssetPool();
-  state.marketTradeUi = createEmptyMarketTradeUi();
+  state.marketTradeContractViolationSeen = {};
+  resetTradeDealModalContext({ includeSession: true, includeTabs: true });
 }
 
 function syncMarketTradeModalSessionState(sessionId, { keepTabsOnReopen = true } = {}) {
@@ -250,14 +263,7 @@ function syncMarketTradeModalSessionState(sessionId, { keepTabsOnReopen = true }
 
   // 세션이 바뀌면 협상 모달 컨텍스트를 reset한다.
   if (!isSameSession) {
-    state.marketTradeActiveSession = null;
-    state.marketTradeDealDraft = createEmptyMarketTradeDealDraft();
-    state.marketTradeAssetPool = createEmptyMarketTradeAssetPool();
-    state.marketTradeInitialOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
-    state.marketTradeLatestOfferSnapshot = createEmptyMarketTradeOfferSnapshot();
-    state.marketTradeDealTabs = createDefaultMarketTradeDealTabs();
-    state.marketTradeUi = createEmptyMarketTradeUi();
-    state.marketTradeSessionFsm = getInitialMarketTradeSessionFsm();
+    resetTradeDealModalContext({ includeSession: true, includeTabs: true });
     return {
       isSameSession: false,
       didReset: true,
@@ -296,6 +302,7 @@ export {
   canTransitionMarketTradeSessionFsm,
   transitionMarketTradeSessionFsm,
   resetMarketTradeInboxState,
+  resetTradeDealModalContext,
   resetMarketTradeDealState,
   resetMarketTradeState,
   syncMarketTradeModalSessionState,
