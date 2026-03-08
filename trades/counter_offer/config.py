@@ -131,7 +131,6 @@ class CounterOfferConfig:
     # Only consider these buckets from asset_catalog for "throw-in" players.
     player_sweetener_buckets: Tuple[str, ...] = (
         "FILLER_CHEAP",
-        "EXPIRING",
         "SURPLUS_LOW_FIT",
         "SURPLUS_REDUNDANT",
     )

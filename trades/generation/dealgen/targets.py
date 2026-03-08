@@ -266,7 +266,6 @@ def select_targets_sell(
     # v2와 동일한 우선순위(숫자 낮을수록 우선)
     bucket_pri: Dict[str, int] = {
         "VETERAN_SALE": 0,
-        "EXPIRING": 1,
         "SURPLUS_LOW_FIT": 2,
         "SURPLUS_REDUNDANT": 3,
         "FILLER_CHEAP": 4,

@@ -177,7 +177,6 @@ BucketId = Literal[
     "FILLER_CHEAP",
     "SURPLUS_LOW_FIT",
     "SURPLUS_REDUNDANT",
-    "EXPIRING",
     "VETERAN_SALE",
     "CONSOLIDATE",
 ]
@@ -421,7 +420,6 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
             "FILLER_CHEAP": 4,
             "SURPLUS_LOW_FIT": 7,
             "SURPLUS_REDUNDANT": 6,
-            "EXPIRING": 6,
             "VETERAN_SALE": 5,
             "CONSOLIDATE": 0,
         }
@@ -431,7 +429,6 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
             "FILLER_CHEAP": 5,
             "SURPLUS_LOW_FIT": 4,
             "SURPLUS_REDUNDANT": 5,
-            "EXPIRING": 5,
             "VETERAN_SALE": 0,
             "CONSOLIDATE": 7,
         }
@@ -441,7 +438,6 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
             "FILLER_CHEAP": 5,
             "SURPLUS_LOW_FIT": 4,
             "SURPLUS_REDUNDANT": 5,
-            "EXPIRING": 5,
             "VETERAN_SALE": 0,
             "CONSOLIDATE": 5,
         }
@@ -451,7 +447,6 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
         "FILLER_CHEAP": 4,
         "SURPLUS_LOW_FIT": 6,
         "SURPLUS_REDUNDANT": 5,
-        "EXPIRING": 5,
         "VETERAN_SALE": 0,
         "CONSOLIDATE": 3,
     }
@@ -462,7 +457,6 @@ def _outgoing_priority_for_posture(posture: str) -> Tuple[BucketId, ...]:
     if p in {"SELL", "SOFT_SELL"}:
         return (
             "VETERAN_SALE",
-            "EXPIRING",
             "SURPLUS_LOW_FIT",
             "SURPLUS_REDUNDANT",
             "FILLER_BAD_CONTRACT",
@@ -475,7 +469,6 @@ def _outgoing_priority_for_posture(posture: str) -> Tuple[BucketId, ...]:
             "FILLER_BAD_CONTRACT",
             "SURPLUS_LOW_FIT",
             "SURPLUS_REDUNDANT",
-            "EXPIRING",
             "FILLER_CHEAP",
             "VETERAN_SALE",
         )
@@ -484,7 +477,6 @@ def _outgoing_priority_for_posture(posture: str) -> Tuple[BucketId, ...]:
         "SURPLUS_LOW_FIT",
         "SURPLUS_REDUNDANT",
         "FILLER_BAD_CONTRACT",
-        "EXPIRING",
         "FILLER_CHEAP",
         "CONSOLIDATE",
         "VETERAN_SALE",
@@ -784,14 +776,7 @@ def build_trade_asset_catalog(
         )
         redundant_ids = [c.player_id for _, c in redundant_scored[: max(0, caps.get("SURPLUS_REDUNDANT", 0))]]
 
-        # EXPIRING
-        expiring = [c for c in eligible_for_outgoing if c.is_expiring and c.salary_m >= 1.0]
         p = str(posture or "").upper()
-        if p in {"SELL", "SOFT_SELL"}:
-            expiring.sort(key=lambda c: (-c.market.total, -c.salary_m, -(c.snap.age or 0.0), c.player_id))
-        else:
-            expiring.sort(key=lambda c: (c.market.total, -c.salary_m, -(c.snap.age or 0.0), c.player_id))
-        expiring_ids = [c.player_id for c in expiring[: max(0, caps.get("EXPIRING", 0))]]
 
         # VETERAN_SALE (SELL/REBUILD teams)
         veteran_ids: List[str] = []
@@ -825,7 +810,6 @@ def build_trade_asset_catalog(
             "FILLER_CHEAP": list(filler_cheap_ids),
             "SURPLUS_LOW_FIT": list(low_fit_ids),
             "SURPLUS_REDUNDANT": list(redundant_ids),
-            "EXPIRING": list(expiring_ids),
             "VETERAN_SALE": list(veteran_ids),
             "CONSOLIDATE": list(consolidate_ids),
         }
