@@ -1688,7 +1688,9 @@ async function openTradeInboxSession(row) {
       idempotencyKey,
     });
 
-    if (!shouldApplyResponseForScope("openSession", requestCtx.requestId, requestCtx.sessionId, { requireModalOpen: false })) {
+    // openSession 응답 시점에는 active session이 아직 세팅되지 않았을 수 있으므로
+    // sessionId 동등성 게이트는 여기서 강제하지 않는다.
+    if (!shouldApplyResponseForScope("openSession", requestCtx.requestId, null, { requireModalOpen: false })) {
       return;
     }
 

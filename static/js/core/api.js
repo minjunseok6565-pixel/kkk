@@ -54,7 +54,17 @@ function resolveApiErrorDetail(data, fallbackUrl = "") {
     if (code) return code;
     if (message) return message;
   }
-  const message = String(data?.message || data?.error || "").trim();
+
+  const error = data?.error;
+  if (error && typeof error === "object") {
+    const code = String(error.code || error.error_code || "").trim();
+    const message = String(error.message || error.error || error.detail || "").trim();
+    if (code && message) return `${code}: ${message}`;
+    if (code) return code;
+    if (message) return message;
+  }
+
+  const message = String(data?.message || error || "").trim();
   if (message) return message;
   return `요청 실패: ${fallbackUrl}`;
 }
