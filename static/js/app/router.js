@@ -1,6 +1,9 @@
 import { els } from "./dom.js";
+import { state } from "./state.js";
+import { abortAllMarketTradeRequests } from "../core/api.js";
 
 function activateScreen(target) {
+  const wasMarketActive = Boolean(state.marketScreenActive);
   [
     els.startScreen,
     els.teamScreen,
@@ -21,6 +24,12 @@ function activateScreen(target) {
     screen.classList.toggle("active", active);
     screen.setAttribute("aria-hidden", active ? "false" : "true");
   });
+
+  const isMarketTarget = target === els.marketScreen;
+  state.marketScreenActive = isMarketTarget;
+  if (wasMarketActive && !isMarketTarget) {
+    abortAllMarketTradeRequests();
+  }
 }
 
 export { activateScreen };
