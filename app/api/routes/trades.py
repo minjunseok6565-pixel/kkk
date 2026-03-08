@@ -360,42 +360,13 @@ def _hydrate_trade_block_player_snapshots(player_ids: List[str], *, db_path: str
     return out
 
 
-def _extract_trade_block_box_stats(
-    *,
-    player_id: str,
-    workflow_state: Optional[Dict[str, Any]] = None,
-) -> Dict[str, float]:
-    ws = workflow_state if isinstance(workflow_state, dict) else (state.export_workflow_state() or {})
-    player_stats = ws.get("player_stats") if isinstance(ws.get("player_stats"), dict) else {}
-    raw = player_stats.get(str(player_id)) if isinstance(player_stats, dict) else {}
-    if not isinstance(raw, dict):
-        raw = {}
-    totals = raw.get("totals") if isinstance(raw, dict) and isinstance(raw.get("totals"), dict) else {}
-    stats = raw.get("stats") if isinstance(raw, dict) and isinstance(raw.get("stats"), dict) else {}
-
-    return {
-        "pts": _first_number(raw.get("pts"), totals.get("PTS"), stats.get("pts"), default=0),
-        "ast": _first_number(raw.get("ast"), totals.get("AST"), stats.get("ast"), default=0),
-        "reb": _first_number(raw.get("reb"), totals.get("REB"), stats.get("reb"), default=0),
-        "three_pm": _first_number(
-            raw.get("three_pm"),
-            totals.get("3PM"),
-            stats.get("three_pm"),
-            stats.get("fg3m"),
-            default=0,
-        ),
-    }
-
-
 def _build_trade_block_row(
     listing: Dict[str, Any],
     *,
     player_snapshots: Dict[str, Dict[str, Any]],
-    workflow_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     pid = str(listing.get("player_id") or "")
     snap = player_snapshots.get(pid) or {}
-    box = _extract_trade_block_box_stats(player_id=pid, workflow_state=workflow_state)
     return {
         "player_id": pid,
         "team_id": str(listing.get("team_id") or "").upper(),
@@ -406,10 +377,6 @@ def _build_trade_block_row(
         "height_in": _first_number(snap.get("height_in"), default=0),
         "weight_lb": _first_number(snap.get("weight_lb"), default=0),
         "salary": _first_number(snap.get("salary"), default=0),
-        "pts": _first_number(box.get("pts"), default=0),
-        "ast": _first_number(box.get("ast"), default=0),
-        "reb": _first_number(box.get("reb"), default=0),
-        "three_pm": _first_number(box.get("three_pm"), default=0),
         "listing": {
             "status": str(listing.get("status") or "").upper() or "ACTIVE",
             "visibility": str(listing.get("visibility") or "").upper() or "PUBLIC",
@@ -1105,10 +1072,8 @@ async def api_trade_block_aggregate(
 
         pids = [str(r.get("player_id") or "") for r in listings if str(r.get("player_id") or "")]
         snapshots = _hydrate_trade_block_player_snapshots(pids, db_path=db_path)
-        workflow_state = state.export_workflow_state() or {}
-
         rows = [
-            _build_trade_block_row(row, player_snapshots=snapshots, workflow_state=workflow_state)
+            _build_trade_block_row(row, player_snapshots=snapshots)
             for row in listings
         ]
         rows = _sort_trade_block_rows(rows, sort_key=q.sort)

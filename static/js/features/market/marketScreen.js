@@ -3,6 +3,7 @@ import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
 import {
   fetchJson,
+  fetchCachedJson,
   fetchTradeNegotiationInbox,
   startTradeNegotiationSession,
   openTradeNegotiationSession,
@@ -14,6 +15,8 @@ import {
   isScopedRequestCurrent,
   abortScopedRequest,
   abortAllMarketTradeRequests,
+  invalidateCachedValue,
+  invalidateCachedValuesByPrefix,
   setLoading,
 } from "../../core/api.js";
 import { num } from "../../core/guards.js";
@@ -24,6 +27,24 @@ import { loadPlayerDetail } from "../myteam/playerDetail.js";
 import { fetchTeamDetail, invalidateTeamDetailCache } from "../team/teamDetailCache.js";
 
 const MARKET_TRADE_INBOX_CACHE_TTL_MS = 30 * 1000;
+const MARKET_TRADE_BLOCK_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function getTradeBlockCacheKeyAll() {
+  return "market:trade-block:all";
+}
+
+function getTradeBlockCacheKeyMine(teamId) {
+  return `market:trade-block:mine:${String(teamId || "").toUpperCase()}`;
+}
+
+function invalidateTradeBlockCaches({ teamId = state.selectedTeamId } = {}) {
+  invalidateCachedValue(getTradeBlockCacheKeyAll());
+  if (teamId) {
+    invalidateCachedValue(getTradeBlockCacheKeyMine(teamId));
+    return;
+  }
+  invalidateCachedValuesByPrefix("market:trade-block:mine:");
+}
 
 function getActiveTradeSessionId() {
   const sessionId = state.marketTradeActiveSession?.session_id;
@@ -687,6 +708,7 @@ async function refreshMarketTradeAfterAccepted(otherTeamId) {
   const myTeamId = state.selectedTeamId;
   if (myTeamId) invalidateTeamDetailCache(myTeamId);
   if (otherTeamId) invalidateTeamDetailCache(otherTeamId);
+  invalidateTradeBlockCaches({ teamId: myTeamId });
 
   const activeSessionId = getActiveTradeSessionId();
   await Promise.all([
@@ -1920,7 +1942,7 @@ function renderTradeBlockRows(rows) {
   els.marketTradeBlockBody.innerHTML = "";
 
   if (!rows.length) {
-    els.marketTradeBlockBody.innerHTML = '<tr><td class="schedule-empty" colspan="13">트레이드 블록 등록 선수가 없습니다.</td></tr>';
+    els.marketTradeBlockBody.innerHTML = '<tr><td class="schedule-empty" colspan="9">트레이드 블록 등록 선수가 없습니다.</td></tr>';
     return;
   }
 
@@ -1939,10 +1961,6 @@ function renderTradeBlockRows(rows) {
       <td>${formatHeightIn(row.height_in)}</td>
       <td>${formatWeightLb(row.weight_lb)}</td>
       <td>${formatMoney(row.salary ?? 0)}</td>
-      <td>${num(row.pts, 0).toFixed(1)}</td>
-      <td>${num(row.ast, 0).toFixed(1)}</td>
-      <td>${num(row.reb, 0).toFixed(1)}</td>
-      <td>${num(row.three_pm, 0).toFixed(1)}</td>
       <td><button type="button" class="btn btn-primary market-trade-offer-btn" data-market-trade-offer="${row.player_id}">트레이드 제안</button></td>
     `;
 
@@ -1970,7 +1988,7 @@ function renderTradeBlockMineRows(rows) {
   els.marketTradeBlockMineBody.innerHTML = "";
 
   if (!rows.length) {
-    els.marketTradeBlockMineBody.innerHTML = '<tr><td class="schedule-empty" colspan="12">등록된 선수가 없습니다.</td></tr>';
+    els.marketTradeBlockMineBody.innerHTML = '<tr><td class="schedule-empty" colspan="8">등록된 선수가 없습니다.</td></tr>';
     return;
   }
 
@@ -1986,10 +2004,6 @@ function renderTradeBlockMineRows(rows) {
       <td>${formatHeightIn(row.height_in)}</td>
       <td>${formatWeightLb(row.weight_lb)}</td>
       <td>${formatMoney(row.salary ?? 0)}</td>
-      <td>${num(row.pts, 0).toFixed(1)}</td>
-      <td>${num(row.ast, 0).toFixed(1)}</td>
-      <td>${num(row.reb, 0).toFixed(1)}</td>
-      <td>${num(row.three_pm, 0).toFixed(1)}</td>
       <td><button type="button" class="btn btn-secondary market-trade-unlist-btn" data-market-trade-unlist="${row.player_id}">해제</button></td>
     `;
 
@@ -2084,6 +2098,7 @@ async function listPlayerToTradeBlock(playerId) {
       reason_code: "MANUAL",
     }),
   });
+  invalidateTradeBlockCaches();
 }
 
 async function unlistPlayerFromTradeBlock(playerId) {
@@ -2099,23 +2114,25 @@ async function unlistPlayerFromTradeBlock(playerId) {
       reason_code: "MANUAL_REMOVE",
     }),
   });
-
+  invalidateTradeBlockCaches();
   return out;
 }
 
 async function loadTradeBlockMineList({ requestCtx = null } = {}) {
   if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
-  const payload = await fetchJson(`/api/trade/block?active_only=true&visibility=PUBLIC&limit=300&sort=priority_desc&team_id=${encodeURIComponent(state.selectedTeamId)}`, { signal: requestCtx?.signal });
+  const payload = await fetchCachedJson({
+    key: getTradeBlockCacheKeyMine(state.selectedTeamId),
+    url: `/api/trade/block?active_only=true&visibility=PUBLIC&limit=300&sort=priority_desc&team_id=${encodeURIComponent(state.selectedTeamId)}`,
+    options: { signal: requestCtx?.signal },
+    ttlMs: MARKET_TRADE_BLOCK_CACHE_TTL_MS,
+    staleWhileRevalidate: true,
+  });
   if (requestCtx && !shouldApplyResponseForScope("tradeBlockMineList", requestCtx.requestId, requestCtx.sessionId, { requireModalOpen: false })) return;
   const rows = (payload?.rows || []).map((row) => ({
     ...row,
     height_in: getFirstNumber(row?.height_in),
     weight_lb: getFirstNumber(row?.weight_lb),
     salary: getFirstNumber(row?.salary),
-    pts: getFirstNumber(row?.pts),
-    ast: getFirstNumber(row?.ast),
-    reb: getFirstNumber(row?.reb),
-    three_pm: getFirstNumber(row?.three_pm),
   }));
   state.marketTradeBlockMyRows = rows;
   const displayRows = getTradeBlockDisplayRows(rows);
@@ -2138,17 +2155,19 @@ async function openTradeBlockScope(scope) {
 }
 
 async function loadTradeBlockList({ requestCtx = null } = {}) {
-  const payload = await fetchJson("/api/trade/block?active_only=true&visibility=PUBLIC&limit=300&sort=priority_desc", { signal: requestCtx?.signal });
+  const payload = await fetchCachedJson({
+    key: getTradeBlockCacheKeyAll(),
+    url: "/api/trade/block?active_only=true&visibility=PUBLIC&limit=300&sort=priority_desc",
+    options: { signal: requestCtx?.signal },
+    ttlMs: MARKET_TRADE_BLOCK_CACHE_TTL_MS,
+    staleWhileRevalidate: true,
+  });
   if (requestCtx && !shouldApplyResponseForScope("tradeBlockList", requestCtx.requestId, requestCtx.sessionId, { requireModalOpen: false })) return;
   const rows = (payload?.rows || []).map((row) => ({
     ...row,
     height_in: getFirstNumber(row?.height_in),
     weight_lb: getFirstNumber(row?.weight_lb),
     salary: getFirstNumber(row?.salary),
-    pts: getFirstNumber(row?.pts),
-    ast: getFirstNumber(row?.ast),
-    reb: getFirstNumber(row?.reb),
-    three_pm: getFirstNumber(row?.three_pm),
   }));
   const selectedTeamId = String(state.selectedTeamId || "").toUpperCase();
   const filteredRows = rows.filter((row) => String(row?.team_id || "").toUpperCase() !== selectedTeamId);
