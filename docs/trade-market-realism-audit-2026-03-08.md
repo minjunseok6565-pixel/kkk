@@ -8,10 +8,12 @@
 
 ## 2) 슈퍼스타 매물에 오퍼가 적은 구조적 원인
 
-### 2-1. BUY 타깃 탐색이 need-tag index 중심 + 좁은 스캔 폭
+### 2-1. BUY 타깃 탐색이 need-tag index 중심 + 좁은 스캔 폭 ✅
 BUY 타깃은 `incoming_by_need_tag` 인덱스에서 팀 need 기반으로만 훑습니다.
 태그별로 `need_n`을 채울 때 `scan_limit = need_n * 3` 상한을 두기 때문에,
 슈퍼스타가 해당 태그 상위 구간에 걸리지 않으면 아예 후보 풀에 거의 진입하지 못할 수 있습니다.
+
+- 변경 후 동작: BUY 탐색은 `incoming_by_need_tag` 하드 게이트 대신 `incoming_all_players`(리그 전체 incoming 풀) 기반으로 후보를 수집하고, `need_similarity`를 순위 가중치로 반영합니다. 또한 `scan_limit = need_n * 3`가 제거되어 후순위 후보도 cap 범위 내에서 검토됩니다.
 
 ### 2-2. 타깃 rank에서 연봉 페널티가 고연봉 스타에 불리
 타깃 점수식에 `rank -= 0.015 * salary_m` 항이 있어, 고연봉 스타는 need 적합도가 높아도 랭크가 쉽게 깎입니다.
@@ -42,11 +44,13 @@ BUY 스켈레톤은 기본적으로
     `_shape_ok()`에서 이를 하드 컷으로 적용합니다.
   - 따라서 슈퍼스타 딜에서 자주 필요한 3-for-1/4-for-2류 선수 패키지가 탐색 단계에서 바로 제거될 수 있습니다.
 
-- **incoming 인덱싱/스캔 방식이 유니콘 노출을 줄일 가능성**
+- **incoming 인덱싱/스캔 방식이 유니콘 노출을 줄일 가능성** ✅
   - incoming 태그 인덱스는 선수 `supply`의 상위 4개 태그만 보고, 그중 `>=0.55`만 유지합니다.
     멀티툴 선수처럼 강점이 넓게 분산된 케이스는 인덱스 진입 태그 수가 줄어들 수 있습니다.
   - BUY 타깃 스캔은 태그별 `scan_limit = need_n * 3`까지만 확인합니다.
     앞쪽 후보가 동일팀/밴/쿨다운으로 탈락하면 뒤쪽의 적합 후보를 보지 못할 수 있습니다.
+
+  - 변경 후 동작: incoming 노출은 단일 need-tag 인덱스 의존을 줄이고, 전역 incoming 인덱스 + 팀/선수 스캔 cap(`teams_cap`, `players_cap`, `iteration_cap`) 구조로 바뀌어 유니콘/후순위 자산의 탐색 진입 가능성이 높아졌습니다.
 
 - **trade block listing은 강제 노출이 아니라 soft rank boost**
   - BUY 타깃 선택에서 public listing은 후보 포함의 필수 조건이 아니고,
@@ -59,11 +63,13 @@ BUY 스켈레톤은 기본적으로
 
 아래는 “시즌 초반에 SGA/앤써니 에드워즈급이 public listing에 뜬다”는 관측과 맞물리는 **상향 노출 편향**입니다.
 
-- **AI proactive listing이 매 tick·매 AI 팀에 자동 적용됨**
+- **AI proactive listing이 매 tick·매 AI 팀에 자동 적용됨** ✅
   - tick 루프에서 각 AI actor가 제안 생성을 마칠 때마다 `apply_ai_proactive_listings(...)`가 호출됩니다.
   - 즉 "실제 시장 반응(오퍼 부족/요청)"이 없어도, 정책상 후보만 있으면 시즌 초부터 기계적으로 listing이 누적될 수 있습니다.
 
-- **proactive 후보 필터에 ‘슈퍼스타 보호’ 개념이 사실상 없음**
+  - 변경 후 동작: proactive listing 평가 주기를 cadence로 분리해 `WEEKLY` 설정 시 앵커 요일 + 7일 간격으로만 평가되며, 팀별 `last_eval_at` 메타를 기준으로 재평가를 제한합니다.
+
+- **proactive 후보 필터에 ‘슈퍼스타 보호’ 개념이 사실상 없음** ⚠️ (부분)
   - proactive 단계에서 제외되는 주요 조건은 `asset lock`, `recent signing ban`, `cooldown` 정도이며,
     `market.total` 상위권/팀 프랜차이즈 코어/올-NBA급 같은 보호 규칙은 없습니다.
   - 따라서 선수가 `SURPLUS_*`/`CONSOLIDATE` 버킷에만 들어오면 고가치 자산도 listing 후보로 열립니다.
@@ -73,10 +79,12 @@ BUY 스켈레톤은 기본적으로
   - 이 경로는 선수 절대 가치(리그 최상위 자산인지)로 컷하지 않기 때문에,
     "가치가 매우 높지만 현재 로스터 문맥에서 중복/저적합"으로 계산된 스타가 후보군에 섞일 수 있습니다.
 
-- **팀별 proactive 공급량이 시즌 초 과잉 노출을 만들기 쉬움**
+- **팀별 proactive 공급량이 시즌 초 과잉 노출을 만들기 쉬움** ✅
   - 기본값이 `team_daily_cap=2`, `team_active_cap=4`라서 AI 팀 수가 많으면 리그 전체 listing 공급이 빠르게 증가합니다.
   - SELL/SOFT_SELL 자세에서는 TTL도 길어(`12/7일`) 한 번 올라온 매물이 꽤 오래 남아,
     "블록에 스타가 자주 보인다"는 체감이 강화됩니다.
+
+  - 변경 후 동작: 버킷 진입만으로 즉시 상장되지 않고 `surplus_score >= 팀상황/버킷별 threshold`를 통과한 선수만 proactive listing 대상이 됩니다. threshold는 posture/horizon/urgency/cooldown에 따라 조정되어 팀별 공급량이 더 보수적으로 제어됩니다.
 
 - **cooldown(7일)이 짧아 ‘재상장 루프’를 충분히 막지 못함**
   - 선수 단위 proactive cooldown은 기본 7일로, 시즌 초 주간 단위로 재상장이 가능한 수준입니다.

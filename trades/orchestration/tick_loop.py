@@ -54,6 +54,29 @@ def _get_last_gm_tick_date() -> Optional[str]:
     return None
 
 
+
+
+class _ListingCadenceConfigProxy:
+    """Listing-only config view that can override proactive listing cadence."""
+
+    def __init__(self, base: Any, *, cadence: str, anchor_weekday: int) -> None:
+        self._base = base
+        self.ai_proactive_listing_cadence = str(cadence).upper()
+        self.ai_proactive_listing_anchor_weekday = int(anchor_weekday)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._base, name)
+
+
+def _listing_only_weekly_config(base_cfg: Any) -> Any:
+    """Keep proposal generation config untouched; force proactive listing cadence to WEEKLY only."""
+    if base_cfg is None:
+        return _ListingCadenceConfigProxy(None, cadence="WEEKLY", anchor_weekday=0)
+
+    anchor = int(getattr(base_cfg, "ai_proactive_listing_anchor_weekday", 0) or 0)
+    anchor = max(0, min(6, anchor))
+    return _ListingCadenceConfigProxy(base_cfg, cadence="WEEKLY", anchor_weekday=anchor)
+
 def _stable_seed_int(*parts: str) -> int:
     raw = "|".join([str(p) for p in parts]).encode("utf-8")
     digest = hashlib.sha1(raw).digest()
@@ -468,7 +491,7 @@ def _run_trade_orchestration_tick_impl(
                             tick_ctx=tick_ctx,
                             trade_market=trade_market,
                             today=today,
-                            config=getattr(cfg, "generator_config", None),
+                            config=_listing_only_weekly_config(getattr(cfg, "generator_config", None)),
                         )
                     except Exception:
                         pass
