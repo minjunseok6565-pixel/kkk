@@ -60,13 +60,113 @@ function resolveApiErrorDetail(data, fallbackUrl = "") {
 }
 
 async function fetchJson(url, options = {}) {
-  const res = await fetch(url, options);
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("REQUEST_ABORTED");
+    }
+    throw error;
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(resolveApiErrorDetail(data, url));
   return data;
 }
 
-async function fetchTradeNegotiationInbox({ teamId, status = "ACTIVE", phase = "OPEN" } = {}) {
+function normalizeTradeRequestScope(scope) {
+  return String(scope || "").trim() || "default";
+}
+
+function normalizeOptionalScopeSessionId(sessionId) {
+  if (sessionId == null) return null;
+  const out = String(sessionId || "").trim();
+  return out || null;
+}
+
+function getMarketTradeRequestScopesStore() {
+  if (!state.marketTradeRequestScopes || typeof state.marketTradeRequestScopes !== "object") {
+    state.marketTradeRequestScopes = {};
+  }
+  return state.marketTradeRequestScopes;
+}
+
+function beginScopedRequest(scope, { sessionId = null, abortPrevious = true } = {}) {
+  const normalizedScope = normalizeTradeRequestScope(scope);
+  const normalizedSessionId = normalizeOptionalScopeSessionId(sessionId);
+  const store = getMarketTradeRequestScopesStore();
+  const previous = store[normalizedScope];
+
+  if (abortPrevious && previous?.abortController instanceof AbortController) {
+    previous.abortController.abort();
+  }
+
+  const requestId = Number(state.marketTradeRequestSeq || 0) + 1;
+  state.marketTradeRequestSeq = requestId;
+  const abortController = new AbortController();
+  const startedAt = Date.now();
+
+  store[normalizedScope] = {
+    requestId,
+    sessionId: normalizedSessionId,
+    abortController,
+    startedAt,
+  };
+
+  return {
+    scope: normalizedScope,
+    requestId,
+    sessionId: normalizedSessionId,
+    signal: abortController.signal,
+    startedAt,
+  };
+}
+
+function isScopedRequestCurrent(scope, requestId, sessionId = null) {
+  const normalizedScope = normalizeTradeRequestScope(scope);
+  const normalizedSessionId = normalizeOptionalScopeSessionId(sessionId);
+  const store = getMarketTradeRequestScopesStore();
+  const current = store[normalizedScope];
+  if (!current) return false;
+  if (Number(current.requestId) !== Number(requestId)) return false;
+
+  if (normalizedSessionId != null) {
+    const activeSessionId = normalizeOptionalScopeSessionId(state.marketTradeActiveSession?.session_id);
+    if (activeSessionId !== normalizedSessionId) return false;
+  }
+
+  return true;
+}
+
+function abortScopedRequest(scope) {
+  const normalizedScope = normalizeTradeRequestScope(scope);
+  const store = getMarketTradeRequestScopesStore();
+  const current = store[normalizedScope];
+  if (!current) return false;
+  if (current.abortController instanceof AbortController) {
+    current.abortController.abort();
+  }
+  delete store[normalizedScope];
+  return true;
+}
+
+function abortAllMarketTradeRequests() {
+  const store = getMarketTradeRequestScopesStore();
+  Object.keys(store).forEach((scope) => {
+    abortScopedRequest(scope);
+  });
+}
+
+function withIdempotencyHeader(headers = {}, idempotencyKey = "") {
+  const key = String(idempotencyKey || "").trim();
+  if (!key) return { ...headers };
+  return {
+    ...headers,
+    "X-Idempotency-Key": key,
+  };
+}
+
+async function fetchTradeNegotiationInbox({ teamId, status = "ACTIVE", phase = "OPEN", signal = undefined } = {}) {
   const normalizedTeamId = String(teamId || "").trim();
   if (!normalizedTeamId) throw new Error("team_id가 필요합니다.");
   const params = new URLSearchParams({
@@ -74,69 +174,76 @@ async function fetchTradeNegotiationInbox({ teamId, status = "ACTIVE", phase = "
     status: String(status || "ACTIVE"),
     phase: String(phase || "OPEN"),
   });
-  return fetchJson(`/api/trade/negotiation/inbox?${params.toString()}`);
+  return fetchJson(`/api/trade/negotiation/inbox?${params.toString()}`, { signal });
 }
 
-async function openTradeNegotiationSession({ sessionId, teamId } = {}) {
+async function openTradeNegotiationSession({ sessionId, teamId, signal = undefined, idempotencyKey = "" } = {}) {
   if (!sessionId) throw new Error("session_id가 필요합니다.");
   if (!teamId) throw new Error("team_id가 필요합니다.");
   return fetchJson("/api/trade/negotiation/open", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, team_id: teamId }),
+    headers: withIdempotencyHeader({ "Content-Type": "application/json" }, idempotencyKey),
+    body: JSON.stringify({ session_id: sessionId, team_id: teamId, idempotency_key: idempotencyKey || null }),
+    signal,
   });
 }
 
-async function rejectTradeNegotiationSession({ sessionId, teamId, reason = "USER_REJECT" } = {}) {
+async function rejectTradeNegotiationSession({ sessionId, teamId, reason = "USER_REJECT", signal = undefined, idempotencyKey = "" } = {}) {
   if (!sessionId) throw new Error("session_id가 필요합니다.");
   if (!teamId) throw new Error("team_id가 필요합니다.");
   return fetchJson("/api/trade/negotiation/reject", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, team_id: teamId, reason }),
+    headers: withIdempotencyHeader({ "Content-Type": "application/json" }, idempotencyKey),
+    body: JSON.stringify({ session_id: sessionId, team_id: teamId, reason, idempotency_key: idempotencyKey || null }),
+    signal,
   });
 }
 
-async function startTradeNegotiationSession({ userTeamId, otherTeamId, defaultOfferPrivacy = "PRIVATE" } = {}) {
+async function startTradeNegotiationSession({ userTeamId, otherTeamId, defaultOfferPrivacy = "PRIVATE", signal = undefined, idempotencyKey = "" } = {}) {
   if (!userTeamId) throw new Error("user_team_id가 필요합니다.");
   if (!otherTeamId) throw new Error("other_team_id가 필요합니다.");
   return fetchJson("/api/trade/negotiation/start", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: withIdempotencyHeader({ "Content-Type": "application/json" }, idempotencyKey),
     body: JSON.stringify({
       user_team_id: userTeamId,
       other_team_id: otherTeamId,
       default_offer_privacy: defaultOfferPrivacy,
+      idempotency_key: idempotencyKey || null,
     }),
+    signal,
   });
 }
 
-async function commitTradeNegotiationSession({ sessionId, deal, offerPrivacy = "PRIVATE", exposeToMedia = false } = {}) {
+async function commitTradeNegotiationSession({ sessionId, deal, offerPrivacy = "PRIVATE", exposeToMedia = false, signal = undefined, idempotencyKey = "" } = {}) {
   if (!sessionId) throw new Error("session_id가 필요합니다.");
   if (!deal || typeof deal !== "object") throw new Error("deal payload가 필요합니다.");
   return fetchJson("/api/trade/negotiation/commit", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: withIdempotencyHeader({ "Content-Type": "application/json" }, idempotencyKey),
     body: JSON.stringify({
       session_id: sessionId,
       deal,
       offer_privacy: offerPrivacy,
       expose_to_media: !!exposeToMedia,
+      idempotency_key: idempotencyKey || null,
     }),
+    signal,
   });
 }
 
-async function submitCommittedTradeDeal({ dealId, force = true } = {}) {
+async function submitCommittedTradeDeal({ dealId, force = true, signal = undefined, idempotencyKey = "" } = {}) {
   if (!dealId) throw new Error("deal_id가 필요합니다.");
   return fetchJson("/api/trade/submit-committed", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ deal_id: dealId, force: !!force }),
+    headers: withIdempotencyHeader({ "Content-Type": "application/json" }, idempotencyKey),
+    body: JSON.stringify({ deal_id: dealId, force: !!force, idempotency_key: idempotencyKey || null }),
+    signal,
   });
 }
 
-async function fetchStateSummary() {
-  return fetchJson("/api/state/summary");
+async function fetchStateSummary({ signal = undefined } = {}) {
+  return fetchJson("/api/state/summary", { signal });
 }
 
 function normalizeCacheKey(key) {
@@ -492,6 +599,10 @@ function showConfirmModal({ title, body, okLabel = "확인", cancelLabel = "취�
 
 export {
   fetchJson,
+  beginScopedRequest,
+  isScopedRequestCurrent,
+  abortScopedRequest,
+  abortAllMarketTradeRequests,
   fetchTradeNegotiationInbox,
   startTradeNegotiationSession,
   openTradeNegotiationSession,

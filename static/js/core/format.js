@@ -104,6 +104,26 @@ function formatPickLabel({ year, round, teamName = "", includeTeam = true } = {}
   return `${base} (${team})`;
 }
 
+// NOTE:
+// - strict formatter for contract-bound UIs.
+// - caller must pass valid year/round or this function throws.
+function strictFormatPickLabel({ year, round, teamName = "", includeTeam = true } = {}) {
+  const yearNum = Number(year);
+  const roundNum = Number(round);
+  if (!Number.isFinite(yearNum)) {
+    throw new Error("Invalid pick year for strict formatter");
+  }
+  if (!Number.isFinite(roundNum) || roundNum <= 0) {
+    throw new Error("Invalid pick round for strict formatter");
+  }
+  return formatPickLabel({
+    year: yearNum,
+    round: roundNum,
+    teamName,
+    includeTeam,
+  });
+}
+
 function formatProtectionSummary(protection) {
   if (!protection || typeof protection !== "object" || Array.isArray(protection)) return "Unprotected";
   const type = String(protection.type || "").toUpperCase();
@@ -142,4 +162,4 @@ function formatFixedAssetLabel({ label = "", draftYear = null, sourcePickId = ""
   if (!cleanLabel && fallbackId) bits.push(`#${fallbackId}`);
   return bits.join(" · ");
 }
-export { formatIsoDate, formatHeightIn, formatWeightLb, formatMoney, formatPercent, seasonLabelByYear, getOptionTypeLabel, formatWinPct, dateToIso, parseIsoDate, startOfWeek, addDays, formatSignedDiff, formatSignedDelta, formatDraftRoundLabel, formatPickLabel, formatProtectionSummary, formatSwapAssetLabel, formatFixedAssetLabel };
+export { formatIsoDate, formatHeightIn, formatWeightLb, formatMoney, formatPercent, seasonLabelByYear, getOptionTypeLabel, formatWinPct, dateToIso, parseIsoDate, startOfWeek, addDays, formatSignedDiff, formatSignedDelta, formatDraftRoundLabel, formatPickLabel, strictFormatPickLabel, formatProtectionSummary, formatSwapAssetLabel, formatFixedAssetLabel };

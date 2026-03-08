@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
 import game_time
 import state
+from league_repo import LeagueRepo
 
 from .errors import TradeError, NEGOTIATION_NOT_FOUND
 from .models import Deal, canonicalize_deal, parse_deal, serialize_deal
@@ -15,6 +17,171 @@ NEGOTIATION_BAD_PAYLOAD = "NEGOTIATION_BAD_PAYLOAD"
 
 def _now_iso() -> str:
     return game_time.now_utc_like_iso()
+
+
+def _is_deal_payload(payload: Any) -> bool:
+    return isinstance(payload, dict) and isinstance(payload.get("teams"), list) and isinstance(payload.get("legs"), dict)
+
+
+def _extract_deal_payload(payload: Any) -> Dict[str, Any]:
+    if _is_deal_payload(payload):
+        return payload
+    if not isinstance(payload, dict):
+        return {}
+    for key in ("offer", "deal"):
+        candidate = payload.get(key)
+        if _is_deal_payload(candidate):
+            return candidate
+    return {}
+
+
+def _collect_asset_ids(deal_payload: Dict[str, Any]) -> tuple[list[str], list[str]]:
+    player_ids: list[str] = []
+    pick_ids: list[str] = []
+    legs = deal_payload.get("legs") if isinstance(deal_payload, dict) else {}
+    for assets in (legs.values() if isinstance(legs, dict) else []):
+        if not isinstance(assets, list):
+            continue
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            kind = str(asset.get("kind") or "").lower().strip()
+            if kind == "player":
+                pid = str(asset.get("player_id") or "").strip()
+                if pid:
+                    player_ids.append(pid)
+            elif kind == "pick":
+                pick_id = str(asset.get("pick_id") or "").strip()
+                if pick_id:
+                    pick_ids.append(pick_id)
+    return list(dict.fromkeys(player_ids)), list(dict.fromkeys(pick_ids))
+
+
+def _hydrate_player_snapshots(player_ids: list[str], *, db_path: str) -> Dict[str, Dict[str, str]]:
+    if not player_ids:
+        return {}
+    placeholders = ",".join("?" for _ in player_ids)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT player_id, name, pos
+            FROM players
+            WHERE player_id IN ({placeholders})
+            """,
+            tuple(player_ids),
+        ).fetchall()
+    out: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        pid = str(row["player_id"])
+        out[pid] = {
+            "display_name": str(row["name"] or "").strip(),
+            "pos": str(row["pos"] or "").strip(),
+        }
+    return out
+
+
+def _hydrate_pick_snapshots(pick_ids: list[str], *, db_path: str) -> Dict[str, Dict[str, Any]]:
+    if not pick_ids:
+        return {}
+    with LeagueRepo(db_path) as repo:
+        picks = repo.get_draft_picks_map() or {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for pick_id in pick_ids:
+        row = picks.get(pick_id)
+        if not isinstance(row, dict):
+            continue
+        out[pick_id] = {
+            "year": row.get("year"),
+            "round": row.get("round"),
+            "original_team": str(row.get("original_team") or "").upper(),
+            "owner_team": str(row.get("owner_team") or "").upper(),
+        }
+    return out
+
+
+def _require_nonempty_string(v: Any, *, field: str, context: Dict[str, Any]) -> str:
+    out = str(v or "").strip()
+    if not out:
+        raise TradeError(NEGOTIATION_BAD_PAYLOAD, f"Missing required field: {field}", context)
+    return out
+
+
+def _canonicalize_last_offer_payload(payload: Any, *, session_id: str, db_path: str) -> Dict[str, Any]:
+    deal = _extract_deal_payload(payload)
+    if not deal:
+        raise TradeError(
+            NEGOTIATION_BAD_PAYLOAD,
+            "last_offer payload must include deal.teams and deal.legs",
+            {"session_id": session_id},
+        )
+
+    player_ids, pick_ids = _collect_asset_ids(deal)
+    player_snaps = _hydrate_player_snapshots(player_ids, db_path=db_path)
+    pick_snaps = _hydrate_pick_snapshots(pick_ids, db_path=db_path)
+
+    teams = list(deal.get("teams") or [])
+    legs = deal.get("legs") if isinstance(deal.get("legs"), dict) else {}
+    out_legs: Dict[str, list[Dict[str, Any]]] = {}
+    for from_team, assets in legs.items():
+        from_key = str(from_team or "").upper()
+        out_assets: list[Dict[str, Any]] = []
+        for idx, asset in enumerate(assets if isinstance(assets, list) else []):
+            if not isinstance(asset, dict):
+                continue
+            row = dict(asset)
+            kind = str(asset.get("kind") or "").lower().strip()
+            if kind == "player":
+                pid = _require_nonempty_string(asset.get("player_id"), field="player_id", context={"session_id": session_id, "path": f"legs.{from_key}[{idx}]"})
+                snap = player_snaps.get(pid) or {}
+                row["player_id"] = pid
+                row["display_name"] = _require_nonempty_string(
+                    snap.get("display_name") or asset.get("display_name"),
+                    field="display_name",
+                    context={"session_id": session_id, "player_id": pid, "path": f"legs.{from_key}[{idx}]"},
+                )
+                row["pos"] = _require_nonempty_string(
+                    snap.get("pos") or asset.get("pos"),
+                    field="pos",
+                    context={"session_id": session_id, "player_id": pid, "path": f"legs.{from_key}[{idx}]"},
+                )
+            elif kind == "pick":
+                pick_id = _require_nonempty_string(asset.get("pick_id"), field="pick_id", context={"session_id": session_id, "path": f"legs.{from_key}[{idx}]"})
+                snap = pick_snaps.get(pick_id) or {}
+                row["pick_id"] = pick_id
+                try:
+                    row["year"] = int(snap.get("year") if snap.get("year") is not None else asset.get("year"))
+                except Exception as exc:
+                    raise TradeError(
+                        NEGOTIATION_BAD_PAYLOAD,
+                        "Missing required field: year",
+                        {"session_id": session_id, "pick_id": pick_id, "path": f"legs.{from_key}[{idx}]"},
+                    ) from exc
+                try:
+                    row["round"] = int(snap.get("round") if snap.get("round") is not None else asset.get("round"))
+                except Exception as exc:
+                    raise TradeError(
+                        NEGOTIATION_BAD_PAYLOAD,
+                        "Missing required field: round",
+                        {"session_id": session_id, "pick_id": pick_id, "path": f"legs.{from_key}[{idx}]"},
+                    ) from exc
+                row["original_team"] = _require_nonempty_string(
+                    snap.get("original_team") or asset.get("original_team"),
+                    field="original_team",
+                    context={"session_id": session_id, "pick_id": pick_id, "path": f"legs.{from_key}[{idx}]"},
+                )
+                row["owner_team"] = _require_nonempty_string(
+                    snap.get("owner_team") or asset.get("owner_team") or from_key,
+                    field="owner_team",
+                    context={"session_id": session_id, "pick_id": pick_id, "path": f"legs.{from_key}[{idx}]"},
+                )
+            out_assets.append(row)
+        out_legs[from_key] = out_assets
+    return {
+        "teams": teams,
+        "legs": out_legs,
+        "meta": deal.get("meta") if isinstance(deal.get("meta"), dict) else {},
+    }
 
 
 def _ensure_session_schema(session: Dict[str, Any]) -> Dict[str, Any]:
@@ -101,7 +268,37 @@ def _ensure_session_schema(session: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(session.get("market_context"), dict):
         session["market_context"] = {}
 
+    last_request_keys = session.get("last_request_keys")
+    if not isinstance(last_request_keys, dict):
+        last_request_keys = {}
+        session["last_request_keys"] = last_request_keys
+
     return session
+
+
+def _normalize_idempotency_key(raw: Optional[str]) -> str:
+    return str(raw or "").strip()
+
+
+def _is_already_processed_key(session: Dict[str, Any], scope: str, key: str) -> bool:
+    scope_key = str(scope or "").strip()
+    idem_key = _normalize_idempotency_key(key)
+    if not scope_key or not idem_key:
+        return False
+    last_request_keys = session.get("last_request_keys") if isinstance(session.get("last_request_keys"), dict) else {}
+    return str(last_request_keys.get(scope_key) or "") == idem_key
+
+
+def _remember_processed_key(session: Dict[str, Any], scope: str, key: str) -> None:
+    scope_key = str(scope or "").strip()
+    idem_key = _normalize_idempotency_key(key)
+    if not scope_key or not idem_key:
+        return
+    last_request_keys = session.get("last_request_keys")
+    if not isinstance(last_request_keys, dict):
+        last_request_keys = {}
+        session["last_request_keys"] = last_request_keys
+    last_request_keys[scope_key] = idem_key
 
 
 def _load_session_or_404(session_id: str) -> Dict[str, Any]:
@@ -314,8 +511,11 @@ def set_last_offer(session_id: str, payload: Any) -> None:
             {"session_id": session_id},
         )
 
+    db_path = state.get_db_path()
+    canonical_payload = _canonicalize_last_offer_payload(payload, session_id=session_id, db_path=db_path)
+
     def _patch(session: Dict[str, Any]) -> None:
-        session["last_offer"] = payload
+        session["last_offer"] = canonical_payload
 
     _atomic_update(session_id, _patch)
 
@@ -336,14 +536,18 @@ def set_last_counter(session_id: str, payload: Any) -> None:
     _atomic_update(session_id, _patch)
 
 
-def close_as_rejected(session_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
+def close_as_rejected(session_id: str, reason: Optional[str] = None, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
     reason_text = str(reason or "").strip()
+    idem_key = _normalize_idempotency_key(idempotency_key)
     idempotent = False
 
     def _patch(session: Dict[str, Any]) -> None:
         nonlocal idempotent
         current_phase = str(session.get("phase") or "").upper()
         current_status = str(session.get("status") or "").upper()
+        if _is_already_processed_key(session, "reject", idem_key):
+            idempotent = True
+            return
         if current_phase == "REJECTED" and current_status == "CLOSED":
             idempotent = True
             return
@@ -361,6 +565,7 @@ def close_as_rejected(session_id: str, reason: Optional[str] = None) -> Dict[str
                 "text": f"REJECTED: {reason_text}",
                 "at": _now_iso(),
             })
+        _remember_processed_key(session, "reject", idem_key)
 
     updated = _atomic_update(session_id, _patch)
     return {"session": updated, "idempotent": bool(idempotent)}
@@ -416,13 +621,18 @@ def mark_auto_ended(
     return {"session": updated, "idempotent": bool(idempotent)}
 
 
-def open_inbox_session(session_id: str) -> Dict[str, Any]:
+def open_inbox_session(session_id: str, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
+    idem_key = _normalize_idempotency_key(idempotency_key)
     idempotent = False
 
     def _patch(session: Dict[str, Any]) -> None:
         nonlocal idempotent
         phase = str(session.get("phase") or "INIT").upper()
         status = str(session.get("status") or "ACTIVE").upper()
+
+        if _is_already_processed_key(session, "open", idem_key):
+            idempotent = True
+            return
 
         if status != "ACTIVE":
             raise TradeError(
@@ -433,10 +643,12 @@ def open_inbox_session(session_id: str) -> Dict[str, Any]:
 
         if phase in {"NEGOTIATING", "COUNTER_PENDING"}:
             idempotent = True
+            _remember_processed_key(session, "open", idem_key)
             return
 
         if phase in {"INIT", "INBOX_PENDING"}:
             session["phase"] = "NEGOTIATING"
+            _remember_processed_key(session, "open", idem_key)
             return
 
         raise TradeError(
@@ -454,12 +666,14 @@ def mark_committed_and_close(
     *,
     deal_id: str,
     expires_at: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     deal_id_s = str(deal_id or "").strip()
     if not deal_id_s:
         raise TradeError("DEAL_INVALIDATED", "deal_id is required", {"session_id": session_id})
 
     expires_value = expires_at if isinstance(expires_at, str) else None
+    idem_key = _normalize_idempotency_key(idempotency_key)
     idempotent = False
 
     def _patch(session: Dict[str, Any]) -> None:
@@ -467,6 +681,10 @@ def mark_committed_and_close(
         status = str(session.get("status") or "").upper()
         phase = str(session.get("phase") or "").upper()
         cur_deal = str(session.get("committed_deal_id") or "").strip()
+
+        if _is_already_processed_key(session, "commit", idem_key):
+            idempotent = True
+            return
 
         if status == "CLOSED" and phase == "ACCEPTED" and cur_deal == deal_id_s:
             idempotent = True
@@ -490,6 +708,7 @@ def mark_committed_and_close(
         session["status"] = "CLOSED"
         session["phase"] = "ACCEPTED"
         session["valid_until"] = expires_value
+        _remember_processed_key(session, "commit", idem_key)
 
     updated = _atomic_update(session_id, _patch)
     return {"session": updated, "idempotent": bool(idempotent)}

@@ -286,8 +286,8 @@
                 <div class="market-trade-inbox-card-right" id="market-trade-inbox-card-actions-wrap">
                   <p id="market-trade-inbox-card-date" class="subtitle">--/--</p>
                   <div class="market-trade-inbox-card-actions">
-                    <button type="button" id="market-trade-inbox-card-open" class="btn btn-secondary">협상</button>
-                    <button type="button" id="market-trade-inbox-card-reject" class="btn btn-secondary">거절</button>
+                    <button type="button" id="market-trade-inbox-card-open" class="btn btn-secondary" data-trade-action="open-session" aria-disabled="false">협상</button>
+                    <button type="button" id="market-trade-inbox-card-reject" class="btn btn-secondary" data-trade-action="reject-session" aria-disabled="false">거절</button>
                   </div>
                 </div>
               </article>
@@ -1194,7 +1194,7 @@
 
       <div class="confirm-modal-actions">
         <button id="market-trade-deal-cancel" type="button" class="btn btn-secondary">취소</button>
-        <button id="market-trade-deal-reject" type="button" class="btn btn-secondary">거절</button>
+        <button id="market-trade-deal-reject" type="button" class="btn btn-secondary" data-trade-action="reject-from-modal" aria-disabled="false">거절</button>
         <button id="market-trade-deal-submit" type="button" class="btn btn-primary">제출</button>
       </div>
     </article>

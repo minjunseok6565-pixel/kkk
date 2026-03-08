@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
+import hashlib
+import json
 import sqlite3
+import time
 
 from fastapi import APIRouter, HTTPException
 
@@ -39,6 +42,7 @@ from app.schemas.trades import (
     TradeNegotiationCommitRequest,
     TradeNegotiationOpenRequest,
     TradeNegotiationRejectRequest,
+    TradeNegotiationInboxResponse,
     TradeNegotiationStartRequest,
     TradeSubmitCommittedRequest,
     TradeSubmitRequest,
@@ -46,14 +50,112 @@ from app.schemas.trades import (
 from app.services.cache_facade import _try_ui_cache_refresh_players
 from app.services.contract_facade import _validate_repo_integrity
 from app.services.trade_facade import _trade_error_response
+from app.services.trade_contract_telemetry import emit_trade_contract_violation
 from agency.service import apply_trade_offer_grievances
 
 router = APIRouter()
+
+_IDEMPOTENCY_CACHE_TTL_S = 120
+_idempotency_result_cache: Dict[str, Dict[str, Any]] = {}
 
 
 def _normalize_offer_privacy(raw: Any, *, default: str = "PRIVATE") -> str:
     v = str(raw or default).upper()
     return "PUBLIC" if v == "PUBLIC" else "PRIVATE"
+
+
+def _normalize_idempotency_key(raw: Any) -> str:
+    return str(raw or "").strip()
+
+
+def _hash_payload(payload: Any) -> str:
+    try:
+        serialized = str(payload) if isinstance(payload, str) else json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    except Exception:
+        serialized = str(payload)
+    return hashlib.sha1(serialized.encode("utf-8")).hexdigest()
+
+
+def _make_idempotency_cache_key(*, scope: str, session_id: str, team_id: str, key: str) -> str:
+    return "::".join([
+        str(scope or "").strip() or "unknown",
+        str(session_id or "").strip() or "none",
+        str(team_id or "").strip().upper() or "none",
+        _normalize_idempotency_key(key),
+    ])
+
+
+def _gc_idempotency_cache(now_ts: Optional[float] = None) -> None:
+    now = float(now_ts or time.time())
+    stale_keys = [
+        cache_key
+        for cache_key, entry in _idempotency_result_cache.items()
+        if now - float(entry.get("created_at") or 0.0) > _IDEMPOTENCY_CACHE_TTL_S
+    ]
+    for cache_key in stale_keys:
+        _idempotency_result_cache.pop(cache_key, None)
+
+
+def _idempotency_replay_guard(
+    *,
+    scope: str,
+    session_id: str,
+    team_id: str,
+    key: str,
+    payload_hash: str,
+) -> Optional[Dict[str, Any]]:
+    idem_key = _normalize_idempotency_key(key)
+    if not idem_key:
+        return None
+
+    _gc_idempotency_cache()
+    cache_key = _make_idempotency_cache_key(
+        scope=scope,
+        session_id=session_id,
+        team_id=team_id,
+        key=idem_key,
+    )
+    cached = _idempotency_result_cache.get(cache_key)
+    if not cached:
+        return None
+
+    if str(cached.get("payload_hash") or "") != str(payload_hash or ""):
+        raise TradeError(
+            "NEGOTIATION_IDEMPOTENCY_CONFLICT",
+            "idempotency_key already used with a different payload",
+            {"scope": scope, "session_id": session_id, "team_id": team_id},
+        )
+
+    out = dict(cached.get("response") or {})
+    out["idempotent"] = True
+    out["idempotency_key"] = idem_key
+    return out
+
+
+def _store_idempotency_response(
+    *,
+    scope: str,
+    session_id: str,
+    team_id: str,
+    key: str,
+    payload_hash: str,
+    response_payload: Dict[str, Any],
+) -> None:
+    idem_key = _normalize_idempotency_key(key)
+    if not idem_key:
+        return
+    _gc_idempotency_cache()
+    cache_key = _make_idempotency_cache_key(
+        scope=scope,
+        session_id=session_id,
+        team_id=team_id,
+        key=idem_key,
+    )
+    _idempotency_result_cache[cache_key] = {
+        "created_at": time.time(),
+        "payload_hash": str(payload_hash or ""),
+        "response": dict(response_payload or {}),
+    }
 
 
 def _extract_outgoing_player_ids_for_team(deal_payload: Dict[str, Any], *, from_team_id: str) -> List[str]:
@@ -540,39 +642,285 @@ def _count_assets_for_user(offer_payload: Dict[str, Any], *, user_team_id: str) 
         "user_incoming_picks": 0,
     }
     legs = offer_payload.get("legs") if isinstance(offer_payload, dict) else None
-    if not isinstance(legs, list):
+    tid = str(user_team_id).upper()
+
+    if isinstance(legs, list):
+        for leg in legs:
+            if not isinstance(leg, dict):
+                continue
+            from_team = str(leg.get("from_team") or "").upper()
+            to_team = str(leg.get("to_team") or "").upper()
+            assets = leg.get("assets")
+            if not isinstance(assets, list):
+                continue
+
+            for asset in assets:
+                if not isinstance(asset, dict):
+                    continue
+                kind = str(asset.get("kind") or "").upper()
+                if kind not in {"PLAYER", "PICK"}:
+                    continue
+                if from_team == tid:
+                    key = "user_outgoing_players" if kind == "PLAYER" else "user_outgoing_picks"
+                    counts[key] += 1
+                if to_team == tid:
+                    key = "user_incoming_players" if kind == "PLAYER" else "user_incoming_picks"
+                    counts[key] += 1
         return counts
 
-    tid = str(user_team_id).upper()
-    for leg in legs:
-        if not isinstance(leg, dict):
-            continue
-        from_team = str(leg.get("from_team") or "").upper()
-        to_team = str(leg.get("to_team") or "").upper()
-        assets = leg.get("assets")
-        if not isinstance(assets, list):
-            continue
-
-        for asset in assets:
-            if not isinstance(asset, dict):
+    if isinstance(legs, dict):
+        teams = [str(t).upper() for t in (offer_payload.get("teams") or []) if str(t)]
+        counterpart = next((team for team in teams if team != tid), "")
+        for from_team_raw, assets in legs.items():
+            from_team = str(from_team_raw or "").upper()
+            if not isinstance(assets, list):
                 continue
-            kind = str(asset.get("kind") or "").upper()
-            if kind not in {"PLAYER", "PICK"}:
-                continue
-            if from_team == tid:
-                key = "user_outgoing_players" if kind == "PLAYER" else "user_outgoing_picks"
-                counts[key] += 1
-            if to_team == tid:
-                key = "user_incoming_players" if kind == "PLAYER" else "user_incoming_picks"
-                counts[key] += 1
+            for asset in assets:
+                if not isinstance(asset, dict):
+                    continue
+                kind = str(asset.get("kind") or "").upper()
+                if kind not in {"PLAYER", "PICK"}:
+                    continue
+                to_team = str(asset.get("to_team") or "").upper() or (counterpart if counterpart else "")
+                if from_team == tid:
+                    key = "user_outgoing_players" if kind == "PLAYER" else "user_outgoing_picks"
+                    counts[key] += 1
+                if to_team == tid:
+                    key = "user_incoming_players" if kind == "PLAYER" else "user_incoming_picks"
+                    counts[key] += 1
     return counts
 
 
-def _build_trade_negotiation_inbox_row(session: Dict[str, Any], *, today: date) -> Dict[str, Any]:
+def _first_nonempty_str(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _is_deal_payload(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return isinstance(payload.get("teams"), list) and isinstance(payload.get("legs"), dict)
+
+
+def _extract_deal_payload(payload: Any) -> Dict[str, Any]:
+    if _is_deal_payload(payload):
+        return payload
+    if not isinstance(payload, dict):
+        return {}
+    for key in ("offer", "deal"):
+        candidate = payload.get(key)
+        if _is_deal_payload(candidate):
+            return candidate
+    return {}
+
+
+def _collect_player_ids_from_deal(offer_payload: Dict[str, Any]) -> List[str]:
+    deal = _extract_deal_payload(offer_payload)
+    out: List[str] = []
+    legs = deal.get("legs") if isinstance(deal, dict) else {}
+    for assets in (legs.values() if isinstance(legs, dict) else []):
+        if not isinstance(assets, list):
+            continue
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            if str(asset.get("kind") or "").lower() != "player":
+                continue
+            pid = str(asset.get("player_id") or "").strip()
+            if pid:
+                out.append(pid)
+    return list(dict.fromkeys(out))
+
+
+def _collect_pick_ids_from_deal(offer_payload: Dict[str, Any]) -> List[str]:
+    deal = _extract_deal_payload(offer_payload)
+    out: List[str] = []
+    legs = deal.get("legs") if isinstance(deal, dict) else {}
+    for assets in (legs.values() if isinstance(legs, dict) else []):
+        if not isinstance(assets, list):
+            continue
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            if str(asset.get("kind") or "").lower() != "pick":
+                continue
+            pick_id = str(asset.get("pick_id") or "").strip()
+            if pick_id:
+                out.append(pick_id)
+    return list(dict.fromkeys(out))
+
+
+def _hydrate_player_asset_snapshots(player_ids: List[str], *, db_path: str) -> Dict[str, Dict[str, Any]]:
+    pids = [str(pid).strip() for pid in (player_ids or []) if str(pid).strip()]
+    if not pids:
+        return {}
+    placeholders = ",".join("?" for _ in pids)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT player_id, name, pos
+            FROM players
+            WHERE player_id IN ({placeholders})
+            """,
+            tuple(pids),
+        ).fetchall()
+    snaps: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        pid = str(row["player_id"])
+        snaps[pid] = {
+            "display_name": str(row["name"] or "").strip(),
+            "pos": str(row["pos"] or "").strip(),
+        }
+    return snaps
+
+
+def _hydrate_pick_asset_snapshots(pick_ids: List[str], *, db_path: str) -> Dict[str, Dict[str, Any]]:
+    ids = [str(pid).strip() for pid in (pick_ids or []) if str(pid).strip()]
+    if not ids:
+        return {}
+    wanted = set(ids)
+    with LeagueRepo(db_path) as repo:
+        picks = repo.get_draft_picks_map() or {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for pick_id in wanted:
+        row = picks.get(pick_id)
+        if not isinstance(row, dict):
+            continue
+        out[pick_id] = {
+            "year": row.get("year"),
+            "round": row.get("round"),
+            "original_team": _first_nonempty_str(row.get("original_team")),
+            "owner_team": _first_nonempty_str(row.get("owner_team")),
+        }
+    return out
+
+
+def _canonicalize_offer_assets(
+    offer_payload: Dict[str, Any],
+    *,
+    player_snaps: Dict[str, Dict[str, Any]],
+    pick_snaps: Dict[str, Dict[str, Any]],
+    session_id: str,
+    endpoint: str,
+) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    deal = _extract_deal_payload(offer_payload)
+    if not deal:
+        return {"teams": [], "legs": {}, "meta": {}}, []
+
+    teams = list(deal.get("teams") or [])
+    legs = deal.get("legs") if isinstance(deal.get("legs"), dict) else {}
+    out_legs: Dict[str, List[Dict[str, Any]]] = {}
+    violations: List[Dict[str, Any]] = []
+
+    for from_team, assets in legs.items():
+        from_key = str(from_team or "").upper()
+        rows: List[Dict[str, Any]] = []
+        if not isinstance(assets, list):
+            out_legs[from_key] = rows
+            continue
+        for idx, asset in enumerate(assets):
+            if not isinstance(asset, dict):
+                continue
+            normalized = dict(asset)
+            kind = str(asset.get("kind") or "").lower().strip()
+            if kind == "player":
+                pid = str(asset.get("player_id") or "").strip()
+                snap = player_snaps.get(pid) or {}
+                normalized["player_id"] = pid
+                normalized["display_name"] = _first_nonempty_str(asset.get("display_name"), snap.get("display_name"))
+                normalized["pos"] = _first_nonempty_str(asset.get("pos"), snap.get("pos"))
+                missing = [
+                    field
+                    for field in ("player_id", "display_name", "pos")
+                    if not _first_nonempty_str(normalized.get(field))
+                ]
+                if missing:
+                    violation = {
+                        "path": f"legs.{from_key}[{idx}]",
+                        "asset_kind": "player",
+                        "asset_ref": pid or f"idx:{idx}",
+                        "missing_fields": missing,
+                        "session_id": session_id,
+                        "endpoint": endpoint,
+                    }
+                    violations.append(violation)
+                    emit_trade_contract_violation(violation)
+            elif kind == "pick":
+                pick_id = str(asset.get("pick_id") or "").strip()
+                snap = pick_snaps.get(pick_id) or {}
+                normalized["pick_id"] = pick_id
+                normalized["year"] = asset.get("year", snap.get("year"))
+                normalized["round"] = asset.get("round", snap.get("round"))
+                normalized["original_team"] = _first_nonempty_str(asset.get("original_team"), snap.get("original_team"))
+                normalized["owner_team"] = _first_nonempty_str(asset.get("owner_team"), snap.get("owner_team"), from_key)
+                missing: List[str] = []
+                if not _first_nonempty_str(normalized.get("pick_id")):
+                    missing.append("pick_id")
+                try:
+                    normalized["year"] = int(normalized.get("year"))
+                except Exception:
+                    missing.append("year")
+                try:
+                    normalized["round"] = int(normalized.get("round"))
+                except Exception:
+                    missing.append("round")
+                if not _first_nonempty_str(normalized.get("original_team")):
+                    missing.append("original_team")
+                if not _first_nonempty_str(normalized.get("owner_team")):
+                    missing.append("owner_team")
+                if missing:
+                    violation = {
+                        "path": f"legs.{from_key}[{idx}]",
+                        "asset_kind": "pick",
+                        "asset_ref": pick_id or f"idx:{idx}",
+                        "missing_fields": missing,
+                        "session_id": session_id,
+                        "endpoint": endpoint,
+                    }
+                    violations.append(violation)
+                    emit_trade_contract_violation(violation)
+            rows.append(normalized)
+        out_legs[from_key] = rows
+
+    canonical_deal = {
+        "teams": teams,
+        "legs": out_legs,
+        "meta": deal.get("meta") if isinstance(deal.get("meta"), dict) else {},
+    }
+    return canonical_deal, violations
+
+
+def _canonicalize_offer_payload_for_response(
+    offer_payload: Dict[str, Any], *, session_id: str, endpoint: str, db_path: str
+) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    player_ids = _collect_player_ids_from_deal(offer_payload)
+    pick_ids = _collect_pick_ids_from_deal(offer_payload)
+    player_snaps = _hydrate_player_asset_snapshots(player_ids, db_path=db_path)
+    pick_snaps = _hydrate_pick_asset_snapshots(pick_ids, db_path=db_path)
+    return _canonicalize_offer_assets(
+        offer_payload,
+        player_snaps=player_snaps,
+        pick_snaps=pick_snaps,
+        session_id=session_id,
+        endpoint=endpoint,
+    )
+
+
+def _build_trade_negotiation_inbox_row(session: Dict[str, Any], *, today: date, db_path: str) -> Dict[str, Any]:
     phase = str(session.get("phase") or "INIT").upper()
     status = str(session.get("status") or "ACTIVE").upper()
     team_id = str(session.get("user_team_id") or "").upper()
     offer_payload = session.get("last_offer") if isinstance(session.get("last_offer"), dict) else {}
+    canonical_offer, contract_violations = _canonicalize_offer_payload_for_response(
+        offer_payload,
+        session_id=str(session.get("session_id") or ""),
+        endpoint="/api/trade/negotiation/inbox",
+        db_path=db_path,
+    )
     market_context = session.get("market_context") if isinstance(session.get("market_context"), dict) else {}
     offer_meta = market_context.get("offer_meta") if isinstance(market_context.get("offer_meta"), dict) else {}
 
@@ -596,14 +944,15 @@ def _build_trade_negotiation_inbox_row(session: Dict[str, Any], *, today: date) 
             "leak_status": str(offer_meta.get("leak_status") or "NONE").upper(),
         },
         "offer": {
-            "deal": offer_payload,
-            "asset_counts": _count_assets_for_user(offer_payload, user_team_id=team_id),
+            "deal": canonical_offer,
+            "asset_counts": _count_assets_for_user(canonical_offer, user_team_id=team_id),
         },
         "actions": {
             "can_open": status == "ACTIVE" and phase in {"INIT", "INBOX_PENDING", "NEGOTIATING", "COUNTER_PENDING"} and not is_expired,
             "can_reject": status == "ACTIVE" and phase not in {"REJECTED", "ACCEPTED"},
             "can_commit": status == "ACTIVE" and phase in {"NEGOTIATING", "COUNTER_PENDING"} and not is_expired,
         },
+        "contract_violations": contract_violations,
     }
 
 
@@ -653,7 +1002,7 @@ def _sort_trade_negotiation_inbox_rows(rows: List[Dict[str, Any]], *, sort_key: 
     return data
 
 
-@router.get("/api/trade/negotiation/inbox")
+@router.get("/api/trade/negotiation/inbox", response_model=TradeNegotiationInboxResponse)
 async def api_trade_negotiation_inbox(
     team_id: str,
     status: str = "ACTIVE",
@@ -675,6 +1024,7 @@ async def api_trade_negotiation_inbox(
         )
 
         today = state.get_current_date_as_date()
+        db_path = state.get_db_path()
         sessions = state.negotiations_get() or {}
 
         rows: List[Dict[str, Any]] = []
@@ -690,7 +1040,7 @@ async def api_trade_negotiation_inbox(
 
             s = dict(session)
             s.setdefault("session_id", str(sid))
-            row = _build_trade_negotiation_inbox_row(s, today=today)
+            row = _build_trade_negotiation_inbox_row(s, today=today, db_path=db_path)
 
             if not q.include_expired and row.get("is_expired"):
                 continue
@@ -879,6 +1229,19 @@ async def api_trade_submit(req: TradeSubmitRequest):
 @router.post("/api/trade/submit-committed")
 async def api_trade_submit_committed(req: TradeSubmitCommittedRequest):
     try:
+        idem_key = _normalize_idempotency_key(getattr(req, "idempotency_key", None))
+        scope = "submit-committed"
+        payload_hash = _hash_payload({"deal_id": req.deal_id})
+        replay = _idempotency_replay_guard(
+            scope=scope,
+            session_id=str(req.deal_id),
+            team_id="",
+            key=idem_key,
+            payload_hash=payload_hash,
+        )
+        if isinstance(replay, dict):
+            return replay
+
         in_game_date = state.get_current_date_as_date()
         db_path = state.get_db_path()
         agreements.gc_expired_agreements(current_date=in_game_date)
@@ -905,7 +1268,23 @@ async def api_trade_submit_committed(req: TradeSubmitCommittedRequest):
                 if pid:
                     moved_ids.append(str(pid))
         _try_ui_cache_refresh_players(moved_ids, context="trade.submit_committed")
-        return {"ok": True, "deal_id": req.deal_id, "transaction": transaction}
+        response = {
+            "ok": True,
+            "deal_id": req.deal_id,
+            "transaction": transaction,
+            "idempotent": False,
+        }
+        if idem_key:
+            response["idempotency_key"] = idem_key
+            _store_idempotency_response(
+                scope=scope,
+                session_id=str(req.deal_id),
+                team_id="",
+                key=idem_key,
+                payload_hash=payload_hash,
+                response_payload=response,
+            )
+        return response
     except TradeError as exc:
         return _trade_error_response(exc)
 
@@ -913,9 +1292,31 @@ async def api_trade_submit_committed(req: TradeSubmitCommittedRequest):
 @router.post("/api/trade/negotiation/start")
 async def api_trade_negotiation_start(req: TradeNegotiationStartRequest):
     try:
-        in_game_date = state.get_current_date_as_date()
+        idem_key = _normalize_idempotency_key(getattr(req, "idempotency_key", None))
+        user_team_id = str(req.user_team_id or "").upper().strip()
+        other_team_id = str(req.other_team_id or "").upper().strip()
+        if not user_team_id or not other_team_id:
+            raise TradeError("NEGOTIATION_BAD_QUERY", "user_team_id and other_team_id are required")
+
+        scope = "negotiation-start"
+        synthetic_session_id = f"{user_team_id}:{other_team_id}"
+        payload_hash = _hash_payload({
+            "user_team_id": user_team_id,
+            "other_team_id": other_team_id,
+            "default_offer_privacy": getattr(req, "default_offer_privacy", "PRIVATE"),
+        })
+        replay = _idempotency_replay_guard(
+            scope=scope,
+            session_id=synthetic_session_id,
+            team_id=user_team_id,
+            key=idem_key,
+            payload_hash=payload_hash,
+        )
+        if isinstance(replay, dict):
+            return replay
+
         session = negotiation_store.create_session(
-            user_team_id=req.user_team_id, other_team_id=req.other_team_id
+            user_team_id=user_team_id, other_team_id=other_team_id
         )
         # AI-driven auto-end policy is now the primary mechanism for stale sessions.
         negotiation_store.touch_ai_action(session["session_id"])
@@ -930,7 +1331,23 @@ async def api_trade_negotiation_start(req: TradeNegotiationStartRequest):
         session.setdefault("market_context", {})
         if isinstance(session["market_context"], dict):
             session["market_context"]["offer_meta"] = {"offer_privacy": default_privacy, "leak_status": "NONE"}
-        return {"ok": True, "session": session}
+
+        response = {
+            "ok": True,
+            "session": session,
+            "idempotent": False,
+        }
+        if idem_key:
+            response["idempotency_key"] = idem_key
+            _store_idempotency_response(
+                scope=scope,
+                session_id=synthetic_session_id,
+                team_id=user_team_id,
+                key=idem_key,
+                payload_hash=payload_hash,
+                response_payload=response,
+            )
+        return response
     except TradeError as exc:
         return _trade_error_response(exc)
 
@@ -938,9 +1355,22 @@ async def api_trade_negotiation_start(req: TradeNegotiationStartRequest):
 @router.post("/api/trade/negotiation/open")
 async def api_trade_negotiation_open(req: TradeNegotiationOpenRequest):
     try:
+        idem_key = _normalize_idempotency_key(getattr(req, "idempotency_key", None))
         team_id = str(req.team_id or "").upper().strip()
         if not team_id:
             raise TradeError("NEGOTIATION_BAD_QUERY", "team_id is required")
+
+        scope = "negotiation-open"
+        payload_hash = _hash_payload({"session_id": req.session_id, "team_id": team_id})
+        replay = _idempotency_replay_guard(
+            scope=scope,
+            session_id=str(req.session_id),
+            team_id=team_id,
+            key=idem_key,
+            payload_hash=payload_hash,
+        )
+        if isinstance(replay, dict):
+            return replay
 
         session = negotiation_store.get_session(req.session_id)
         owner_team_id = str(session.get("user_team_id") or "").upper().strip()
@@ -982,17 +1412,50 @@ async def api_trade_negotiation_open(req: TradeNegotiationOpenRequest):
                 },
             )
 
-        result = negotiation_store.open_inbox_session(req.session_id)
+        result = negotiation_store.open_inbox_session(req.session_id, idempotency_key=idem_key)
         updated = result.get("session") if isinstance(result, dict) else None
         if not isinstance(updated, dict):
             updated = negotiation_store.get_session(req.session_id)
 
-        return {
+        db_path = state.get_db_path()
+        contract_violations: List[Dict[str, Any]] = []
+        if isinstance(updated.get("last_offer"), dict):
+            canonical_offer, violations = _canonicalize_offer_payload_for_response(
+                updated["last_offer"],
+                session_id=str(updated.get("session_id") or req.session_id),
+                endpoint="/api/trade/negotiation/open:last_offer",
+                db_path=db_path,
+            )
+            updated["last_offer"] = canonical_offer
+            contract_violations.extend(violations)
+        if isinstance(updated.get("draft_deal"), dict):
+            canonical_draft, violations = _canonicalize_offer_payload_for_response(
+                updated["draft_deal"],
+                session_id=str(updated.get("session_id") or req.session_id),
+                endpoint="/api/trade/negotiation/open:draft_deal",
+                db_path=db_path,
+            )
+            updated["draft_deal"] = canonical_draft
+            contract_violations.extend(violations)
+
+        response = {
             "ok": True,
             "session": updated,
             "opened": True,
             "idempotent": bool((result or {}).get("idempotent")) if isinstance(result, dict) else False,
+            "contract_violations": contract_violations,
         }
+        if idem_key:
+            response["idempotency_key"] = idem_key
+            _store_idempotency_response(
+                scope=scope,
+                session_id=str(req.session_id),
+                team_id=team_id,
+                key=idem_key,
+                payload_hash=payload_hash,
+                response_payload=response,
+            )
+        return response
     except TradeError as exc:
         return _trade_error_response(exc)
 
@@ -1000,9 +1463,22 @@ async def api_trade_negotiation_open(req: TradeNegotiationOpenRequest):
 @router.post("/api/trade/negotiation/reject")
 async def api_trade_negotiation_reject(req: TradeNegotiationRejectRequest):
     try:
+        idem_key = _normalize_idempotency_key(getattr(req, "idempotency_key", None))
         team_id = str(req.team_id or "").upper().strip()
         if not team_id:
             raise TradeError("NEGOTIATION_BAD_QUERY", "team_id is required")
+
+        scope = "negotiation-reject"
+        payload_hash = _hash_payload({"session_id": req.session_id, "team_id": team_id, "reason": req.reason})
+        replay = _idempotency_replay_guard(
+            scope=scope,
+            session_id=str(req.session_id),
+            team_id=team_id,
+            key=idem_key,
+            payload_hash=payload_hash,
+        )
+        if isinstance(replay, dict):
+            return replay
 
         session = negotiation_store.get_session(req.session_id)
         owner_team_id = str(session.get("user_team_id") or "").upper().strip()
@@ -1013,12 +1489,12 @@ async def api_trade_negotiation_reject(req: TradeNegotiationRejectRequest):
                 {"session_id": str(req.session_id), "team_id": team_id, "owner_team_id": owner_team_id or None},
             )
 
-        result = negotiation_store.close_as_rejected(req.session_id, reason=req.reason)
+        result = negotiation_store.close_as_rejected(req.session_id, reason=req.reason, idempotency_key=idem_key)
         updated = result.get("session") if isinstance(result, dict) else None
         if not isinstance(updated, dict):
             updated = negotiation_store.get_session(req.session_id)
 
-        return {
+        response = {
             "ok": True,
             "session_id": str(updated.get("session_id") or req.session_id),
             "status": str(updated.get("status") or "CLOSED").upper(),
@@ -1026,6 +1502,17 @@ async def api_trade_negotiation_reject(req: TradeNegotiationRejectRequest):
             "rejected": True,
             "idempotent": bool((result or {}).get("idempotent")) if isinstance(result, dict) else False,
         }
+        if idem_key:
+            response["idempotency_key"] = idem_key
+            _store_idempotency_response(
+                scope=scope,
+                session_id=str(req.session_id),
+                team_id=team_id,
+                key=idem_key,
+                payload_hash=payload_hash,
+                response_payload=response,
+            )
+        return response
     except TradeError as exc:
         return _trade_error_response(exc)
 
@@ -1033,9 +1520,43 @@ async def api_trade_negotiation_reject(req: TradeNegotiationRejectRequest):
 @router.post("/api/trade/negotiation/commit")
 async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
     try:
+        idem_key = _normalize_idempotency_key(getattr(req, "idempotency_key", None))
+        scope = "negotiation-commit"
+        payload_hash = _hash_payload({
+            "session_id": req.session_id,
+            "deal": req.deal,
+            "offer_privacy": getattr(req, "offer_privacy", None),
+            "expose_to_media": bool(getattr(req, "expose_to_media", False)),
+        })
         in_game_date = state.get_current_date_as_date()
         db_path = state.get_db_path()
         session = negotiation_store.get_session(req.session_id)
+        owner_team_id = str(session.get("user_team_id") or "").upper().strip()
+
+        replay = _idempotency_replay_guard(
+            scope=scope,
+            session_id=str(req.session_id),
+            team_id=owner_team_id,
+            key=idem_key,
+            payload_hash=payload_hash,
+        )
+        if isinstance(replay, dict):
+            return replay
+
+        def _finalize_commit_response(payload: Dict[str, Any]) -> Dict[str, Any]:
+            out = dict(payload or {})
+            out.setdefault("idempotent", False)
+            if idem_key:
+                out["idempotency_key"] = idem_key
+                _store_idempotency_response(
+                    scope=scope,
+                    session_id=str(req.session_id),
+                    team_id=owner_team_id,
+                    key=idem_key,
+                    payload_hash=payload_hash,
+                    response_payload=out,
+                )
+            return out
 
         idempotent_payload = _ensure_session_ready_for_commit(
             session,
@@ -1043,7 +1564,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
             today=in_game_date,
         )
         if isinstance(idempotent_payload, dict):
-            return idempotent_payload
+            return _finalize_commit_response(idempotent_payload)
 
         deal = canonicalize_deal(parse_deal(req.deal))
         team_ids = {session["user_team_id"].upper(), session["other_team_id"].upper()}
@@ -1100,6 +1621,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                         req.session_id,
                         deal_id=str(committed["deal_id"]),
                         expires_at=committed.get("expires_at"),
+                        idempotency_key=idem_key,
                     )
 
                     fast_decision = DealDecision(
@@ -1142,7 +1664,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                     except Exception:
                         pass
 
-                    return {
+                    return _finalize_commit_response({
                         "ok": True,
                         "accepted": True,
                         "fast_accept": True,
@@ -1154,7 +1676,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                         "ai_evaluation": fast_eval,
                         "offer_privacy": offer_privacy,
                         "leak_status": leak_status,
-                    }
+                    })
         except Exception:
             # Fast-accept should never crash the commit flow.
             pass
@@ -1189,20 +1711,17 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
 
         # Record the latest offer evaluation in-session (do NOT overwrite last_counter).
         # - last_counter is reserved for the actual counter deal payload (for fast-accept).
-        try:
-            negotiation_store.set_last_offer(
-                req.session_id,
-                {
-                    "offer": deal_serialized,
-                    "ai_verdict": to_jsonable(decision.verdict),
-                    "ai_decision": to_jsonable(decision),
-                    "ai_evaluation": eval_summary,
-                    "offer_privacy": offer_privacy,
-                    "leak_status": leak_status,
-                },
-            )
-        except Exception:
-            pass
+        negotiation_store.set_last_offer(
+            req.session_id,
+            {
+                "offer": deal_serialized,
+                "ai_verdict": to_jsonable(decision.verdict),
+                "ai_decision": to_jsonable(decision),
+                "ai_evaluation": eval_summary,
+                "offer_privacy": offer_privacy,
+                "leak_status": leak_status,
+            },
+        )
 
         # Offer privacy effects (market-level, never mutate DB SSOT)
         leaked_player_ids: List[str] = []
@@ -1367,8 +1886,9 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                 req.session_id,
                 deal_id=str(committed["deal_id"]),
                 expires_at=committed.get("expires_at"),
+                idempotency_key=idem_key,
             )
-            return {
+            return _finalize_commit_response({
                 "ok": True,
                 "accepted": True,
                 "deal_id": committed["deal_id"],
@@ -1379,7 +1899,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                 "ai_evaluation": eval_summary,
                 "offer_privacy": offer_privacy,
                 "leak_status": leak_status,
-            }
+            })
 
         # ------------------------------------------------------------------
         # COUNTER: build an actual counter proposal (NBA-like minimal edits)
@@ -1455,7 +1975,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
 
                 # Response: counter details are embedded in ai_decision.counter (SSOT).
 
-                return {
+                return _finalize_commit_response({
                     "ok": True,
                     "accepted": False,
                     "counter_unimplemented": False,
@@ -1465,7 +1985,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                     "ai_evaluation": eval_summary,
                     "offer_privacy": offer_privacy,
                     "leak_status": leak_status,
-                }
+                })
 
             # If we couldn't build a legal/acceptable counter, fall back conservatively to REJECT.
             decision = DealDecision(
@@ -1511,7 +2031,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
         except Exception:
             pass
 
-        return {
+        return _finalize_commit_response({
             "ok": True,
             "accepted": False,
             "counter_unimplemented": False,
@@ -1519,9 +2039,9 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
             "ai_verdict": to_jsonable(decision.verdict),
             "ai_decision": to_jsonable(decision),
             "ai_evaluation": eval_summary,
-                        "offer_privacy": offer_privacy,
-                        "leak_status": leak_status,
-        }
+            "offer_privacy": offer_privacy,
+            "leak_status": leak_status,
+        })
     except TradeError as exc:
         return _trade_error_response(exc)
 
