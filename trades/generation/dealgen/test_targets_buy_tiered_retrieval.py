@@ -27,6 +27,7 @@ class _TickCtxStub:
                 cooldown_active=False,
                 cap_space=30_000_000,
                 deadline_pressure=self._deadline_pressure,
+                apron_status="OVER_CAP",
             ),
             needs=[],
             time_horizon="RE_TOOL",
@@ -297,6 +298,39 @@ class BuyTieredRetrievalTests(unittest.TestCase):
 
         self.assertEqual(out[0].player_id, "fit_need")
 
+
+    def test_contract_gap_affects_rank_without_direct_salary_term(self):
+        refs = [
+            IncomingPlayerRef(
+                "good_contract", "LAL", "WING", 0.8, 20.0, 20.0, 3.0, 26.0,
+                basketball_total=22.0,
+                contract_gap_cap_share=0.08,
+            ),
+            IncomingPlayerRef(
+                "bad_contract", "NYK", "WING", 0.8, 20.0, 20.0, 3.0, 26.0,
+                basketball_total=22.0,
+                contract_gap_cap_share=-0.08,
+            ),
+        ]
+
+        cfg = DealGeneratorConfig(
+            buy_target_listed_min_quota=0,
+            buy_target_non_listed_base_quota=2,
+            buy_target_contract_base_weight=0.35,
+            buy_target_pre_score_contract_weight=0.20,
+        )
+
+        out = select_targets_buy(
+            "BOS",
+            _TickCtxStub(deadline_pressure=0.5, urgency=0.5),
+            self._catalog(refs),
+            cfg,
+            budget=self._budget(max_targets=2),
+            rng=random.Random(9),
+            banned_players=set(),
+        )
+
+        self.assertEqual(out[0].player_id, "good_contract")
 
 
 if __name__ == "__main__":

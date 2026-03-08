@@ -172,8 +172,33 @@ class DealGeneratorConfig:
     buy_target_need_mismatch_floor: float = -0.20
     buy_target_market_weight: float = 0.30
     buy_target_fit_weight: float = 0.45
-    buy_target_salary_penalty_weight: float = 0.20
-    buy_target_salary_penalty_cap: float = 0.35
+
+    # --- buy ranking: contract-aware replacement (salary direct penalty removed)
+    buy_target_player_core_weight_fit: float = 0.50
+    buy_target_player_core_weight_market: float = 0.35
+    buy_target_player_core_weight_need: float = 0.35
+
+    buy_target_contract_gap_softness_cap_share: float = 0.060
+    buy_target_contract_base_weight: float = 0.30
+
+    buy_target_contract_apron_mult_below_cap: float = 0.55
+    buy_target_contract_apron_mult_over_cap: float = 0.90
+    buy_target_contract_apron_mult_above_1st: float = 1.25
+    buy_target_contract_apron_mult_above_2nd: float = 1.70
+
+    buy_target_contract_posture_mult_aggressive_buy: float = 1.10
+    buy_target_contract_posture_mult_soft_buy: float = 1.00
+    buy_target_contract_posture_mult_stand_pat: float = 0.90
+    buy_target_contract_posture_mult_soft_sell: float = 0.70
+    buy_target_contract_posture_mult_sell: float = 0.60
+
+    buy_target_contract_deadline_mult_min: float = 0.90
+    buy_target_contract_deadline_mult_max: float = 1.15
+
+    buy_target_contract_team_sensitivity_min: float = 0.35
+    buy_target_contract_team_sensitivity_max: float = 2.20
+
+    buy_target_pre_score_contract_weight: float = 0.18
 
     # --- proactive listing controls (AI)
     ai_proactive_listing_enabled: bool = True

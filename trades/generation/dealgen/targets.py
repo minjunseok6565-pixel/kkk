@@ -31,6 +31,15 @@ def _clamp01(x: Any) -> float:
     return xf
 
 
+def _clamp(x: Any, lo: float, hi: float) -> float:
+    xf = _safe_float(x, lo)
+    if xf <= lo:
+        return float(lo)
+    if xf >= hi:
+        return float(hi)
+    return float(xf)
+
+
 def _parse_iso_ymd(value: Any) -> Optional[date]:
     if value is None:
         return None
@@ -155,14 +164,68 @@ def _listing_interest_boost(
     return min(max(0.0, interest_boost), max(0.0, cap))
 
 
-def _cheap_pre_score(ref: IncomingPlayerRef, need_similarity: float, config: DealGeneratorConfig) -> float:
-    market_norm = _clamp01(float(getattr(ref, "market_total", 0.0) or 0.0) / 60.0)
-    salary_norm = _clamp01(float(getattr(ref, "salary_m", 0.0) or 0.0) / 60.0)
-    salary_soft_penalty = min(
-        max(0.0, float(getattr(config, "buy_target_salary_penalty_cap", 0.35) or 0.35)),
-        max(0.0, float(getattr(config, "buy_target_salary_penalty_weight", 0.2) or 0.2)) * salary_norm,
+def _contract_gap_score(gap_cap_share: float, config: DealGeneratorConfig) -> float:
+    soft = max(0.005, float(getattr(config, "buy_target_contract_gap_softness_cap_share", 0.060) or 0.060))
+    return float(math.tanh(float(gap_cap_share) / soft))
+
+
+def _team_contract_sensitivity(team_situation: Any, config: DealGeneratorConfig) -> float:
+    constraints = getattr(team_situation, "constraints", None)
+    apron_status = str(getattr(constraints, "apron_status", "OVER_CAP") or "OVER_CAP").upper()
+    posture = str(getattr(team_situation, "trade_posture", "STAND_PAT") or "STAND_PAT").upper()
+    deadline_pressure = _clamp01(getattr(constraints, "deadline_pressure", 0.0))
+
+    apron_mult = {
+        "BELOW_CAP": float(getattr(config, "buy_target_contract_apron_mult_below_cap", 0.55) or 0.55),
+        "OVER_CAP": float(getattr(config, "buy_target_contract_apron_mult_over_cap", 0.90) or 0.90),
+        "ABOVE_1ST_APRON": float(getattr(config, "buy_target_contract_apron_mult_above_1st", 1.25) or 1.25),
+        "ABOVE_2ND_APRON": float(getattr(config, "buy_target_contract_apron_mult_above_2nd", 1.70) or 1.70),
+    }.get(apron_status, float(getattr(config, "buy_target_contract_apron_mult_over_cap", 0.90) or 0.90))
+
+    posture_mult = {
+        "AGGRESSIVE_BUY": float(getattr(config, "buy_target_contract_posture_mult_aggressive_buy", 1.10) or 1.10),
+        "SOFT_BUY": float(getattr(config, "buy_target_contract_posture_mult_soft_buy", 1.00) or 1.00),
+        "STAND_PAT": float(getattr(config, "buy_target_contract_posture_mult_stand_pat", 0.90) or 0.90),
+        "SOFT_SELL": float(getattr(config, "buy_target_contract_posture_mult_soft_sell", 0.70) or 0.70),
+        "SELL": float(getattr(config, "buy_target_contract_posture_mult_sell", 0.60) or 0.60),
+    }.get(posture, float(getattr(config, "buy_target_contract_posture_mult_stand_pat", 0.90) or 0.90))
+
+    d_min = float(getattr(config, "buy_target_contract_deadline_mult_min", 0.90) or 0.90)
+    d_max = float(getattr(config, "buy_target_contract_deadline_mult_max", 1.15) or 1.15)
+    deadline_mult = d_min + (d_max - d_min) * deadline_pressure
+
+    sens = float(apron_mult) * float(posture_mult) * float(deadline_mult)
+    s_min = float(getattr(config, "buy_target_contract_team_sensitivity_min", 0.35) or 0.35)
+    s_max = float(getattr(config, "buy_target_contract_team_sensitivity_max", 2.20) or 2.20)
+    return _clamp(sens, s_min, s_max)
+
+
+def _player_core_score(ref: IncomingPlayerRef, need_similarity: float, config: DealGeneratorConfig) -> float:
+    fit = _clamp01(getattr(ref, "tag_strength", 0.0))
+    basketball_total = float(getattr(ref, "basketball_total", 0.0) or 0.0)
+    basketball_norm = _clamp01((basketball_total + 15.0) / 45.0)
+
+    w_fit = max(0.0, float(getattr(config, "buy_target_player_core_weight_fit", 0.50) or 0.50))
+    w_market = max(0.0, float(getattr(config, "buy_target_player_core_weight_market", 0.35) or 0.35))
+    w_need = max(0.0, float(getattr(config, "buy_target_player_core_weight_need", 0.35) or 0.35))
+
+    need_term = max(
+        float(getattr(config, "buy_target_need_mismatch_floor", -0.2) or -0.2),
+        w_need * (_clamp01(need_similarity) - 0.5),
     )
-    return 0.55 * market_norm + 0.45 * _clamp01(need_similarity) - salary_soft_penalty
+
+    return float((w_fit * fit) + (w_market * basketball_norm) + need_term)
+
+
+def _cheap_pre_score(ref: IncomingPlayerRef, need_similarity: float, config: DealGeneratorConfig) -> float:
+    basketball_total = float(getattr(ref, "basketball_total", 0.0) or 0.0)
+    basketball_norm = _clamp01((basketball_total + 15.0) / 45.0)
+    core_pre = 0.62 * basketball_norm + 0.38 * _clamp01(need_similarity)
+
+    gap = float(getattr(ref, "contract_gap_cap_share", 0.0) or 0.0)
+    contract_pre_w = float(getattr(config, "buy_target_pre_score_contract_weight", 0.18) or 0.18)
+    contract_pre = contract_pre_w * _contract_gap_score(gap, config)
+    return float(core_pre + contract_pre)
 
 
 def _final_rank(
@@ -170,27 +233,19 @@ def _final_rank(
     ref: IncomingPlayerRef,
     need_similarity: float,
     listing_boost: float,
+    buyer_ts: Any,
     config: DealGeneratorConfig,
     rng: random.Random,
 ) -> float:
-    fit_norm = _clamp01(getattr(ref, "tag_strength", 0.0))
-    market_norm = _clamp01(float(getattr(ref, "market_total", 0.0) or 0.0) / 60.0)
-    salary_norm = _clamp01(float(getattr(ref, "salary_m", 0.0) or 0.0) / 60.0)
+    player_core = _player_core_score(ref, need_similarity, config)
 
-    w_fit = max(0.0, float(getattr(config, "buy_target_fit_weight", 0.45) or 0.45))
-    w_market = max(0.0, float(getattr(config, "buy_target_market_weight", 0.30) or 0.30))
+    contract_gap = float(getattr(ref, "contract_gap_cap_share", 0.0) or 0.0)
+    contract_score = _contract_gap_score(contract_gap, config)
+    team_sens = _team_contract_sensitivity(buyer_ts, config)
+    contract_base_w = float(getattr(config, "buy_target_contract_base_weight", 0.30) or 0.30)
+    contract_term = contract_base_w * contract_score * team_sens
 
-    salary_penalty = min(
-        max(0.0, float(getattr(config, "buy_target_salary_penalty_cap", 0.35) or 0.35)),
-        max(0.0, float(getattr(config, "buy_target_salary_penalty_weight", 0.2) or 0.2)) * salary_norm,
-    )
-
-    need_bonus = max(
-        float(getattr(config, "buy_target_need_mismatch_floor", -0.2) or -0.2),
-        max(0.0, float(getattr(config, "buy_target_need_weight_scale", 0.55) or 0.55)) * (_clamp01(need_similarity) - 0.5),
-    )
-
-    rank = w_fit * fit_norm + w_market * market_norm - salary_penalty + need_bonus + max(0.0, float(listing_boost or 0.0))
+    rank = player_core + contract_term + max(0.0, float(listing_boost or 0.0))
     rank += rng.random() * 0.01
     return float(rank)
 
@@ -418,6 +473,7 @@ def select_targets_buy(
             ref=ref,
             need_similarity=float(row.get("need_similarity", 0.0) or 0.0),
             listing_boost=float(row.get("listing_boost", 0.0) or 0.0),
+            buyer_ts=buyer_ts,
             config=config,
             rng=rng,
         )

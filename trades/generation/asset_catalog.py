@@ -57,6 +57,7 @@ from ..valuation.market_pricing import MarketPricer, MarketPricingConfig
 from ..valuation.env import ValuationEnv
 from ..valuation.data_context import contract_snapshot_from_dict
 from ..valuation.types import (
+    MarketValuation,
     PlayerSnapshot,
     PickSnapshot,
     SwapSnapshot,
@@ -276,6 +277,11 @@ class IncomingPlayerRef:
     salary_m: float
     remaining_years: float
     age: Optional[float]
+    basketball_total: float = 0.0
+    contract_total: float = 0.0
+    contract_gap_cap_share: float = 0.0
+    expected_cap_share_avg: float = 0.0
+    actual_cap_share_avg: float = 0.0
     # multi-tag supply profile for need-similarity scoring (tag, strength in [0,1])
     supply_items: Tuple[Tuple[str, float], ...] = tuple()
 
@@ -379,15 +385,78 @@ def _lock_info_for_asset_key(
     return LockInfo(is_locked=True, expires_at=expires_at_iso, deal_id=str(deal_id) if deal_id else None)
 
 
+def _extract_player_value_breakdown(mv: MarketValuation) -> Dict[str, float]:
+    out = {
+        "basketball_total": 0.0,
+        "contract_total": 0.0,
+        "contract_gap_cap_share": 0.0,
+        "expected_cap_share_avg": 0.0,
+        "actual_cap_share_avg": 0.0,
+    }
+
+    meta = mv.meta if isinstance(getattr(mv, "meta", None), Mapping) else {}
+    vb = meta.get("value_breakdown") if isinstance(meta.get("value_breakdown"), Mapping) else {}
+    basket = vb.get("basketball") if isinstance(vb.get("basketball"), Mapping) else {}
+    contract = vb.get("contract") if isinstance(vb.get("contract"), Mapping) else {}
+    out["basketball_total"] = float(_safe_float(basket.get("total"), 0.0) or 0.0)
+    out["contract_total"] = float(_safe_float(contract.get("total"), 0.0) or 0.0)
+
+    contract_rows: Sequence[Mapping[str, Any]] = tuple()
+    for st in tuple(getattr(mv, "steps", tuple()) or tuple()):
+        if str(getattr(st, "code", "") or "") != "CONTRACT_SURPLUS_DELTA":
+            continue
+        st_meta = getattr(st, "meta", None)
+        if not isinstance(st_meta, Mapping):
+            continue
+        rows = st_meta.get("rows")
+        if isinstance(rows, Sequence):
+            contract_rows = tuple(r for r in rows if isinstance(r, Mapping))
+            break
+
+    if not contract_rows:
+        return out
+
+    w_sum = 0.0
+    gap_sum = 0.0
+    expected_sum = 0.0
+    actual_sum = 0.0
+
+    for r in contract_rows:
+        cap_y = float(_safe_float(r.get("cap"), 0.0) or 0.0)
+        if cap_y <= 0.0:
+            continue
+        fair_salary = float(_safe_float(r.get("fair_salary"), 0.0) or 0.0)
+        actual_salary = float(_safe_float(r.get("actual_salary"), 0.0) or 0.0)
+        disc = float(_safe_float(r.get("disc"), 0.0) or 0.0)
+        w = max(0.35, disc)
+
+        expected_cs = fair_salary / cap_y
+        actual_cs = actual_salary / cap_y
+        gap_cs = expected_cs - actual_cs
+
+        w_sum += w
+        expected_sum += expected_cs * w
+        actual_sum += actual_cs * w
+        gap_sum += gap_cs * w
+
+    if w_sum <= 0.0:
+        return out
+
+    out["expected_cap_share_avg"] = expected_sum / w_sum
+    out["actual_cap_share_avg"] = actual_sum / w_sum
+    out["contract_gap_cap_share"] = gap_sum / w_sum
+    return out
+
+
 def _market_summary_for_player(
     pricer: MarketPricer,
     snap: PlayerSnapshot,
     *,
     env: Optional[ValuationEnv] = None,
-) -> MarketValueSummary:
+) -> Tuple[MarketValueSummary, Dict[str, float]]:
     a = PlayerAsset(kind="player", player_id=snap.player_id, to_team=None)
     mv = pricer.price_snapshot(snap, asset_key=_asset_key(a), env=env)
-    return MarketValueSummary.from_components(mv.value)
+    return MarketValueSummary.from_components(mv.value), _extract_player_value_breakdown(mv)
 
 
 def _market_summary_for_pick(
@@ -577,6 +646,7 @@ def build_trade_asset_catalog(
 
     # Accumulate all eligible player candidates for league-wide BUY incoming index.
     incoming_all_players_by_id: Dict[str, IncomingPlayerRef] = {}
+    incoming_player_value_by_id: Dict[str, Dict[str, float]] = {}
 
     # Precompute for all teams to keep deterministic behavior.
     for tid in team_ids:
@@ -674,7 +744,7 @@ def build_trade_asset_catalog(
                 meta={},
             )
 
-            market = _market_summary_for_player(pricer, snap, env=env)
+            market, value_breakdown = _market_summary_for_player(pricer, snap, env=env)
             supply = fit_engine.compute_player_supply_vector(snap)
             fit_score, _, _ = fit_engine.score_fit(dc.need_map or {}, supply)
             top_tags = _compute_top_tags(supply)
@@ -714,6 +784,7 @@ def build_trade_asset_catalog(
                 buckets=(),
             )
             players[pid] = cand
+            incoming_player_value_by_id[pid] = dict(value_breakdown)
             per_team_candidates.append(cand)
 
         # --- Compute per-team bucket memberships
@@ -1036,6 +1107,11 @@ def build_trade_asset_catalog(
                 salary_m=float(c.salary_m),
                 remaining_years=float(c.remaining_years),
                 age=c.snap.age,
+                basketball_total=float((incoming_player_value_by_id.get(c.player_id) or {}).get("basketball_total", 0.0) or 0.0),
+                contract_total=float((incoming_player_value_by_id.get(c.player_id) or {}).get("contract_total", 0.0) or 0.0),
+                contract_gap_cap_share=float((incoming_player_value_by_id.get(c.player_id) or {}).get("contract_gap_cap_share", 0.0) or 0.0),
+                expected_cap_share_avg=float((incoming_player_value_by_id.get(c.player_id) or {}).get("expected_cap_share_avg", 0.0) or 0.0),
+                actual_cap_share_avg=float((incoming_player_value_by_id.get(c.player_id) or {}).get("actual_cap_share_avg", 0.0) or 0.0),
                 supply_items=tuple(supply_items_t),
             )
             incoming_all_players_by_id[c.player_id] = all_ref

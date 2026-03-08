@@ -20,7 +20,12 @@ class _TickCtxStub:
     def get_team_situation(self, team_id: str):
         return SimpleNamespace(
             trade_posture="BUY",
-            constraints=SimpleNamespace(cooldown_active=False, cap_space=30_000_000),
+            constraints=SimpleNamespace(
+                cooldown_active=False,
+                cap_space=30_000_000,
+                apron_status="OVER_CAP",
+                deadline_pressure=0.0,
+            ),
             needs=[],
             time_horizon="RE_TOOL",
         )
@@ -253,6 +258,51 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         )
 
         self.assertGreaterEqual(len(candidates), 1)
+
+    def test_listing_boost_can_outweigh_negative_contract_gap_when_capped(self):
+        refs = [
+            IncomingPlayerRef(
+                "listed_neg", "LAL", "WING", 0.82, 18.0, 18.0, 3.0, 27.0,
+                basketball_total=22.0,
+                contract_gap_cap_share=-0.06,
+            ),
+            IncomingPlayerRef(
+                "plain_pos", "LAL", "WING", 0.82, 18.0, 18.0, 3.0, 27.0,
+                basketball_total=22.0,
+                contract_gap_cap_share=0.01,
+            ),
+        ]
+        trade_market = {
+            "listings": {
+                "listed_neg": {
+                    "player_id": "listed_neg",
+                    "team_id": "LAL",
+                    "status": "ACTIVE",
+                    "visibility": "PUBLIC",
+                    "priority": 1.0,
+                    "updated_at": "2026-02-10",
+                }
+            }
+        }
+
+        cfg = DealGeneratorConfig(
+            buy_target_listing_interest_boost_base=0.30,
+            buy_target_listing_interest_priority_scale=0.45,
+            buy_target_listing_interest_cap=0.90,
+            buy_target_contract_base_weight=0.25,
+        )
+
+        out = select_targets_buy(
+            "BOS",
+            _TickCtxStub(trade_market=trade_market),
+            self._catalog(refs),
+            cfg,
+            budget=self._budget(),
+            rng=random.Random(11),
+            banned_players=set(),
+        )
+
+        self.assertEqual(out[0].player_id, "listed_neg")
 
 
 if __name__ == "__main__":
