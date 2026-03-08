@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import math
 import random
 
 from typing import Dict, List, Optional, Set, Tuple
@@ -25,7 +26,7 @@ from .utils import (
     _count_players,
 )
 from .dedupe import dedupe_hash
-from .targets import select_targets_buy, select_targets_sell, select_buyers_for_sale_asset
+from .targets import select_targets_buy, select_targets_sell, select_buyers_for_sale_asset, _active_public_listing_meta_by_player
 from .skeletons import build_offer_skeletons_buy, build_offer_skeletons_sell, expand_variants
 from .repair import repair_until_valid
 from .scoring import evaluate_and_score, _proposal_from_cached_eval, _should_discard_prop
@@ -204,6 +205,45 @@ class DealGenerator:
         return proposals
 
 
+def _derive_buy_retrieval_budget_guard_config(
+    config: DealGeneratorConfig,
+    budget: DealGeneratorBudget,
+) -> DealGeneratorConfig:
+    """Shape BUY retrieval expansion knobs by current budget to avoid late-stage blowups."""
+    eval_cap = max(1, int(getattr(budget, "max_evaluations", 1) or 1))
+    val_cap = max(1, int(getattr(budget, "max_validations", 1) or 1))
+
+    # Baseline from default scaled budget neighborhood (~180 eval / ~360 val).
+    eval_scale = min(1.0, max(0.0, float(eval_cap) / 180.0))
+    val_scale = min(1.0, max(0.0, float(val_cap) / 360.0))
+    scale = min(eval_scale, val_scale)
+
+    tier2_enabled = bool(getattr(config, "buy_target_expand_tier2_enabled", True))
+    tier2_share = max(0.0, float(getattr(config, "buy_target_expand_tier2_budget_share", 0.35) or 0.0))
+    iter_cap = max(1, int(getattr(config, "buy_target_retrieval_iteration_cap", 1) or 1))
+    non_listed_bonus = max(0, int(getattr(config, "buy_target_non_listed_deadline_bonus_max", 0) or 0))
+
+    if scale <= 0.30:
+        tier2_enabled = False
+        tier2_share = 0.0
+    else:
+        tier2_share = tier2_share * scale
+
+    iter_floor = 48
+    iter_cap = max(iter_floor, int(round(iter_cap * (0.55 + 0.45 * scale))))
+    non_listed_bonus = max(1, int(round(non_listed_bonus * (0.55 + 0.45 * scale))))
+
+    return replace(
+        config,
+        buy_target_expand_tier2_enabled=bool(tier2_enabled),
+        buy_target_expand_tier2_budget_share=float(max(0.0, min(1.0, tier2_share))),
+        buy_target_retrieval_iteration_cap=int(iter_cap),
+        buy_target_non_listed_deadline_bonus_max=int(non_listed_bonus),
+    )
+
+
+
+
 # =============================================================================
 # Mode orchestrators
 # =============================================================================
@@ -267,20 +307,56 @@ def _generate_buy_mode(
     max_sweetener_trials_per_base = int(getattr(config, "sweetener_max_trials_per_base", 2))
     max_fit_swap_trials_per_base = int(getattr(config, "fit_swap_max_trials_per_base", 1))
 
+    retrieval_cfg = _derive_buy_retrieval_budget_guard_config(config, budget)
+
     targets = select_targets_buy(
         buyer_id,
         tick_ctx,
         catalog,
-        config,
+        retrieval_cfg,
         budget=budget,
         rng=rng,
         banned_players=banned_players,
     )
 
+    # debug/stat points for BUY retrieval shaping
+    stats.failures_by_kind["buy_retrieval_targets"] = int(len(targets))
+    stats.failures_by_kind["buy_retrieval_tier2_enabled"] = 1 if bool(getattr(retrieval_cfg, "buy_target_expand_tier2_enabled", True)) else 0
+    stats.failures_by_kind["buy_retrieval_iteration_cap"] = int(getattr(retrieval_cfg, "buy_target_retrieval_iteration_cap", 0) or 0)
+    stats.failures_by_kind["buy_retrieval_non_listed_bonus"] = int(getattr(retrieval_cfg, "buy_target_non_listed_deadline_bonus_max", 0) or 0)
+
+    listed_meta = {}
+    try:
+        listed_meta = {
+            str(pid): meta
+            for pid, meta in (_active_public_listing_meta_by_player(tick_ctx) or {}).items()
+            if isinstance(meta, dict)
+        }
+    except Exception:
+        listed_meta = {}
+
+    listed_count = 0
+    for t in targets:
+        m = listed_meta.get(str(getattr(t, "player_id", "") or "")) if listed_meta else None
+        if isinstance(m, dict) and str(m.get("team_id") or "").upper() == str(getattr(t, "from_team", "")).upper():
+            listed_count += 1
+    stats.failures_by_kind["buy_retrieval_listed_targets"] = int(listed_count)
+    stats.failures_by_kind["buy_retrieval_non_listed_targets"] = int(max(0, len(targets) - listed_count))
+
+    soft_val_stop = max(1, int(math.floor(float(budget.max_validations) * 0.92)))
+    soft_eval_stop = max(1, int(math.floor(float(budget.max_evaluations) * 0.92)))
+
     for t in targets:
         if len(proposals) >= pool_cap:
             break
         if stats.validations >= budget.max_validations or stats.evaluations >= budget.max_evaluations:
+            break
+
+        # Tier2 early-stop linkage: budget 임계치 근접 시 탐색을 조기 종료.
+        if (
+            stats.validations >= soft_val_stop or stats.evaluations >= soft_eval_stop
+        ) and len(proposals) >= max(1, int(max_results // 2)):
+            stats.bump_failure("buy_budget_soft_stop")
             break
 
         stats.targets_considered += 1

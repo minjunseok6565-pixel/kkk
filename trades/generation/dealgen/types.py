@@ -136,11 +136,6 @@ class DealGeneratorConfig:
     fit_swap_weights_win_now: Tuple[float, float, float] = (0.05, 0.70, 0.25)
     fit_swap_weights_neutral: Tuple[float, float, float] = (0.20, 0.60, 0.20)
 
-    # --- target selection / incoming pool
-    need_tags_max: int = 4
-    incoming_pool_per_tag: int = 60
-    incoming_use_cheap_pool: bool = True
-
     # --- target diversity / spam prevention (v2 absorption)
     # 동일 타깃(같은 선수)이 결과 상단에 반복 노출되는 것을 억제하기 위한 soft penalty.
     # v2는 core 단계에서 target_seen 카운트 기반으로 score를 감점한다.
@@ -157,6 +152,28 @@ class DealGeneratorConfig:
     buy_target_listing_interest_recency_half_life_days: float = 7.0
     buy_target_listing_interest_need_weight_scale: float = 0.25
     buy_target_listing_interest_cap: float = 0.85
+
+    # --- buy retrieval: tiered market scan (stage 1 foundation)
+    buy_target_listed_min_quota: int = 6
+    buy_target_listed_max_share: float = 0.75
+    buy_target_non_listed_base_quota: int = 8
+    buy_target_non_listed_deadline_bonus_max: int = 12
+
+    buy_target_max_teams_scanned_base: int = 8
+    buy_target_max_teams_scanned_deadline_bonus: int = 18
+    buy_target_max_players_scanned_base: int = 120
+    buy_target_max_players_scanned_deadline_bonus: int = 220
+
+    buy_target_expand_tier2_enabled: bool = True
+    buy_target_expand_tier2_budget_share: float = 0.35
+    buy_target_retrieval_iteration_cap: int = 400
+
+    buy_target_need_weight_scale: float = 0.55
+    buy_target_need_mismatch_floor: float = -0.20
+    buy_target_market_weight: float = 0.30
+    buy_target_fit_weight: float = 0.45
+    buy_target_salary_penalty_weight: float = 0.20
+    buy_target_salary_penalty_cap: float = 0.35
 
     # --- proactive listing controls (AI)
     ai_proactive_listing_enabled: bool = True

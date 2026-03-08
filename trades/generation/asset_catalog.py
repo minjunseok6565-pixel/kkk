@@ -277,6 +277,8 @@ class IncomingPlayerRef:
     salary_m: float
     remaining_years: float
     age: Optional[float]
+    # multi-tag supply profile for need-similarity scoring (tag, strength in [0,1])
+    supply_items: Tuple[Tuple[str, float], ...] = tuple()
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,8 +341,7 @@ class TradeAssetCatalog:
     trade_rules: Dict[str, Any]
 
     outgoing_by_team: Dict[str, TeamOutgoingCatalog]
-    incoming_by_need_tag: Dict[str, Tuple[IncomingPlayerRef, ...]]
-    incoming_cheap_by_need_tag: Dict[str, Tuple[IncomingPlayerRef, ...]]
+    incoming_all_players: Tuple[IncomingPlayerRef, ...]
 
     stepien: StepienHelper
 
@@ -494,8 +495,6 @@ def _outgoing_priority_for_posture(posture: str) -> Tuple[BucketId, ...]:
 def build_trade_asset_catalog(
     *,
     tick_ctx: Any,
-    incoming_top_n: int = 120,
-    incoming_cheap_n: int = 120,
     bucket_caps_override: Optional[Dict[str, int]] = None,
     allow_locked_by_deal_id: Optional[str] = None,
 ) -> TradeAssetCatalog:
@@ -584,9 +583,8 @@ def build_trade_asset_catalog(
     # --- Build outgoing catalogs per team
     outgoing_by_team: Dict[str, TeamOutgoingCatalog] = {}
 
-    # Accumulate all eligible player candidates for league-wide incoming indices.
-    incoming_refs_by_tag: Dict[str, List[IncomingPlayerRef]] = {}
-    incoming_cheap_refs_by_tag: Dict[str, List[IncomingPlayerRef]] = {}
+    # Accumulate all eligible player candidates for league-wide BUY incoming index.
+    incoming_all_players_by_id: Dict[str, IncomingPlayerRef] = {}
 
     # Precompute for all teams to keep deterministic behavior.
     for tid in team_ids:
@@ -1027,35 +1025,41 @@ def build_trade_asset_catalog(
                 d_ban = _parse_iso_date(c.recent_signing_banned_until)
                 if d_ban is not None and current_date < d_ban:
                     continue
-            # Index by top tags (>= threshold)
-            for tag in c.top_tags:
-                strength = float(c.supply.get(tag, 0.0) or 0.0)
-                if strength < _TOP_TAG_MIN:
+            # League-wide all-player index (BUY global retrieval source)
+            best_tag = ""
+            best_strength = 0.0
+            try:
+                supply_items = [(str(k), float(v or 0.0)) for k, v in (c.supply or {}).items()]
+            except Exception:
+                supply_items = []
+            if supply_items:
+                supply_items.sort(key=lambda kv: (-kv[1], kv[0]))
+                best_tag = str(supply_items[0][0])
+                best_strength = float(supply_items[0][1])
+            supply_items_t: List[Tuple[str, float]] = []
+            for k, v in supply_items:
+                vv = _safe_float(v, 0.0)
+                if vv <= 0.0:
                     continue
-                ref = IncomingPlayerRef(
-                    player_id=c.player_id,
-                    from_team=c.team_id,
-                    tag=tag,
-                    tag_strength=strength,
-                    market_total=float(c.market.total),
-                    salary_m=float(c.salary_m),
-                    remaining_years=float(c.remaining_years),
-                    age=c.snap.age,
-                )
-                incoming_refs_by_tag.setdefault(tag, []).append(ref)
-                incoming_cheap_refs_by_tag.setdefault(tag, []).append(ref)
+                supply_items_t.append((str(k), float(vv)))
 
-    # --- Finalize incoming indices (sort + cut)
-    incoming_by_need_tag: Dict[str, Tuple[IncomingPlayerRef, ...]] = {}
-    incoming_cheap_by_need_tag: Dict[str, Tuple[IncomingPlayerRef, ...]] = {}
+            all_ref = IncomingPlayerRef(
+                player_id=c.player_id,
+                from_team=c.team_id,
+                tag=best_tag,
+                tag_strength=best_strength,
+                market_total=float(c.market.total),
+                salary_m=float(c.salary_m),
+                remaining_years=float(c.remaining_years),
+                age=c.snap.age,
+                supply_items=tuple(supply_items_t),
+            )
+            incoming_all_players_by_id[c.player_id] = all_ref
 
-    for tag, refs in incoming_refs_by_tag.items():
-        refs.sort(key=lambda r: (-r.tag_strength, -r.market_total, -r.remaining_years, r.player_id))
-        incoming_by_need_tag[str(tag)] = tuple(refs[: max(0, int(incoming_top_n))])
 
-    for tag, refs in incoming_cheap_refs_by_tag.items():
-        refs.sort(key=lambda r: (-r.tag_strength, r.market_total, r.salary_m, r.player_id))
-        incoming_cheap_by_need_tag[str(tag)] = tuple(refs[: max(0, int(incoming_cheap_n))])
+    # --- Finalize league-wide incoming index
+    incoming_all_players: List[IncomingPlayerRef] = list(incoming_all_players_by_id.values())
+    incoming_all_players.sort(key=lambda r: (-r.market_total, r.salary_m, -r.remaining_years, r.player_id))
 
     return TradeAssetCatalog(
         db_path=db_path,
@@ -1064,7 +1068,6 @@ def build_trade_asset_catalog(
         draft_year=int(draft_year),
         trade_rules=dict(trade_rules),
         outgoing_by_team=outgoing_by_team,
-        incoming_by_need_tag=incoming_by_need_tag,
-        incoming_cheap_by_need_tag=incoming_cheap_by_need_tag,
+        incoming_all_players=tuple(incoming_all_players),
         stepien=stepien,
     )

@@ -130,6 +130,69 @@ def _estimate_team_payroll_after_dollars(
 
 
 
+def _smoothstep01(x: Any) -> float:
+    """Clamp to [0, 1] then apply smoothstep curve x*x*(3-2x)."""
+    try:
+        xf = float(x)
+    except Exception:
+        xf = 0.0
+    if xf <= 0.0:
+        return 0.0
+    if xf >= 1.0:
+        return 1.0
+    return xf * xf * (3.0 - 2.0 * xf)
+
+
+def _safe_norm(x: Any, lo: Any, hi: Any) -> float:
+    """Best-effort normalization to [0, 1]; degenerate ranges return 0."""
+    try:
+        xv = float(x)
+        lov = float(lo)
+        hiv = float(hi)
+    except Exception:
+        return 0.0
+    if hiv <= lov:
+        return 0.0
+    if xv <= lov:
+        return 0.0
+    if xv >= hiv:
+        return 1.0
+    return (xv - lov) / (hiv - lov)
+
+
+def compute_buy_retrieval_caps(team_situation: Any, cfg: DealGeneratorConfig) -> Dict[str, float]:
+    """Compute BUY retrieval intensity and dynamic scan caps (stage-1 shared helper)."""
+    try:
+        deadline = float(getattr(getattr(team_situation, "constraints", None), "deadline_pressure", 0.0) or 0.0)
+    except Exception:
+        deadline = 0.0
+    try:
+        urgency = float(getattr(team_situation, "urgency", 0.0) or 0.0)
+    except Exception:
+        urgency = 0.0
+
+    d = max(0.0, min(1.0, deadline))
+    u = max(0.0, min(1.0, urgency))
+    intensity = max(0.0, min(1.0, 0.65 * d + 0.35 * u))
+    shaped = _smoothstep01(intensity)
+
+    teams_cap = int(max(1, int(cfg.buy_target_max_teams_scanned_base) + round(float(cfg.buy_target_max_teams_scanned_deadline_bonus) * shaped)))
+    players_cap = int(max(1, int(cfg.buy_target_max_players_scanned_base) + round(float(cfg.buy_target_max_players_scanned_deadline_bonus) * shaped)))
+    non_listed_quota = int(max(0, int(cfg.buy_target_non_listed_base_quota) + round(float(cfg.buy_target_non_listed_deadline_bonus_max) * intensity)))
+
+    return {
+        "deadline_pressure": d,
+        "urgency": u,
+        "intensity": intensity,
+        "intensity_shaped": shaped,
+        "teams_cap": float(teams_cap),
+        "players_cap": float(players_cap),
+        "non_listed_quota": float(non_listed_quota),
+    }
+
+
+
+
 # -----------------------------------------------------------------------------
 # Cap space helpers (shared)
 # -----------------------------------------------------------------------------

@@ -53,8 +53,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
             swaps={},
         )
         return SimpleNamespace(
-            incoming_by_need_tag={"WING": tuple(refs)},
-            incoming_cheap_by_need_tag={"WING": tuple()},
+            incoming_all_players=tuple(refs),
             outgoing_by_team={"LAL": out_lal, "BOS": out_bos},
         )
 
@@ -147,8 +146,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
             swaps={},
         )
         catalog = SimpleNamespace(
-            incoming_by_need_tag={"WING": tuple(refs)},
-            incoming_cheap_by_need_tag={"WING": tuple()},
+            incoming_all_players=tuple(refs),
             outgoing_by_team={"LAL": out_lal, "BOS": self._catalog(refs).outgoing_by_team["BOS"]},
         )
         trade_market = {
@@ -188,8 +186,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
             swaps={},
         )
         catalog = SimpleNamespace(
-            incoming_by_need_tag={"WING": tuple(refs)},
-            incoming_cheap_by_need_tag={"WING": tuple()},
+            incoming_all_players=tuple(refs),
             outgoing_by_team={"LAL": out_lal, "BOS": self._catalog(refs).outgoing_by_team["BOS"]},
         )
 
@@ -227,8 +224,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
             swaps={},
         )
         catalog = SimpleNamespace(
-            incoming_by_need_tag={"WING": tuple(refs)},
-            incoming_cheap_by_need_tag={"WING": tuple()},
+            incoming_all_players=tuple(refs),
             outgoing_by_team={"LAL": out_lal, "BOS": out_bos},
         )
         listed_target = TargetCandidate(

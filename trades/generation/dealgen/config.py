@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .types import DealGeneratorConfig, DealGeneratorBudget
+from .utils import compute_buy_retrieval_caps
 
 # =============================================================================
 # Budget scaling
@@ -45,3 +46,22 @@ def _scale_budget(cfg: DealGeneratorConfig, team_situation: Any) -> DealGenerato
     )
 
 
+
+
+def _scale_buy_retrieval_limits(cfg: DealGeneratorConfig, team_situation: Any) -> dict[str, float]:
+    """Return deadline/urgency-shaped BUY retrieval limits for tiered candidate scan."""
+    caps = compute_buy_retrieval_caps(team_situation, cfg)
+
+    listed_min = max(0, int(getattr(cfg, "buy_target_listed_min_quota", 0) or 0))
+    listed_max_share = float(getattr(cfg, "buy_target_listed_max_share", 0.75) or 0.75)
+    if listed_max_share < 0.0:
+        listed_max_share = 0.0
+    elif listed_max_share > 1.0:
+        listed_max_share = 1.0
+
+    caps["listed_min_quota"] = float(listed_min)
+    caps["listed_max_share"] = float(listed_max_share)
+    caps["tier2_enabled"] = 1.0 if bool(getattr(cfg, "buy_target_expand_tier2_enabled", True)) else 0.0
+    caps["tier2_budget_share"] = max(0.0, min(1.0, float(getattr(cfg, "buy_target_expand_tier2_budget_share", 0.35) or 0.0)))
+    caps["retrieval_iteration_cap"] = float(max(1, int(getattr(cfg, "buy_target_retrieval_iteration_cap", 1) or 1)))
+    return caps
