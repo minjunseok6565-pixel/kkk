@@ -56,10 +56,9 @@
 
 ### 3-2. 1차(현행 데이터 기반) 계약부담 점수 설계
 - 후보 계산용 핵심값(이미 존재):
-  - `negative_money = max(0, salary_m - market.total)`
+  - `negative_money = max(0, actual_cap_share_avg - expected_cap_share_avg)`
+    (시장가치 `market.total`과 분리된 cap share 기반 순수 과지급 신호)
   - `years_factor = clamp01(remaining_years / Y_MAX)` (예: `Y_MAX=4`)
-  - `cap_gap_pressure = max(0, -contract_gap_cap_share)`  
-    (실제 급여 비중이 fair 대비 높은 케이스를 부담으로 해석)
   - `team_flex_pressure = 1 - signals.flexibility`
   - `expendability_proxy = surplus_score` (기존 fit 기반 보조 신호)
 
@@ -67,9 +66,8 @@
   - `bad_contract_score =`
     - `w1 * norm(negative_money)`
     - `+ w2 * years_factor`
-    - `+ w3 * norm(cap_gap_pressure)`
-    - `+ w4 * team_flex_pressure`
-    - `+ w5 * expendability_proxy`
+    - `+ w3 * team_flex_pressure`
+    - `+ w4 * expendability_proxy`
 
 ### 3-3. 진입 게이트(1차)
 - 필수 게이트:
@@ -77,7 +75,6 @@
 - 보조 게이트(아래 중 1개 이상):
   - `remaining_years >= 2` (또는 비-expiring)
   - `team_flex_pressure` 높음
-  - `cap_gap_pressure` 높음
 - 이후 기존처럼 점수 정렬 + posture cap 적용.
 
 ### 3-4. 2차 확장 후보
@@ -124,7 +121,7 @@
   - 선택: `RE_TOOL` 포함 여부는 실험 플래그로 점검
 - 선수 조건:
   - `market.now` 하한은 유지(품질 필터)
-  - `timeline_mismatch` 최소치 충족 필수
+  - `timeline_mismatch` 최소치 또는 (`age_decline_proxy` + `contract_window_risk`) 조합 충족
 - 결과:
   - “29세라서 자동 매각”이 아니라,
   - “팀 방향과 시계열이 어긋나는 가치 자산” 중심 선별.
@@ -189,7 +186,7 @@
   - "시장가치가 낮다"는 이유만으로 `FILLER_BAD_CONTRACT`에 들어가는 케이스가 있었음.
   - 그래서 싼 말단 벤치 자원이 "나쁜 계약"처럼 보이는 어색함이 발생.
 - 이후:
-  - "연봉 대비 과지급"이 먼저 확인되고,
+  - "적정 cap share 대비 실제 cap share 과지급"이 먼저 확인되고,
   - 여기에 "계약기간 부담" 또는 "팀 유연성 압박" 같은 맥락이 붙어야 진입.
 - 유저 체감:
   - 저가 자산은 주로 `FILLER_CHEAP` 쪽으로 남고,
