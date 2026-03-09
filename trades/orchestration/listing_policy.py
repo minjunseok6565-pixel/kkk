@@ -106,24 +106,19 @@ def _is_player_in_proactive_cooldown(
 _PROACTIVE_ALLOWED_BUCKETS: Tuple[str, ...] = (
     "VETERAN_SALE",
     "SURPLUS_EXPENDABLE",
-    "SURPLUS_LOW_FIT",
-    "SURPLUS_REDUNDANT",
     "FILLER_BAD_CONTRACT",
 )
 
 
 def _priority_signal(player: Any, *, config: Any, normalized: bool) -> float:
-    use_expendable = bool(getattr(config, "ai_use_expendable_priority_signals", False))
-    if use_expendable:
-        if not normalized:
-            raw = getattr(player, "raw_trade_block_score", None)
-            if raw is not None:
-                return float(raw)
-        norm = getattr(player, "trade_block_score", None)
-        if norm is not None:
-            return _clamp01(norm)
-    base = getattr(player, "surplus_score", 0.0)
-    return _clamp01(base) if normalized else float(_safe_float(base, 0.0))
+    if not normalized:
+        raw = getattr(player, "raw_trade_block_score", None)
+        if raw is not None:
+            return float(raw)
+    norm = getattr(player, "trade_block_score", None)
+    if norm is not None:
+        return _clamp01(norm) if normalized else float(norm)
+    return 0.0
 
 
 def _bucket_priority_key(player: Any, *, config: Any) -> Tuple[int, float]:
@@ -184,22 +179,12 @@ def _resolve_bucket_threshold(*, bucket: str, team_situation: Any, config: Any) 
     table = getattr(config, "ai_proactive_listing_bucket_thresholds", {}) or {}
     row = table.get(posture, {}) if isinstance(table, dict) else {}
     default_threshold = _safe_float(getattr(config, "ai_proactive_listing_threshold_default", 0.55), 0.55)
-    if isinstance(row, dict) and bucket == "SURPLUS_EXPENDABLE":
-        expendable_base = row.get("SURPLUS_EXPENDABLE")
-        if expendable_base is None:
-            legacy = [
-                _safe_float(row.get("SURPLUS_LOW_FIT"), default_threshold),
-                _safe_float(row.get("SURPLUS_REDUNDANT"), default_threshold),
-            ]
-            expendable_base = max(legacy) if legacy else default_threshold
-        base = _safe_float(expendable_base, default_threshold)
-    else:
-        base = _safe_float(
-            (row.get(bucket) if isinstance(row, dict) else None),
-            default_threshold,
-        )
+    base = _safe_float(
+        (row.get(bucket) if isinstance(row, dict) else None),
+        default_threshold,
+    )
 
-    if horizon == "WIN_NOW" and bucket in {"SURPLUS_LOW_FIT", "SURPLUS_REDUNDANT"}:
+    if horizon == "WIN_NOW" and bucket == "SURPLUS_EXPENDABLE":
         base += _safe_float(getattr(config, "ai_proactive_listing_threshold_horizon_win_now_delta", -0.03), -0.03)
     elif horizon == "REBUILD" and bucket == "VETERAN_SALE":
         base += _safe_float(getattr(config, "ai_proactive_listing_threshold_horizon_rebuild_delta", -0.05), -0.05)

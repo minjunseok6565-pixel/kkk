@@ -35,11 +35,11 @@ class BuyTargetListingInterestTests(unittest.TestCase):
     def _catalog(self, refs):
         out_lal = TeamOutgoingCatalog(
             team_id="LAL",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple(r.player_id for r in refs if r.from_team == "LAL")},
+            player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple(r.player_id for r in refs if r.from_team == "LAL")},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players={
-                r.player_id: SimpleNamespace(buckets=("SURPLUS_LOW_FIT",))
+                r.player_id: SimpleNamespace(buckets=("SURPLUS_EXPENDABLE",))
                 for r in refs if r.from_team == "LAL"
             },
             picks={},
@@ -47,11 +47,11 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         )
         out_bos = TeamOutgoingCatalog(
             team_id="BOS",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple(r.player_id for r in refs if r.from_team == "BOS")},
+            player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple(r.player_id for r in refs if r.from_team == "BOS")},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players={
-                r.player_id: SimpleNamespace(buckets=("SURPLUS_LOW_FIT",))
+                r.player_id: SimpleNamespace(buckets=("SURPLUS_EXPENDABLE",))
                 for r in refs if r.from_team == "BOS"
             },
             picks={},
@@ -143,7 +143,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         ]
         out_lal = TeamOutgoingCatalog(
             team_id="LAL",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple()},
+            player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple()},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players={"core1": SimpleNamespace(buckets=tuple())},
@@ -183,7 +183,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         refs = [IncomingPlayerRef("core2", "LAL", "WING", 0.8, 10.0, 8.0, 2.0, 26.0)]
         out_lal = TeamOutgoingCatalog(
             team_id="LAL",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple()},
+            player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple()},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players={"core2": SimpleNamespace(buckets=tuple())},
@@ -212,7 +212,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         refs = [IncomingPlayerRef("core1", "LAL", "WING", 0.8, 10.0, 8.0, 2.0, 26.0)]
         out_lal = TeamOutgoingCatalog(
             team_id="LAL",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple()},
+            player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple()},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players={"core1": SimpleNamespace(buckets=tuple(), return_ban_teams=tuple())},
@@ -221,7 +221,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         )
         out_bos = TeamOutgoingCatalog(
             team_id="BOS",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple()},
+            player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple()},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players={},

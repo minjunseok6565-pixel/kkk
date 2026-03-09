@@ -132,8 +132,6 @@ class CounterOfferConfig:
     player_sweetener_buckets: Tuple[str, ...] = (
         "FILLER_CHEAP",
         "SURPLUS_EXPENDABLE",
-        "SURPLUS_LOW_FIT",
-        "SURPLUS_REDUNDANT",
     )
 
     # Avoid proposing "major" players as sweeteners unless absolutely necessary.
