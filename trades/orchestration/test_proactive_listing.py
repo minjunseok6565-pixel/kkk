@@ -40,36 +40,42 @@ class ProactiveListingTests(unittest.TestCase):
             ai_proactive_listing_ttl_days_default=5,
             ai_proactive_listing_priority_base=0.45,
             ai_proactive_listing_priority_span=0.35,
+            ai_use_expendable_priority_signals=False,
             ai_proactive_listing_cadence="DAILY",
             ai_proactive_listing_anchor_weekday=0,
             ai_proactive_listing_threshold_enabled=True,
             ai_proactive_listing_threshold_default=0.55,
             ai_proactive_listing_bucket_thresholds={
                 "AGGRESSIVE_BUY": {
+                    "SURPLUS_EXPENDABLE": 0.66,
                     "SURPLUS_LOW_FIT": 0.30,
                     "SURPLUS_REDUNDANT": 0.35,
                     "FILLER_BAD_CONTRACT": 0.80,
                     "VETERAN_SALE": 0.90,
                 },
                 "SOFT_BUY": {
+                    "SURPLUS_EXPENDABLE": 0.62,
                     "SURPLUS_LOW_FIT": 0.38,
                     "SURPLUS_REDUNDANT": 0.42,
                     "FILLER_BAD_CONTRACT": 0.82,
                     "VETERAN_SALE": 0.92,
                 },
                 "STAND_PAT": {
+                    "SURPLUS_EXPENDABLE": 0.56,
                     "SURPLUS_LOW_FIT": 0.50,
                     "SURPLUS_REDUNDANT": 0.55,
                     "FILLER_BAD_CONTRACT": 0.86,
                     "VETERAN_SALE": 0.95,
                 },
                 "SOFT_SELL": {
+                    "SURPLUS_EXPENDABLE": 0.46,
                     "SURPLUS_LOW_FIT": 0.40,
                     "SURPLUS_REDUNDANT": 0.45,
                     "FILLER_BAD_CONTRACT": 0.70,
                     "VETERAN_SALE": 0.45,
                 },
                 "SELL": {
+                    "SURPLUS_EXPENDABLE": 0.40,
                     "SURPLUS_LOW_FIT": 0.32,
                     "SURPLUS_REDUNDANT": 0.38,
                     "FILLER_BAD_CONTRACT": 0.62,
@@ -370,6 +376,54 @@ class ProactiveListingTests(unittest.TestCase):
             trade_market=trade_market,
             today=date(2026, 2, 2),
             config=self._cfg(ai_proactive_listing_cadence="DAILY"),
+        )
+        self.assertEqual(listed, ["p1"])
+
+    def test_surplus_expendable_threshold_applies(self):
+        players = {
+            "p1": SimpleNamespace(
+                buckets=("SURPLUS_EXPENDABLE",),
+                lock=SimpleNamespace(is_locked=False),
+                recent_signing_banned_until=None,
+                surplus_score=0.10,
+                raw_trade_block_score=0.70,
+                trade_block_score=0.80,
+                is_expiring=False,
+            )
+        }
+        listed = apply_ai_proactive_listings(
+            team_id="LAL",
+            tick_ctx=self._tick_ctx(players, posture="SELL", player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
+            trade_market={"listings": {}, "events": []},
+            today=date(2026, 2, 2),
+            config=self._cfg(ai_use_expendable_priority_signals=True),
+        )
+        self.assertEqual(listed, ["p1"])
+
+    def test_surplus_expendable_threshold_fallback_to_legacy_max(self):
+        players = {
+            "p1": SimpleNamespace(
+                buckets=("SURPLUS_EXPENDABLE",),
+                lock=SimpleNamespace(is_locked=False),
+                recent_signing_banned_until=None,
+                surplus_score=0.50,
+                is_expiring=False,
+            )
+        }
+        cfg = self._cfg(
+            ai_proactive_listing_bucket_thresholds={
+                "SELL": {
+                    "SURPLUS_LOW_FIT": 0.42,
+                    "SURPLUS_REDUNDANT": 0.47,
+                }
+            }
+        )
+        listed = apply_ai_proactive_listings(
+            team_id="LAL",
+            tick_ctx=self._tick_ctx(players, posture="SELL", player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
+            trade_market={"listings": {}, "events": []},
+            today=date(2026, 2, 2),
+            config=cfg,
         )
         self.assertEqual(listed, ["p1"])
 

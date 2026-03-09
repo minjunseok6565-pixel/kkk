@@ -176,6 +176,7 @@ class LockInfo:
 BucketId = Literal[
     "FILLER_BAD_CONTRACT",
     "FILLER_CHEAP",
+    "SURPLUS_EXPENDABLE",
     "SURPLUS_LOW_FIT",
     "SURPLUS_REDUNDANT",
     "VETERAN_SALE",
@@ -206,6 +207,23 @@ class PlayerTradeCandidate:
     aggregation_banned_until: Optional[str]
     aggregation_solo_only: bool
     return_ban_teams: Tuple[str, ...]
+
+    fit_vs_peers: float = 0.0
+    misfit_peer: float = 0.0
+    redundancy_peer: float = 0.0
+    redundancy_peer_norm: float = 0.0
+    peer_cover: float = 0.0
+    dependence_risk: float = 0.0
+    core_proxy: float = 0.0
+    identity_risk_proxy: float = 0.0
+    minutes_squeeze_proxy: float = 0.0
+    contract_pressure: float = 0.0
+    raw_trade_block_score: float = 0.0
+    trade_block_score: float = 0.0
+    hard_protected: bool = False
+    expendable_gate_passed: bool = False
+    surplus_reason_flags: Tuple[str, ...] = field(default_factory=tuple)
+    surplus_protection_flags: Tuple[str, ...] = field(default_factory=tuple)
 
     buckets: Tuple[BucketId, ...] = field(default_factory=tuple)
 
@@ -358,6 +376,136 @@ class TradeAssetCatalog:
 # Thresholds / constants (deterministic)
 _TOP_TAG_MIN = 0.55
 _LOW_FIT_MAX = 0.45
+_REDUNDANCY_GATE = 0.52
+_REPLACEABLE_GATE = 0.58
+_SQUEEZE_GATE = 0.55
+_CONTRACT_GATE = 0.60
+_TRADE_BLOCK_SCORE_GATE_BY_POSTURE = {
+    "SELL": 0.48,
+    "SOFT_SELL": 0.52,
+    "STAND_PAT": 0.58,
+    "SOFT_BUY": 0.64,
+    "AGGRESSIVE_BUY": 0.68,
+}
+_PROTECTION_WEIGHT_BY_POSTURE = {
+    "SELL": 0.85,
+    "SOFT_SELL": 0.95,
+    "STAND_PAT": 1.00,
+    "SOFT_BUY": 1.10,
+    "AGGRESSIVE_BUY": 1.18,
+}
+
+
+def _clamp01(v: float) -> float:
+    return max(0.0, min(1.0, float(v)))
+
+
+def _compute_peer_signals(
+    *,
+    candidate: PlayerTradeCandidate,
+    need_map: Mapping[str, float],
+    team_supply_total: Mapping[str, float],
+    fit_engine: FitEngine,
+) -> Dict[str, float]:
+    eps = 1e-9
+    peer_supply_without_p: Dict[str, float] = {}
+    peer_need_map: Dict[str, float] = {}
+    supply = candidate.supply or {}
+    for tag in set(tuple(team_supply_total.keys()) + tuple(supply.keys()) + tuple((need_map or {}).keys())):
+        total_v = float(team_supply_total.get(tag, 0.0) or 0.0)
+        own_v = float(supply.get(tag, 0.0) or 0.0)
+        peer_supply_without_p[tag] = max(0.0, total_v - own_v)
+        peer_need_map[tag] = _clamp01(float(need_map.get(tag, 0.0) or 0.0) + own_v)
+
+    fit_vs_peers, _, _ = fit_engine.score_fit(peer_need_map, supply)
+    misfit_peer = 1.0 - float(fit_vs_peers)
+
+    redundancy_peer = 0.0
+    supply_sum = 0.0
+    cover_sum = 0.0
+    for tag, raw_v in supply.items():
+        v = float(raw_v or 0.0)
+        supply_sum += v
+        need_v = float(peer_need_map.get(tag, 0.0) or 0.0)
+        redundancy_peer += v * (1.0 - need_v)
+        cover_sum += min(v, float(peer_supply_without_p.get(tag, 0.0) or 0.0))
+    redundancy_peer_norm = float(redundancy_peer / (supply_sum + eps))
+    peer_cover = float(cover_sum / (supply_sum + eps))
+    dependence_risk = _clamp01(float(fit_vs_peers) - float(candidate.fit_vs_team))
+
+    return {
+        "fit_vs_peers": float(fit_vs_peers),
+        "misfit_peer": float(misfit_peer),
+        "redundancy_peer": float(redundancy_peer),
+        "redundancy_peer_norm": float(redundancy_peer_norm),
+        "peer_cover": float(peer_cover),
+        "dependence_risk": float(dependence_risk),
+    }
+
+
+def _compute_protection_signals(
+    *,
+    candidate: PlayerTradeCandidate,
+    team_candidates: Sequence[PlayerTradeCandidate],
+    team_supply_total: Mapping[str, float],
+    value_breakdown: Mapping[str, float],
+) -> Dict[str, float]:
+    basket_total = _safe_float(value_breakdown.get("basketball_total"), None)
+    gap_cap_share = _safe_float(value_breakdown.get("contract_gap_cap_share"), None)
+    expected_cap_share_avg = _safe_float(value_breakdown.get("expected_cap_share_avg"), None)
+    actual_cap_share_avg = _safe_float(value_breakdown.get("actual_cap_share_avg"), None)
+
+    if gap_cap_share is not None:
+        contract_pressure = _clamp01((-float(gap_cap_share)) / 0.06)
+    elif expected_cap_share_avg is not None and actual_cap_share_avg is not None:
+        contract_pressure = _clamp01((float(actual_cap_share_avg) - float(expected_cap_share_avg)) / 0.06)
+    else:
+        contract_pressure = 0.0
+
+    overlap_count = 0
+    own_top_tags = set(candidate.top_tags or tuple())
+    for c in team_candidates:
+        if c.player_id == candidate.player_id:
+            continue
+        if own_top_tags.intersection(set(c.top_tags or tuple())):
+            overlap_count += 1
+    minutes_squeeze_proxy = _clamp01((float(overlap_count) - 1.0) / 6.0)
+
+    ranked = sorted(
+        team_candidates,
+        key=lambda c: (-float(c.market.now if c.market.now is not None else c.market.total), c.player_id),
+    )
+    rank_now = 1
+    for idx, c in enumerate(ranked, start=1):
+        if c.player_id == candidate.player_id:
+            rank_now = idx
+            break
+    core_from_now = _clamp01(1.0 - float(rank_now - 1) / float(max(1, len(ranked) - 1)))
+    if basket_total is not None:
+        basketball_core = _clamp01((float(basket_total) + 15.0) / 45.0)
+        core_proxy = _clamp01(0.75 * core_from_now + 0.25 * basketball_core)
+    else:
+        core_proxy = core_from_now
+
+    identity_tags = sorted(
+        [(str(k), float(v or 0.0)) for k, v in (team_supply_total or {}).items()],
+        key=lambda t: (-t[1], t[0]),
+    )[:3]
+    identity_contrib_share = 0.0
+    for tag, team_total in identity_tags:
+        if team_total <= 0.0:
+            continue
+        identity_contrib_share += float(candidate.supply.get(tag, 0.0) or 0.0) / float(team_total)
+    identity_risk_proxy = _clamp01(identity_contrib_share)
+
+    timing_liquidity = 1.0 if bool(candidate.is_expiring) else 0.0
+    return {
+        "core_proxy": float(core_proxy),
+        "identity_risk_proxy": float(identity_risk_proxy),
+        "minutes_squeeze_proxy": float(minutes_squeeze_proxy),
+        "contract_pressure": float(contract_pressure),
+        "timing_liquidity": float(timing_liquidity),
+    }
 
 
 def _lock_info_for_asset_key(
@@ -488,6 +636,7 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
         return {
             "FILLER_BAD_CONTRACT": 4,
             "FILLER_CHEAP": 4,
+            "SURPLUS_EXPENDABLE": 7,
             "SURPLUS_LOW_FIT": 7,
             "SURPLUS_REDUNDANT": 6,
             "VETERAN_SALE": 5,
@@ -497,6 +646,7 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
         return {
             "FILLER_BAD_CONTRACT": 7,
             "FILLER_CHEAP": 5,
+            "SURPLUS_EXPENDABLE": 5,
             "SURPLUS_LOW_FIT": 4,
             "SURPLUS_REDUNDANT": 5,
             "VETERAN_SALE": 0,
@@ -506,6 +656,7 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
         return {
             "FILLER_BAD_CONTRACT": 7,
             "FILLER_CHEAP": 5,
+            "SURPLUS_EXPENDABLE": 5,
             "SURPLUS_LOW_FIT": 4,
             "SURPLUS_REDUNDANT": 5,
             "VETERAN_SALE": 0,
@@ -515,6 +666,7 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
     return {
         "FILLER_BAD_CONTRACT": 6,
         "FILLER_CHEAP": 4,
+        "SURPLUS_EXPENDABLE": 6,
         "SURPLUS_LOW_FIT": 6,
         "SURPLUS_REDUNDANT": 5,
         "VETERAN_SALE": 0,
@@ -527,6 +679,7 @@ def _outgoing_priority_for_posture(posture: str) -> Tuple[BucketId, ...]:
     if p in {"SELL", "SOFT_SELL"}:
         return (
             "VETERAN_SALE",
+            "SURPLUS_EXPENDABLE",
             "SURPLUS_LOW_FIT",
             "SURPLUS_REDUNDANT",
             "FILLER_BAD_CONTRACT",
@@ -537,6 +690,7 @@ def _outgoing_priority_for_posture(posture: str) -> Tuple[BucketId, ...]:
         return (
             "CONSOLIDATE",
             "FILLER_BAD_CONTRACT",
+            "SURPLUS_EXPENDABLE",
             "SURPLUS_LOW_FIT",
             "SURPLUS_REDUNDANT",
             "FILLER_CHEAP",
@@ -544,6 +698,7 @@ def _outgoing_priority_for_posture(posture: str) -> Tuple[BucketId, ...]:
         )
     # STAND_PAT / unknown
     return (
+        "SURPLUS_EXPENDABLE",
         "SURPLUS_LOW_FIT",
         "SURPLUS_REDUNDANT",
         "FILLER_BAD_CONTRACT",
@@ -795,15 +950,12 @@ def build_trade_asset_catalog(
             if not c.lock.is_locked
             and not (c.recent_signing_banned_until and _parse_iso_date(c.recent_signing_banned_until) and current_date < _parse_iso_date(c.recent_signing_banned_until))  # type: ignore[arg-type]
         ]
+        eligible_ids = {c.player_id for c in eligible_for_outgoing}
 
-        # Precompute redundant score (supply * (1 - need))
-        def redundancy_score(c: PlayerTradeCandidate) -> float:
-            nm = dc.need_map or {}
-            s = 0.0
-            for tag, v in (c.supply or {}).items():
-                nv = float(nm.get(tag, 0.0) or 0.0)
-                s += float(v or 0.0) * (1.0 - nv)
-            return float(s)
+        team_supply_total: Dict[str, float] = {}
+        for c in per_team_candidates:
+            for tag, raw_v in (c.supply or {}).items():
+                team_supply_total[str(tag)] = float(team_supply_total.get(str(tag), 0.0) or 0.0) + float(raw_v or 0.0)
 
         # BAD_CONTRACT filler: overpay = salary_m - market.total
         filler_bad = []
@@ -827,25 +979,132 @@ def build_trade_asset_catalog(
         )
         filler_cheap_ids = [c.player_id for c in filler_cheap[: max(0, caps.get("FILLER_CHEAP", 0))]]
 
-        # SURPLUS_LOW_FIT
-        low_fit = [c for c in eligible_for_outgoing if c.fit_vs_team <= _LOW_FIT_MAX]
-        low_fit.sort(
-            key=lambda c: (c.fit_vs_team, c.market.total, -c.salary_m, c.player_id)
-        )
-        low_fit_ids = [c.player_id for c in low_fit[: max(0, caps.get("SURPLUS_LOW_FIT", 0))]]
-
-        # SURPLUS_REDUNDANT
-        redundant_scored = []
-        for c in eligible_for_outgoing:
-            rs = redundancy_score(c)
-            if rs >= 0.55:
-                redundant_scored.append((rs, c))
-        redundant_scored.sort(
-            key=lambda t: (t[1].market.total, -t[0], t[1].fit_vs_team, t[1].player_id)
-        )
-        redundant_ids = [c.player_id for _, c in redundant_scored[: max(0, caps.get("SURPLUS_REDUNDANT", 0))]]
-
         p = str(posture or "").upper()
+        posture_gate = float(_TRADE_BLOCK_SCORE_GATE_BY_POSTURE.get(p, _TRADE_BLOCK_SCORE_GATE_BY_POSTURE["STAND_PAT"]))
+        protection_weight = float(_PROTECTION_WEIGHT_BY_POSTURE.get(p, _PROTECTION_WEIGHT_BY_POSTURE["STAND_PAT"]))
+
+        expendable_scored: List[Tuple[float, PlayerTradeCandidate]] = []
+        low_fit_scored: List[Tuple[float, PlayerTradeCandidate]] = []
+        redundant_scored: List[Tuple[float, PlayerTradeCandidate]] = []
+
+        for c in per_team_candidates:
+            peer = _compute_peer_signals(
+                candidate=c,
+                need_map=dc.need_map or {},
+                team_supply_total=team_supply_total,
+                fit_engine=fit_engine,
+            )
+            protection = _compute_protection_signals(
+                candidate=c,
+                team_candidates=per_team_candidates,
+                team_supply_total=team_supply_total,
+                value_breakdown=incoming_player_value_by_id.get(c.player_id, {}) or {},
+            )
+
+            expendable_base = (
+                0.40 * float(peer["redundancy_peer_norm"])
+                + 0.20 * float(peer["misfit_peer"])
+                + 0.20 * float(peer["peer_cover"])
+                + 0.10 * float(protection["contract_pressure"])
+                + 0.10 * float(protection["minutes_squeeze_proxy"])
+            )
+            protection_score = (
+                0.40 * float(protection["core_proxy"])
+                + 0.35 * float(peer["dependence_risk"])
+                + 0.25 * float(protection["identity_risk_proxy"])
+            )
+            raw_trade_block_score = float(expendable_base - protection_weight * protection_score + 0.05)
+            trade_block_score = _clamp01(raw_trade_block_score)
+
+            hard_protected = bool(
+                float(protection["core_proxy"]) >= 0.82
+                or float(protection["identity_risk_proxy"]) >= 0.78
+                or float(peer["dependence_risk"]) >= 0.68
+            )
+
+            reason_flags: List[str] = []
+            if float(peer["misfit_peer"]) >= 0.55:
+                reason_flags.append("LOW_PEER_FIT")
+            if float(peer["redundancy_peer_norm"]) >= 0.55:
+                reason_flags.append("REDUNDANT_DEPTH")
+            if float(protection["minutes_squeeze_proxy"]) >= 0.55:
+                reason_flags.append("ROLE_BLOCKED")
+            if float(protection["contract_pressure"]) >= 0.60:
+                reason_flags.append("EXPENSIVE_FOR_ROLE")
+            if float(protection["timing_liquidity"]) >= 1.0:
+                reason_flags.append("TIMING_WINDOW")
+
+            protection_flags: List[str] = []
+            if float(protection["core_proxy"]) >= 0.75:
+                protection_flags.append("CORE_PLAYER")
+            if float(protection["identity_risk_proxy"]) >= 0.70:
+                protection_flags.append("IDENTITY_ANCHOR")
+            if float(peer["dependence_risk"]) >= 0.60:
+                protection_flags.append("WEAKNESS_EXPOSURE_RISK")
+
+            gate = (
+                float(peer["redundancy_peer_norm"]) >= _REDUNDANCY_GATE
+                or float(peer["peer_cover"]) >= _REPLACEABLE_GATE
+                or float(protection["minutes_squeeze_proxy"]) >= _SQUEEZE_GATE
+                or float(protection["contract_pressure"]) >= _CONTRACT_GATE
+                or (float(protection["timing_liquidity"]) >= 1.0 and p in {"SELL", "SOFT_SELL"})
+            )
+            enter_expendable = (not hard_protected) and trade_block_score >= posture_gate and gate
+
+            players[c.player_id] = PlayerTradeCandidate(
+                player_id=c.player_id,
+                team_id=c.team_id,
+                snap=c.snap,
+                market=c.market,
+                supply=c.supply,
+                top_tags=c.top_tags,
+                fit_vs_team=c.fit_vs_team,
+                surplus_score=c.surplus_score,
+                fit_vs_peers=float(peer["fit_vs_peers"]),
+                misfit_peer=float(peer["misfit_peer"]),
+                redundancy_peer=float(peer["redundancy_peer"]),
+                redundancy_peer_norm=float(peer["redundancy_peer_norm"]),
+                peer_cover=float(peer["peer_cover"]),
+                dependence_risk=float(peer["dependence_risk"]),
+                core_proxy=float(protection["core_proxy"]),
+                identity_risk_proxy=float(protection["identity_risk_proxy"]),
+                minutes_squeeze_proxy=float(protection["minutes_squeeze_proxy"]),
+                contract_pressure=float(protection["contract_pressure"]),
+                raw_trade_block_score=raw_trade_block_score,
+                trade_block_score=trade_block_score,
+                hard_protected=hard_protected,
+                expendable_gate_passed=bool(enter_expendable),
+                surplus_reason_flags=tuple(reason_flags),
+                surplus_protection_flags=tuple(protection_flags),
+                salary_m=c.salary_m,
+                remaining_years=c.remaining_years,
+                is_expiring=c.is_expiring,
+                lock=c.lock,
+                recent_signing_banned_until=c.recent_signing_banned_until,
+                aggregation_banned_until=c.aggregation_banned_until,
+                aggregation_solo_only=c.aggregation_solo_only,
+                return_ban_teams=c.return_ban_teams,
+                buckets=c.buckets,
+            )
+
+            if c.player_id in eligible_ids:
+                if enter_expendable:
+                    expendable_scored.append((raw_trade_block_score, players[c.player_id]))
+                if "LOW_PEER_FIT" in reason_flags:
+                    low_fit_scored.append((float(peer["misfit_peer"]), players[c.player_id]))
+                if "REDUNDANT_DEPTH" in reason_flags:
+                    redundant_scored.append((float(peer["redundancy_peer_norm"]), players[c.player_id]))
+
+        expendable_scored.sort(key=lambda t: (-t[0], t[1].market.total, t[1].player_id))
+        expendable_ids = [c.player_id for _, c in expendable_scored[: max(0, caps.get("SURPLUS_EXPENDABLE", 0))]]
+
+        low_fit_scored = [(s, c) for s, c in low_fit_scored if c.player_id in set(expendable_ids)]
+        low_fit_scored.sort(key=lambda t: (-t[0], t[1].market.total, t[1].player_id))
+        low_fit_ids = [c.player_id for _, c in low_fit_scored[: max(0, caps.get("SURPLUS_LOW_FIT", 0))]]
+
+        redundant_scored = [(s, c) for s, c in redundant_scored if c.player_id in set(expendable_ids)]
+        redundant_scored.sort(key=lambda t: (-t[0], t[1].market.total, t[1].player_id))
+        redundant_ids = [c.player_id for _, c in redundant_scored[: max(0, caps.get("SURPLUS_REDUNDANT", 0))]]
 
         # VETERAN_SALE (SELL/REBUILD teams)
         veteran_ids: List[str] = []
@@ -877,6 +1136,7 @@ def build_trade_asset_catalog(
         bucket_members: Dict[BucketId, List[str]] = {
             "FILLER_BAD_CONTRACT": list(filler_bad_ids),
             "FILLER_CHEAP": list(filler_cheap_ids),
+            "SURPLUS_EXPENDABLE": list(expendable_ids),
             "SURPLUS_LOW_FIT": list(low_fit_ids),
             "SURPLUS_REDUNDANT": list(redundant_ids),
             "VETERAN_SALE": list(veteran_ids),
@@ -900,6 +1160,22 @@ def build_trade_asset_catalog(
                     top_tags=c.top_tags,
                     fit_vs_team=c.fit_vs_team,
                     surplus_score=c.surplus_score,
+                    fit_vs_peers=c.fit_vs_peers,
+                    misfit_peer=c.misfit_peer,
+                    redundancy_peer=c.redundancy_peer,
+                    redundancy_peer_norm=c.redundancy_peer_norm,
+                    peer_cover=c.peer_cover,
+                    dependence_risk=c.dependence_risk,
+                    core_proxy=c.core_proxy,
+                    identity_risk_proxy=c.identity_risk_proxy,
+                    minutes_squeeze_proxy=c.minutes_squeeze_proxy,
+                    contract_pressure=c.contract_pressure,
+                    raw_trade_block_score=c.raw_trade_block_score,
+                    trade_block_score=c.trade_block_score,
+                    hard_protected=c.hard_protected,
+                    expendable_gate_passed=c.expendable_gate_passed,
+                    surplus_reason_flags=c.surplus_reason_flags,
+                    surplus_protection_flags=c.surplus_protection_flags,
                     salary_m=c.salary_m,
                     remaining_years=c.remaining_years,
                     is_expiring=c.is_expiring,

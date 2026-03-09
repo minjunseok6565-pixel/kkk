@@ -14,6 +14,7 @@ from ..asset_catalog import TradeAssetCatalog, TeamOutgoingCatalog, PlayerTradeC
 from .types import DealGeneratorConfig, DealGeneratorBudget, DealGeneratorStats, DealProposal, DealCandidate
 from .repair import repair_until_valid
 from .scoring import evaluate_and_score, _should_discard_prop
+from .utils import SURPLUS_BUCKETS_EFFECTIVE
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,7 +389,7 @@ def maybe_apply_fit_swap(
 
     # replacement 후보 풀
     exclude = set(outgoing_pids) | set(protected)
-    buckets = ("SURPLUS_LOW_FIT", "SURPLUS_REDUNDANT", "CONSOLIDATE", "FILLER_CHEAP")
+    buckets = SURPLUS_BUCKETS_EFFECTIVE + ("CONSOLIDATE", "FILLER_CHEAP")
     pool = _pick_replacement_pool(
         giver_out,
         buckets=buckets,

@@ -26,10 +26,10 @@ class _TickCtxStub:
 
 
 class SellTargetPrioritySignalTests(unittest.TestCase):
-    def _catalog(self, players):
+    def _catalog(self, players, *, bucket="SURPLUS_LOW_FIT"):
         out_cat = TeamOutgoingCatalog(
             team_id="LAL",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple(players.keys())},
+            player_ids_by_bucket={str(bucket): tuple(players.keys())},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players=players,
@@ -38,13 +38,16 @@ class SellTargetPrioritySignalTests(unittest.TestCase):
         )
         return SimpleNamespace(outgoing_by_team={"LAL": out_cat})
 
-    def _player(self, pid: str, *, surplus: float = 0.4):
+    def _player(self, pid: str, *, surplus: float = 0.4, bucket="SURPLUS_LOW_FIT", raw=None, norm=None, contract_pressure=0.0):
         return SimpleNamespace(
             player_id=pid,
             lock=None,
             recent_signing_banned_until=None,
-            buckets=("SURPLUS_LOW_FIT",),
+            buckets=(str(bucket),),
             surplus_score=float(surplus),
+            raw_trade_block_score=raw,
+            trade_block_score=norm,
+            contract_pressure=float(contract_pressure),
             is_expiring=False,
             market=SimpleNamespace(total=10.0),
             salary_m=8.0,
@@ -135,6 +138,50 @@ class SellTargetPrioritySignalTests(unittest.TestCase):
             banned_players=set(),
         )
 
+        self.assertEqual(out[0].player_id, "p1")
+
+    def test_raw_trade_block_score_priority_when_flag_on(self):
+        cfg = DealGeneratorConfig(ai_use_expendable_priority_signals=True)
+        tick_ctx = _TickCtxStub()
+        catalog = self._catalog(
+            {
+                "p1": self._player("p1", surplus=0.9, raw=0.1, bucket="SURPLUS_EXPENDABLE"),
+                "p2": self._player("p2", surplus=0.1, raw=0.8, bucket="SURPLUS_EXPENDABLE"),
+            },
+            bucket="SURPLUS_EXPENDABLE",
+        )
+
+        out = select_targets_sell(
+            "LAL",
+            tick_ctx,
+            catalog,
+            cfg,
+            budget=self._budget(),
+            rng=_DeterministicRng(),
+            banned_players=set(),
+        )
+        self.assertEqual(out[0].player_id, "p2")
+
+    def test_alias_mode_legacy_bucket_fallback_still_works(self):
+        cfg = DealGeneratorConfig(ai_use_expendable_priority_signals=True)
+        tick_ctx = _TickCtxStub()
+        catalog = self._catalog(
+            {
+                "p1": self._player("p1", surplus=0.8, bucket="SURPLUS_LOW_FIT", raw=None, norm=None),
+                "p2": self._player("p2", surplus=0.3, bucket="SURPLUS_REDUNDANT", raw=None, norm=None),
+            }
+        )
+
+        out = select_targets_sell(
+            "LAL",
+            tick_ctx,
+            catalog,
+            cfg,
+            budget=self._budget(),
+            rng=_DeterministicRng(),
+            banned_players=set(),
+        )
+        # raw/norm 없으면 surplus fallback으로 정렬
         self.assertEqual(out[0].player_id, "p1")
 
 

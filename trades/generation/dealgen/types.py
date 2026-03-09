@@ -294,6 +294,7 @@ class DealGeneratorConfig:
     ai_proactive_listing_ttl_days_default: int = 5
     ai_proactive_listing_priority_base: float = 0.45
     ai_proactive_listing_priority_span: float = 0.35
+    ai_use_expendable_priority_signals: bool = False
 
     # proactive listing cadence (listing only; proposal generation cadence is unchanged)
     ai_proactive_listing_cadence: str = "WEEKLY"  # DAILY | WEEKLY
@@ -304,30 +305,35 @@ class DealGeneratorConfig:
     ai_proactive_listing_threshold_default: float = 0.55
     ai_proactive_listing_bucket_thresholds: Dict[str, Dict[str, float]] = field(default_factory=lambda: {
         "AGGRESSIVE_BUY": {
+            "SURPLUS_EXPENDABLE": 0.66,
             "SURPLUS_LOW_FIT": 0.30,
             "SURPLUS_REDUNDANT": 0.35,
             "FILLER_BAD_CONTRACT": 0.80,
             "VETERAN_SALE": 0.90,
         },
         "SOFT_BUY": {
+            "SURPLUS_EXPENDABLE": 0.62,
             "SURPLUS_LOW_FIT": 0.38,
             "SURPLUS_REDUNDANT": 0.42,
             "FILLER_BAD_CONTRACT": 0.82,
             "VETERAN_SALE": 0.92,
         },
         "STAND_PAT": {
+            "SURPLUS_EXPENDABLE": 0.56,
             "SURPLUS_LOW_FIT": 0.50,
             "SURPLUS_REDUNDANT": 0.55,
             "FILLER_BAD_CONTRACT": 0.86,
             "VETERAN_SALE": 0.95,
         },
         "SOFT_SELL": {
+            "SURPLUS_EXPENDABLE": 0.46,
             "SURPLUS_LOW_FIT": 0.40,
             "SURPLUS_REDUNDANT": 0.45,
             "FILLER_BAD_CONTRACT": 0.70,
             "VETERAN_SALE": 0.45,
         },
         "SELL": {
+            "SURPLUS_EXPENDABLE": 0.40,
             "SURPLUS_LOW_FIT": 0.32,
             "SURPLUS_REDUNDANT": 0.38,
             "FILLER_BAD_CONTRACT": 0.62,

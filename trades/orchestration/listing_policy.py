@@ -105,18 +105,34 @@ def _is_player_in_proactive_cooldown(
 
 _PROACTIVE_ALLOWED_BUCKETS: Tuple[str, ...] = (
     "VETERAN_SALE",
+    "SURPLUS_EXPENDABLE",
     "SURPLUS_LOW_FIT",
     "SURPLUS_REDUNDANT",
     "FILLER_BAD_CONTRACT",
 )
 
 
-def _bucket_priority_key(player: Any) -> Tuple[int, float]:
+def _priority_signal(player: Any, *, config: Any, normalized: bool) -> float:
+    use_expendable = bool(getattr(config, "ai_use_expendable_priority_signals", False))
+    if use_expendable:
+        if not normalized:
+            raw = getattr(player, "raw_trade_block_score", None)
+            if raw is not None:
+                return float(raw)
+        norm = getattr(player, "trade_block_score", None)
+        if norm is not None:
+            return _clamp01(norm)
+    base = getattr(player, "surplus_score", 0.0)
+    return _clamp01(base) if normalized else float(_safe_float(base, 0.0))
+
+
+def _bucket_priority_key(player: Any, *, config: Any) -> Tuple[int, float]:
     buckets = {str(b).upper() for b in (getattr(player, "buckets", None) or tuple())}
+    pri_score = _priority_signal(player, config=config, normalized=False)
     for idx, b in enumerate(_PROACTIVE_ALLOWED_BUCKETS):
         if b in buckets:
-            return idx, -max(0.0, _safe_float(getattr(player, "surplus_score", 0.0), 0.0))
-    return len(_PROACTIVE_ALLOWED_BUCKETS), -max(0.0, _safe_float(getattr(player, "surplus_score", 0.0), 0.0))
+            return idx, -pri_score
+    return len(_PROACTIVE_ALLOWED_BUCKETS), -pri_score
 
 
 def _should_run_proactive_listing_today(
@@ -167,10 +183,21 @@ def _resolve_bucket_threshold(*, bucket: str, team_situation: Any, config: Any) 
 
     table = getattr(config, "ai_proactive_listing_bucket_thresholds", {}) or {}
     row = table.get(posture, {}) if isinstance(table, dict) else {}
-    base = _safe_float(
-        (row.get(bucket) if isinstance(row, dict) else None),
-        _safe_float(getattr(config, "ai_proactive_listing_threshold_default", 0.55), 0.55),
-    )
+    default_threshold = _safe_float(getattr(config, "ai_proactive_listing_threshold_default", 0.55), 0.55)
+    if isinstance(row, dict) and bucket == "SURPLUS_EXPENDABLE":
+        expendable_base = row.get("SURPLUS_EXPENDABLE")
+        if expendable_base is None:
+            legacy = [
+                _safe_float(row.get("SURPLUS_LOW_FIT"), default_threshold),
+                _safe_float(row.get("SURPLUS_REDUNDANT"), default_threshold),
+            ]
+            expendable_base = max(legacy) if legacy else default_threshold
+        base = _safe_float(expendable_base, default_threshold)
+    else:
+        base = _safe_float(
+            (row.get(bucket) if isinstance(row, dict) else None),
+            default_threshold,
+        )
 
     if horizon == "WIN_NOW" and bucket in {"SURPLUS_LOW_FIT", "SURPLUS_REDUNDANT"}:
         base += _safe_float(getattr(config, "ai_proactive_listing_threshold_horizon_win_now_delta", -0.03), -0.03)
@@ -194,7 +221,7 @@ def _resolve_bucket_threshold(*, bucket: str, team_situation: Any, config: Any) 
 def _passes_listing_threshold(*, player: Any, bucket: str, team_situation: Any, config: Any) -> bool:
     if not bool(getattr(config, "ai_proactive_listing_threshold_enabled", True)):
         return True
-    score = _clamp01(getattr(player, "surplus_score", 0.0))
+    score = _priority_signal(player, config=config, normalized=True)
     threshold = _resolve_bucket_threshold(bucket=bucket, team_situation=team_situation, config=config)
     return float(score) >= float(threshold)
 
@@ -311,7 +338,7 @@ def apply_ai_proactive_listings(
         ):
             continue
 
-        pri_idx, pri_surplus = _bucket_priority_key(player)
+        pri_idx, pri_surplus = _bucket_priority_key(player, config=config)
         rows.append(((pri_idx, pri_surplus, p), p))
 
     if not rows:
