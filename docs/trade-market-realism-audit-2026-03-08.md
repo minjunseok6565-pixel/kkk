@@ -56,10 +56,15 @@ BUY 스켈레톤은 기본적으로
 
   - 변경 후 동작: incoming 노출은 단일 need-tag 인덱스 의존을 줄이고, 전역 incoming 인덱스 + 팀/선수 스캔 cap(`teams_cap`, `players_cap`, `iteration_cap`) 구조로 바뀌어 유니콘/후순위 자산의 탐색 진입 가능성이 높아졌습니다.
 
-- **trade block listing은 강제 노출이 아니라 soft rank boost**
+- **trade block listing은 강제 노출이 아니라 soft rank boost** ⚠️ (부분 수정)
   - BUY 타깃 선택에서 public listing은 후보 포함의 필수 조건이 아니고,
     랭크에 `interest_boost`를 더하되 `buy_target_listing_interest_cap` 상한으로 제한됩니다.
   - 즉 listing은 “탐색 강제”가 아니라 “정렬 가중치” 성격이라, 다른 제약과 겹치면 체감 노출 효과가 약해질 수 있습니다.
+
+  - 변경 후 동작: BUY 타깃 탐색이 전역 incoming 풀 기반으로 재구성되면서,
+    active public listing 선수는 listed lane으로 분리 수집되어 merge 단계의 `listed_min_quota` 내에서 우선 진입합니다.
+    다만 최종 타깃은 `listed_max_share`/팀·선수 cap/쿨다운·밴 등 공통 제약을 함께 적용하므로,
+    listing은 “절대 강제 노출”이라기보다 “후보 진입 우선권 + 랭크 가중치”로 동작합니다.
 
 ---
 
