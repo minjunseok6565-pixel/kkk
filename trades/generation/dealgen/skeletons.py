@@ -22,6 +22,7 @@ from .utils import (
     _pick_return_player_salaryish_with_need,
     _split_young_candidates,
     _shape_ok,
+    classify_target_tier,
 )
 
 
@@ -38,6 +39,33 @@ def _with_core_tags(tags: List[str], *, mode: str, focal_player_id: str, archety
         if t not in out:
             out.append(t)
     return out
+
+
+def _attach_v3_meta(candidate: DealCandidate, *, spec: object, target_tier: str) -> None:
+    skeleton_id = str(getattr(spec, "skeleton_id", "") or "")
+    domain = str(getattr(spec, "domain", "") or "")
+    compat = str(getattr(spec, "compat_archetype", "") or candidate.archetype)
+
+    if skeleton_id:
+        candidate.skeleton_id = skeleton_id
+    if domain:
+        candidate.skeleton_domain = domain
+    candidate.compat_archetype = compat
+    candidate.target_tier = str(target_tier).upper()
+    candidate.archetype = compat
+
+    if not isinstance(candidate.tags, list):
+        candidate.tags = list(candidate.tags or [])
+
+    for t in (
+        f"skeleton:{candidate.skeleton_id}",
+        f"domain:{candidate.skeleton_domain}",
+        f"target_tier:{candidate.target_tier}",
+        f"arch_compat:{candidate.compat_archetype}",
+        f"arch:{candidate.archetype}",
+    ):
+        if t not in candidate.tags:
+            candidate.tags.append(t)
 
 
 def build_offer_skeletons_buy(
@@ -58,6 +86,7 @@ def build_offer_skeletons_buy(
 
     if bool(getattr(config, "skeleton_overhaul_enabled", True)):
         registry = build_default_registry()
+        target_tier = classify_target_tier(target=target, config=config)
         ctx = BuildContext(
             mode="BUY",
             buyer_id=buyer_id,
@@ -73,8 +102,11 @@ def build_offer_skeletons_buy(
             banned_receivers_by_player=banned_receivers_by_player,
         )
         out_v3: List[DealCandidate] = []
-        for spec in registry.get_specs_for_mode("BUY"):
-            out_v3.extend(spec.build_fn(ctx))
+        for spec in registry.get_specs_for_mode_and_tier("BUY", target_tier, config, ctx=ctx):
+            built = spec.build_fn(ctx)
+            for cand in built:
+                _attach_v3_meta(cand, spec=spec, target_tier=target_tier)
+            out_v3.extend(built)
         out_v3 = apply_modifiers(
             out_v3,
             catalog=catalog,
@@ -87,6 +119,8 @@ def build_offer_skeletons_buy(
         for c in out_v3:
             if not c.compat_archetype:
                 c.compat_archetype = c.archetype
+            if not c.target_tier:
+                c.target_tier = str(target_tier).upper()
             if _shape_ok(c.deal, config=config, catalog=catalog):
                 trimmed_v3.append(c)
         return trimmed_v3[: max(2, int(budget.beam_width))]
@@ -354,6 +388,7 @@ def build_offer_skeletons_sell(
 
     if bool(getattr(config, "skeleton_overhaul_enabled", True)):
         registry = build_default_registry()
+        target_tier = classify_target_tier(sale_asset=sale_asset, match_tag=match_tag, config=config)
         ctx = BuildContext(
             mode="SELL",
             buyer_id=buyer_id,
@@ -370,8 +405,11 @@ def build_offer_skeletons_sell(
             banned_receivers_by_player=banned_receivers_by_player,
         )
         out_v3: List[DealCandidate] = []
-        for spec in registry.get_specs_for_mode("SELL"):
-            out_v3.extend(spec.build_fn(ctx))
+        for spec in registry.get_specs_for_mode_and_tier("SELL", target_tier, config, ctx=ctx):
+            built = spec.build_fn(ctx)
+            for cand in built:
+                _attach_v3_meta(cand, spec=spec, target_tier=target_tier)
+            out_v3.extend(built)
         out_v3 = apply_modifiers(
             out_v3,
             catalog=catalog,
@@ -384,6 +422,8 @@ def build_offer_skeletons_sell(
         for c in out_v3:
             if not c.compat_archetype:
                 c.compat_archetype = c.archetype
+            if not c.target_tier:
+                c.target_tier = str(target_tier).upper()
             if _shape_ok(c.deal, config=config, catalog=catalog):
                 trimmed_v3.append(c)
         return trimmed_v3[: max(2, int(budget.beam_width))]

@@ -259,6 +259,31 @@ def _budget_or_hard_cap_reached(stats: DealGeneratorStats, budget: DealGenerator
     return bool(hit_budget_v or hit_budget_e or hit_hard_v or hit_hard_e)
 
 
+def _record_candidate_observability(stats: DealGeneratorStats, cand: DealCandidate) -> None:
+    sid = str(getattr(cand, "skeleton_id", "") or "")
+    domain = str(getattr(cand, "skeleton_domain", "") or "")
+    tier = str(getattr(cand, "target_tier", "") or "")
+    arch = str(getattr(cand, "compat_archetype", "") or getattr(cand, "archetype", "") or "")
+
+    stats.bump_counter(stats.skeleton_id_counts, sid)
+    stats.bump_counter(stats.skeleton_domain_counts, domain)
+    stats.bump_counter(stats.target_tier_counts, tier)
+    stats.bump_counter(stats.arch_compat_counts, arch)
+
+    stats.modifier_candidates += 1
+    trace = list(getattr(cand, "modifier_trace", []) or [])
+    if trace:
+        stats.modifier_applied_candidates += 1
+    for mod in trace:
+        stats.bump_counter(stats.modifier_trace_counts, str(mod))
+
+
+def _finalize_observability_stats(stats: DealGeneratorStats) -> None:
+    stats.unique_skeleton_count = len([k for k in stats.skeleton_id_counts.keys() if str(k)])
+    denom = max(1, int(stats.modifier_candidates))
+    stats.modifier_success_rate = float(stats.modifier_applied_candidates) / float(denom)
+
+
 
 
 # =============================================================================
@@ -406,6 +431,8 @@ def _generate_buy_mode(
             continue
 
         stats.skeletons_built += len(candidates)
+        for c in candidates:
+            _record_candidate_observability(stats, c)
 
         # 변형 확장: 타깃당 6~12개로 제한(폭발 방지)
         candidates = expand_variants(
@@ -687,6 +714,7 @@ def _generate_buy_mode(
         partner_side="seller",  # BUY: 다양화 기준 = seller
         cap=partner_cap,
     )
+    _finalize_observability_stats(stats)
     return proposals
 
 
@@ -807,6 +835,8 @@ def _generate_sell_mode(
                 continue
 
             stats.skeletons_built += len(candidates)
+            for c in candidates:
+                _record_candidate_observability(stats, c)
 
             # soft guard: payroll_after_est 기준 2nd apron one-for-one 위반 가능 후보 제거(탐색 낭비/invalid 감소)
             if getattr(config, "soft_guard_second_apron_by_constraints", False):
@@ -1062,6 +1092,7 @@ def _generate_sell_mode(
         partner_side="buyer",  # SELL: 다양화 기준 = buyer
         cap=partner_cap,
     )
+    _finalize_observability_stats(stats)
     return proposals
 
 

@@ -81,6 +81,48 @@ def _proposal_key(prop: DealProposal) -> Tuple[float, float]:
     return (min(mb, ms), float(prop.score))
 
 
+def _extract_protection_intent_from_tags(tags: Tuple[str, ...]) -> Optional[str]:
+    for raw in list(tags or ()):  # style: avoid mutating inbound tuple
+        s = str(raw or "").strip().lower()
+        if s.startswith("proposal_meta:protection_intent="):
+            val = s.split("=", 1)[-1].strip()
+            if val in {"light", "mid", "heavy"}:
+                return val
+        if s.startswith("protection_intent:"):
+            val = s.split(":", 1)[-1].strip()
+            if val in {"light", "mid", "heavy"}:
+                return val
+    return None
+
+
+def _intent_topn_candidates(intent: Optional[str], *, config: Any) -> List[int]:
+    if intent not in {"light", "mid", "heavy"}:
+        return []
+
+    # Config ladder drives the priority order; unknown tokens are ignored.
+    ladder = tuple(getattr(config, "modifier_protection_default_ladder", ("prot_light", "prot_mid", "prot_heavy")) or ())
+    token_to_topn: Dict[str, List[int]] = {
+        "prot_light": [4, 8],
+        "prot_mid": [14],
+        "prot_heavy": [20, 24],
+    }
+
+    intent_token = f"prot_{intent}"
+    ordered_tokens: List[str] = []
+    if intent_token in ladder:
+        ordered_tokens.append(intent_token)
+    for t in ladder:
+        if t not in ordered_tokens:
+            ordered_tokens.append(str(t))
+
+    out: List[int] = []
+    for t in ordered_tokens:
+        for n in token_to_topn.get(str(t), []):
+            if n not in out:
+                out.append(int(n))
+    return out
+
+
 # -----------------------------------------------------------------------------
 # Protection construction
 # -----------------------------------------------------------------------------
@@ -196,12 +238,17 @@ def choose_top_n_options(
     *,
     pick_bucket: Optional[str],
     config: Any,
+    protection_intent: Optional[str] = None,
     max_variants: int = 2,
 ) -> List[int]:
     """Choose 1~N TOP_N values to try.
 
     Keeps the set small to control eval cost.
     """
+
+    intent_options = _intent_topn_candidates(protection_intent, config=config)
+    if intent_options:
+        return intent_options[: max(1, int(max_variants))]
 
     # Allow config override with an explicit list like (4, 8, 10).
     raw = getattr(config, "pick_protection_topn_options", None)
@@ -452,7 +499,14 @@ def maybe_apply_pick_protection_variants(
         dc = None
 
     max_variants = int(getattr(config, "pick_protection_max_variants", 2) or 2)
-    top_ns = choose_top_n_options(dc, pick_bucket=pick_bucket, config=config, max_variants=max_variants)
+    protection_intent = _extract_protection_intent_from_tags(tuple(base_prop.tags or ()))
+    top_ns = choose_top_n_options(
+        dc,
+        pick_bucket=pick_bucket,
+        config=config,
+        protection_intent=protection_intent,
+        max_variants=max_variants,
+    )
 
     # Build deal variants.
     variants: List[Tuple[int, Deal]] = []

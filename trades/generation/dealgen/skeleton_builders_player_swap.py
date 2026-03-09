@@ -95,13 +95,69 @@ def build_starter_for_two_rotation(ctx: BuildContext) -> List[DealCandidate]:
     focal, _, tag, _ = _focal(ctx)
     if not focal:
         return []
-    return build_fit_swap_2_for_2(ctx) and [
+    base = build_fit_swap_2_for_2(ctx)
+    if not base:
+        return []
+    return [
         _cand(
             ctx,
-            deal=build_fit_swap_2_for_2(ctx)[0].deal,
+            deal=base[0].deal,
             archetype="consolidate_2_for_1",
             skeleton_id="player_swap.starter_for_two_rotation",
             tags=[f"need:{tag}", "pkg:starter_for_two_rotation"],
+            focal_player_id=focal,
+        )
+    ]
+
+
+def build_one_for_two_depth(ctx: BuildContext) -> List[DealCandidate]:
+    """1 ↔ 2 depth: starter_for_two_rotation의 저강도(ROLE/STARTER 중심) 버전."""
+
+    focal, salary_m, tag, _ = _focal(ctx)
+    if not focal:
+        return []
+
+    buyer_out = ctx.catalog.outgoing_by_team.get(str(ctx.buyer_id).upper())
+    if buyer_out is None:
+        return []
+
+    seller_need_map = _get_need_map(ctx.tick_ctx, ctx.seller_id)
+    p1 = _pick_bucket_player_for_need(
+        buyer_out,
+        bucket="FILLER_CHEAP",
+        receiver_team_id=ctx.seller_id,
+        banned_players=ctx.banned_players,
+        banned_receivers_by_player=ctx.banned_receivers_by_player,
+        need_map=seller_need_map,
+        must_be_aggregation_friendly=True,
+    )
+    p2 = _pick_return_player_salaryish_with_need(
+        buyer_out,
+        receiver_team_id=ctx.seller_id,
+        target_salary_m=max(1.0, salary_m * 0.45),
+        need_map=seller_need_map,
+        rng=ctx.rng,
+        banned_players=ctx.banned_players | {str(p1 or "")},
+        banned_receivers_by_player=ctx.banned_receivers_by_player,
+        must_be_aggregation_friendly=True,
+    )
+    if not p1 or not p2 or p1 == p2:
+        return []
+
+    deal = _clone_deal(_base_deal(ctx, focal))
+    deal.legs[str(ctx.buyer_id).upper()].extend(
+        [
+            PlayerAsset(kind="player", player_id=p1),
+            PlayerAsset(kind="player", player_id=p2),
+        ]
+    )
+    return [
+        _cand(
+            ctx,
+            deal=deal,
+            archetype="consolidate_2_for_1",
+            skeleton_id="player_swap.one_for_two_depth",
+            tags=[f"need:{tag}", "pkg:one_for_two_depth"],
             focal_player_id=focal,
         )
     ]

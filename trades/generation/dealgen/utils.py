@@ -191,6 +191,48 @@ def compute_buy_retrieval_caps(team_situation: Any, cfg: DealGeneratorConfig) ->
     }
 
 
+def classify_target_tier(
+    *,
+    target: Optional[Any] = None,
+    sale_asset: Optional[Any] = None,
+    match_tag: str = "",
+    config: Optional[DealGeneratorConfig] = None,
+) -> str:
+    """거래 focal asset을 tier로 분류한다.
+
+    반환값: ROLE | STARTER | HIGH_STARTER | STAR | PICK_ONLY
+    - target(BUY) 또는 sale_asset(SELL) 중 하나를 입력한다.
+    - threshold는 문서 기준의 단순 초기값이며, strictness 파라미터로 완화/강화 가능.
+    """
+
+    _ = config  # phase-2: 인터페이스 고정(추후 strictness/bias 반영 시 사용)
+
+    focus = target if target is not None else sale_asset
+    if focus is None:
+        return "STARTER"
+
+    market = float(getattr(focus, "market_total", 0.0) or 0.0)
+    salary_m = float(getattr(focus, "salary_m", 0.0) or 0.0)
+    remaining_years = float(getattr(focus, "remaining_years", 0.0) or 0.0)
+    need_tag = str(getattr(focus, "need_tag", "") or "").upper()
+    tag = str(match_tag or "").upper()
+    is_expiring = bool(getattr(focus, "is_expiring", False)) or (remaining_years <= 1.1)
+
+    if "PICK" in need_tag or "PICK" in tag:
+        return "PICK_ONLY"
+
+    if is_expiring and market <= 58.0 and salary_m <= 30.0:
+        return "ROLE"
+
+    if market >= 86.0:
+        return "STAR"
+    if market >= 72.0:
+        return "HIGH_STARTER"
+    if market >= 52.0:
+        return "STARTER"
+    return "ROLE"
+
+
 
 
 # -----------------------------------------------------------------------------
