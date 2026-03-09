@@ -96,7 +96,7 @@
 
 - `contract_pressure` (계약 전용 신호; expiring 미포함)
   - `contract_gap_cap_share`를 1순위로 사용
-  - fallback: `expected_cap_share_avg - actual_cap_share_avg`
+  - fallback: (actual_cap_share_avg - expected_cap_share_avg) / 0.06
   - 예시 구현:
 
 ```python
