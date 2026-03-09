@@ -393,9 +393,143 @@ _PROTECTION_WEIGHT_BY_POSTURE = {
     "AGGRESSIVE_BUY": 1.18,
 }
 
+_NEGATIVE_MONEY_NORM_CAP_SHARE = 0.05
+_MARKET_NOW_NORM = 12.0
+
+_BAD_CONTRACT_NEGATIVE_MONEY_MIN_CAP_SHARE = 0.015
+_BAD_CONTRACT_YEARS_MIN = 2.0
+_BAD_CONTRACT_FLEX_PRESSURE_MIN = 0.55
+_VETERAN_MARKET_NOW_MIN = 6.0
+_TIMELINE_MISMATCH_MIN = 0.45
+
 
 def _clamp01(v: float) -> float:
     return max(0.0, min(1.0, float(v)))
+
+
+def _norm(x: float, denom: float) -> float:
+    d = float(denom)
+    if d <= 0.0:
+        return 0.0
+    return _clamp01(float(x) / d)
+
+
+def _safe_team_signal(ts: Any, name: str, default: float = 0.0) -> float:
+    key = str(name)
+    if isinstance(ts, Mapping):
+        return float(_safe_float(ts.get(key), float(default)) or float(default))
+    return float(_safe_float(getattr(ts, key, default), float(default)) or float(default))
+
+
+@dataclass(frozen=True, slots=True)
+class BadContractEval:
+    enter: bool
+    score: float
+    negative_money: float
+    years_factor: float
+    team_flex_pressure: float
+    expendability: float
+
+
+def _eval_bad_contract_candidate(
+    *,
+    c: PlayerTradeCandidate,
+    ts: Any,
+    expected_cap_share_avg: float,
+    actual_cap_share_avg: float,
+) -> BadContractEval:
+    negative_money = max(0.0, float(actual_cap_share_avg - expected_cap_share_avg))
+    years_factor = _clamp01(float(c.remaining_years) / 4.0)
+
+    flexibility = _safe_team_signal(getattr(ts, "signals", None), "flexibility", 0.5)
+    team_flex_pressure = _clamp01(1.0 - flexibility)
+    expendability = _clamp01(float(c.surplus_score))
+
+    negative_money_norm = _norm(negative_money, _NEGATIVE_MONEY_NORM_CAP_SHARE)
+
+    score = (
+        0.55 * negative_money_norm
+        + 0.20 * years_factor
+        + 0.15 * team_flex_pressure
+        + 0.10 * expendability
+    )
+
+    support_gate = (
+        float(c.remaining_years) >= _BAD_CONTRACT_YEARS_MIN
+        or team_flex_pressure >= _BAD_CONTRACT_FLEX_PRESSURE_MIN
+    )
+    enter = (negative_money >= _BAD_CONTRACT_NEGATIVE_MONEY_MIN_CAP_SHARE) and support_gate
+
+    return BadContractEval(
+        enter=bool(enter),
+        score=float(score),
+        negative_money=float(negative_money),
+        years_factor=float(years_factor),
+        team_flex_pressure=float(team_flex_pressure),
+        expendability=float(expendability),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class VeteranSaleEval:
+    enter: bool
+    score: float
+    timeline_mismatch: float
+    market_now_norm: float
+    age_decline: float
+    contract_window_risk: float
+
+
+def _timeline_horizon_pressure(ts: Any) -> float:
+    horizon = str(getattr(ts, "time_horizon", "") or "").upper()
+    if horizon == "REBUILD":
+        return 1.0
+    if horizon == "RE_TOOL":
+        return 0.75
+    if horizon == "WIN_NOW":
+        return 0.20
+    return 0.45
+
+
+def _eval_veteran_sale_candidate(*, c: PlayerTradeCandidate, ts: Any) -> VeteranSaleEval:
+    age = float(c.snap.age or 0.0)
+    age_decline = _clamp01((age - 28.0) / 8.0)
+
+    horizon_pressure = _timeline_horizon_pressure(ts)
+    years_factor = _clamp01(float(c.remaining_years) / 4.0)
+
+    timeline_mismatch = _clamp01(horizon_pressure * (0.60 * age_decline + 0.40 * years_factor))
+
+    market_now_norm = _norm(float(c.market.now), _MARKET_NOW_NORM)
+
+    re_sign_pressure = _safe_team_signal(getattr(ts, "signals", None), "re_sign_pressure", 0.0)
+    expiring_risk = 1.0 if bool(c.is_expiring) else 0.0
+    contract_window_risk = _clamp01(0.65 * expiring_risk + 0.35 * _clamp01(re_sign_pressure))
+
+    score = (
+        0.40 * timeline_mismatch
+        + 0.25 * market_now_norm
+        + 0.20 * age_decline
+        + 0.15 * contract_window_risk
+    )
+
+    team_ok = (
+        str(getattr(ts, "trade_posture", "") or "").upper() in {"SELL", "SOFT_SELL"}
+        or str(getattr(ts, "time_horizon", "") or "").upper() == "REBUILD"
+    )
+
+    mismatch_gate = timeline_mismatch >= _TIMELINE_MISMATCH_MIN
+    contract_window_gate = (age_decline >= 0.35) and (contract_window_risk >= 0.55)
+    enter = team_ok and (float(c.market.now) >= _VETERAN_MARKET_NOW_MIN) and (mismatch_gate or contract_window_gate)
+
+    return VeteranSaleEval(
+        enter=bool(enter),
+        score=float(score),
+        timeline_mismatch=float(timeline_mismatch),
+        market_now_norm=float(market_now_norm),
+        age_decline=float(age_decline),
+        contract_window_risk=float(contract_window_risk),
+    )
 
 
 def _compute_peer_signals(
@@ -941,15 +1075,23 @@ def build_trade_asset_catalog(
             for tag, raw_v in (c.supply or {}).items():
                 team_supply_total[str(tag)] = float(team_supply_total.get(str(tag), 0.0) or 0.0) + float(raw_v or 0.0)
 
-        # BAD_CONTRACT filler: overpay = salary_m - market.total
-        filler_bad = []
+        # BAD_CONTRACT filler: negative_money + support gates
+        bad_contract_eval_by_pid: Dict[str, BadContractEval] = {}
+        filler_bad: List[Tuple[BadContractEval, PlayerTradeCandidate]] = []
         for c in eligible_for_outgoing:
-            overpay = float(c.salary_m - c.market.total)
-            if c.market.total <= 6.0 or overpay >= 6.0:
-                filler_bad.append((overpay, c))
-        filler_bad.sort(
-            key=lambda t: (-t[0], -t[1].salary_m, t[1].market.total, t[1].player_id)
-        )
+            vb = incoming_player_value_by_id.get(c.player_id, {}) or {}
+            expected_cap_share_avg = float(_safe_float(vb.get("expected_cap_share_avg"), 0.0) or 0.0)
+            actual_cap_share_avg = float(_safe_float(vb.get("actual_cap_share_avg"), 0.0) or 0.0)
+            eval_result = _eval_bad_contract_candidate(
+                c=c,
+                ts=ts,
+                expected_cap_share_avg=expected_cap_share_avg,
+                actual_cap_share_avg=actual_cap_share_avg,
+            )
+            bad_contract_eval_by_pid[c.player_id] = eval_result
+            if eval_result.enter:
+                filler_bad.append((eval_result, c))
+        filler_bad.sort(key=lambda t: (-t[0].score, -t[0].negative_money, -t[1].salary_m, t[1].player_id))
         filler_bad_ids = [c.player_id for _, c in filler_bad[: max(0, caps.get("FILLER_BAD_CONTRACT", 0))]]
 
         # CHEAP filler
@@ -1075,16 +1217,16 @@ def build_trade_asset_catalog(
         expendable_scored.sort(key=lambda t: (-t[0], t[1].market.total, t[1].player_id))
         expendable_ids = [c.player_id for _, c in expendable_scored[: max(0, caps.get("SURPLUS_EXPENDABLE", 0))]]
 
-        # VETERAN_SALE (SELL/REBUILD teams)
-        veteran_ids: List[str] = []
-        if p in {"SELL", "SOFT_SELL"} or str(getattr(ts, "time_horizon", "") or "").upper() == "REBUILD":
-            veteran = [
-                c
-                for c in eligible_for_outgoing
-                if (c.snap.age is not None and float(c.snap.age) >= 29.0) and c.market.now >= 6.0
-            ]
-            veteran.sort(key=lambda c: (-c.market.now, -(c.snap.age or 0.0), c.remaining_years, c.player_id))
-            veteran_ids = [c.player_id for c in veteran[: max(0, caps.get("VETERAN_SALE", 0))]]
+        # VETERAN_SALE (timeline mismatch centered)
+        veteran_eval_by_pid: Dict[str, VeteranSaleEval] = {}
+        veteran: List[Tuple[VeteranSaleEval, PlayerTradeCandidate]] = []
+        for c in eligible_for_outgoing:
+            eval_result = _eval_veteran_sale_candidate(c=c, ts=ts)
+            veteran_eval_by_pid[c.player_id] = eval_result
+            if eval_result.enter:
+                veteran.append((eval_result, c))
+        veteran.sort(key=lambda t: (-t[0].score, -t[1].market.now, -(t[1].snap.age or 0.0), t[1].player_id))
+        veteran_ids = [c.player_id for _, c in veteran[: max(0, caps.get("VETERAN_SALE", 0))]]
 
         # CONSOLIDATE (BUY teams) - mid-tier by team market rank (30%~70%)
         consolidate_ids: List[str] = []
