@@ -52,10 +52,10 @@ class BuyTargetContractValueTests(unittest.TestCase):
             team_refs = [r for r in refs if str(r.from_team).upper() == team_id]
             by_team[team_id] = TeamOutgoingCatalog(
                 team_id=team_id,
-                player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple(r.player_id for r in team_refs)},
+                player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple(r.player_id for r in team_refs)},
                 pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
                 swap_ids=tuple(),
-                players={r.player_id: SimpleNamespace(buckets=("SURPLUS_LOW_FIT",)) for r in team_refs},
+                players={r.player_id: SimpleNamespace(buckets=("SURPLUS_EXPENDABLE",)) for r in team_refs},
                 picks={},
                 swaps={},
             )

@@ -177,8 +177,6 @@ BucketId = Literal[
     "FILLER_BAD_CONTRACT",
     "FILLER_CHEAP",
     "SURPLUS_EXPENDABLE",
-    "SURPLUS_LOW_FIT",
-    "SURPLUS_REDUNDANT",
     "VETERAN_SALE",
     "CONSOLIDATE",
 ]
@@ -637,8 +635,6 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
             "FILLER_BAD_CONTRACT": 4,
             "FILLER_CHEAP": 4,
             "SURPLUS_EXPENDABLE": 7,
-            "SURPLUS_LOW_FIT": 7,
-            "SURPLUS_REDUNDANT": 6,
             "VETERAN_SALE": 5,
             "CONSOLIDATE": 0,
         }
@@ -647,8 +643,6 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
             "FILLER_BAD_CONTRACT": 7,
             "FILLER_CHEAP": 5,
             "SURPLUS_EXPENDABLE": 5,
-            "SURPLUS_LOW_FIT": 4,
-            "SURPLUS_REDUNDANT": 5,
             "VETERAN_SALE": 0,
             "CONSOLIDATE": 7,
         }
@@ -657,8 +651,6 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
             "FILLER_BAD_CONTRACT": 7,
             "FILLER_CHEAP": 5,
             "SURPLUS_EXPENDABLE": 5,
-            "SURPLUS_LOW_FIT": 4,
-            "SURPLUS_REDUNDANT": 5,
             "VETERAN_SALE": 0,
             "CONSOLIDATE": 5,
         }
@@ -667,8 +659,6 @@ def _bucket_caps_for_posture(posture: str) -> Dict[BucketId, int]:
         "FILLER_BAD_CONTRACT": 6,
         "FILLER_CHEAP": 4,
         "SURPLUS_EXPENDABLE": 6,
-        "SURPLUS_LOW_FIT": 6,
-        "SURPLUS_REDUNDANT": 5,
         "VETERAN_SALE": 0,
         "CONSOLIDATE": 3,
     }
@@ -680,8 +670,6 @@ def _outgoing_priority_for_posture(posture: str) -> Tuple[BucketId, ...]:
         return (
             "VETERAN_SALE",
             "SURPLUS_EXPENDABLE",
-            "SURPLUS_LOW_FIT",
-            "SURPLUS_REDUNDANT",
             "FILLER_BAD_CONTRACT",
             "FILLER_CHEAP",
             "CONSOLIDATE",
@@ -691,16 +679,12 @@ def _outgoing_priority_for_posture(posture: str) -> Tuple[BucketId, ...]:
             "CONSOLIDATE",
             "FILLER_BAD_CONTRACT",
             "SURPLUS_EXPENDABLE",
-            "SURPLUS_LOW_FIT",
-            "SURPLUS_REDUNDANT",
             "FILLER_CHEAP",
             "VETERAN_SALE",
         )
     # STAND_PAT / unknown
     return (
         "SURPLUS_EXPENDABLE",
-        "SURPLUS_LOW_FIT",
-        "SURPLUS_REDUNDANT",
         "FILLER_BAD_CONTRACT",
         "FILLER_CHEAP",
         "CONSOLIDATE",
@@ -984,9 +968,6 @@ def build_trade_asset_catalog(
         protection_weight = float(_PROTECTION_WEIGHT_BY_POSTURE.get(p, _PROTECTION_WEIGHT_BY_POSTURE["STAND_PAT"]))
 
         expendable_scored: List[Tuple[float, PlayerTradeCandidate]] = []
-        low_fit_scored: List[Tuple[float, PlayerTradeCandidate]] = []
-        redundant_scored: List[Tuple[float, PlayerTradeCandidate]] = []
-
         for c in per_team_candidates:
             peer = _compute_peer_signals(
                 candidate=c,
@@ -1090,21 +1071,9 @@ def build_trade_asset_catalog(
             if c.player_id in eligible_ids:
                 if enter_expendable:
                     expendable_scored.append((raw_trade_block_score, players[c.player_id]))
-                if "LOW_PEER_FIT" in reason_flags:
-                    low_fit_scored.append((float(peer["misfit_peer"]), players[c.player_id]))
-                if "REDUNDANT_DEPTH" in reason_flags:
-                    redundant_scored.append((float(peer["redundancy_peer_norm"]), players[c.player_id]))
 
         expendable_scored.sort(key=lambda t: (-t[0], t[1].market.total, t[1].player_id))
         expendable_ids = [c.player_id for _, c in expendable_scored[: max(0, caps.get("SURPLUS_EXPENDABLE", 0))]]
-
-        low_fit_scored = [(s, c) for s, c in low_fit_scored if c.player_id in set(expendable_ids)]
-        low_fit_scored.sort(key=lambda t: (-t[0], t[1].market.total, t[1].player_id))
-        low_fit_ids = [c.player_id for _, c in low_fit_scored[: max(0, caps.get("SURPLUS_LOW_FIT", 0))]]
-
-        redundant_scored = [(s, c) for s, c in redundant_scored if c.player_id in set(expendable_ids)]
-        redundant_scored.sort(key=lambda t: (-t[0], t[1].market.total, t[1].player_id))
-        redundant_ids = [c.player_id for _, c in redundant_scored[: max(0, caps.get("SURPLUS_REDUNDANT", 0))]]
 
         # VETERAN_SALE (SELL/REBUILD teams)
         veteran_ids: List[str] = []
@@ -1137,8 +1106,6 @@ def build_trade_asset_catalog(
             "FILLER_BAD_CONTRACT": list(filler_bad_ids),
             "FILLER_CHEAP": list(filler_cheap_ids),
             "SURPLUS_EXPENDABLE": list(expendable_ids),
-            "SURPLUS_LOW_FIT": list(low_fit_ids),
-            "SURPLUS_REDUNDANT": list(redundant_ids),
             "VETERAN_SALE": list(veteran_ids),
             "CONSOLIDATE": list(consolidate_ids),
         }

@@ -27,8 +27,6 @@ from .types import DealGeneratorConfig
 
 SURPLUS_BUCKETS_EFFECTIVE: Tuple[BucketId, ...] = (
     "SURPLUS_EXPENDABLE",
-    "SURPLUS_LOW_FIT",
-    "SURPLUS_REDUNDANT",
 )
 
 # =============================================================================
@@ -441,7 +439,7 @@ def _split_young_candidates(
     Filters:
     - receiver return_ban_teams + learned banned_receivers_by_player
     - aggregation_solo_only excluded if must_be_aggregation_friendly=True
-    - uses buckets (SURPLUS_EXPENDABLE/SURPLUS_LOW_FIT/SURPLUS_REDUNDANT, FILLER_CHEAP, CONSOLIDATE)
+    - uses buckets (SURPLUS_EXPENDABLE, FILLER_CHEAP, CONSOLIDATE)
 
     """
     receiver = str(receiver_team_id).upper() if receiver_team_id else None

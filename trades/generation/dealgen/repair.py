@@ -452,7 +452,7 @@ def _repair_second_apron_salary_mismatch(
             "FILLER_BAD_CONTRACT",
             "FILLER_CHEAP",
             "CONSOLIDATE",
-        ) + SURPLUS_BUCKETS_EFFECTIVE[::-1] + (
+        ) + SURPLUS_BUCKETS_EFFECTIVE + (
             "VETERAN_SALE",
         )
 
@@ -556,7 +556,7 @@ def _repair_second_apron_salary_mismatch(
         scan_buckets2: Tuple[BucketId, ...] = (
             "FILLER_CHEAP",
             "FILLER_BAD_CONTRACT",
-        ) + SURPLUS_BUCKETS_EFFECTIVE[::-1] + (
+        ) + SURPLUS_BUCKETS_EFFECTIVE + (
             "CONSOLIDATE",
             "VETERAN_SALE",
         )
@@ -762,4 +762,3 @@ def _repair_pick_rules(cand: DealCandidate, team_id: str, catalog: TradeAssetCat
             cand.tags.append("repair:stepien_replace_second")
 
     return True
-
