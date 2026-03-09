@@ -69,6 +69,7 @@ def apply_modifiers(
                 for label, n in (("prot_light", 10), ("prot_mid", 14), ("prot_heavy", 20)):
                     if created >= limit:
                         break
+                    intent = str(label).replace("prot_", "")
                     d2 = _replace_pick_with_protection(cand.deal, sender_team=sender, pick_id=first_pick.pick_id, protection=_top_n_protection(n))
                     c2 = DealCandidate(
                         deal=d2,
@@ -81,7 +82,12 @@ def apply_modifiers(
                         target_tier=cand.target_tier,
                         compat_archetype=cand.compat_archetype,
                         modifier_trace=[*list(cand.modifier_trace or []), "protection_step_up_down", label],
-                        tags=[*list(cand.tags or []), f"modifier:{label}"],
+                        tags=[
+                            *list(cand.tags or []),
+                            f"modifier:{label}",
+                            f"protection_intent:{intent}",
+                            f"proposal_meta:protection_intent={intent}",
+                        ],
                         repairs_used=cand.repairs_used,
                     )
                     out.append(c2)
