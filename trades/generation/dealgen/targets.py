@@ -510,7 +510,8 @@ def select_targets_sell(
     v2 정합 로직:
     - locked(allow_locked 예외 포함) 선필터
     - recent_signing_banned_until 선필터
-    - 정렬: bucket priority -> public request signal(desc) -> surplus_score(desc) -> expiring(desc) -> market_total(asc) -> player_id
+    - 정렬: bucket priority -> public request signal(desc) -> raw_trade_block_score(desc), timing_liquidity(desc), contract_pressure(desc)
+      -> market_total(asc) -> player_id
     - 상위 head만 소폭 셔플해 매번 같은 쇼핑리스트가 되지 않게 한다
     """
 
@@ -528,14 +529,13 @@ def select_targets_sell(
     # v2와 동일한 우선순위(숫자 낮을수록 우선)
     bucket_pri: Dict[str, int] = {
         "VETERAN_SALE": 0,
-        "SURPLUS_LOW_FIT": 2,
-        "SURPLUS_REDUNDANT": 3,
-        "FILLER_CHEAP": 4,
-        "FILLER_BAD_CONTRACT": 5,
-        "CONSOLIDATE": 6,
+        "SURPLUS_EXPENDABLE": 1,
+        "FILLER_CHEAP": 2,
+        "FILLER_BAD_CONTRACT": 3,
+        "CONSOLIDATE": 4,
     }
 
-    rows: List[Tuple[Tuple[int, float, float, float, float, str], SellAssetCandidate]] = []
+    rows: List[Tuple[Tuple[Any, ...], SellAssetCandidate]] = []
 
     trade_request_level_by_player = _public_trade_request_level_by_player(tick_ctx)
 
@@ -561,8 +561,16 @@ def select_targets_sell(
         else:
             pri = bucket_pri.get("FILLER_CHEAP", 4)
 
-        surplus = float(getattr(c, "surplus_score", 0.0) or 0.0)
+        raw_trade_block_score = getattr(c, "raw_trade_block_score", None)
+        trade_block_score = getattr(c, "trade_block_score", None)
+        priority_score = float(
+            raw_trade_block_score
+            if raw_trade_block_score is not None
+            else (trade_block_score if trade_block_score is not None else 0.0)
+        )
         exp = 1.0 if bool(getattr(c, "is_expiring", False)) else 0.0
+        timing_liquidity = float(getattr(c, "timing_liquidity", exp) or exp)
+        contract_pressure = float(getattr(c, "contract_pressure", 0.0) or 0.0)
         value = float(getattr(getattr(c, "market", None), "total", 0.0) or 0.0)
 
         sale_cand = SellAssetCandidate(
@@ -582,7 +590,7 @@ def select_targets_sell(
             signal_boost += float(config.public_request_priority_boost)
         signal_boost = min(max(0.0, signal_boost), max(0.0, float(config.public_request_priority_boost_cap)))
 
-        sort_key = (pri, -signal_boost, -surplus, -exp, value, str(pid))
+        sort_key = (pri, -signal_boost, -priority_score, -timing_liquidity, -contract_pressure, value, str(pid))
         rows.append((sort_key, sale_cand))
 
     if not rows:

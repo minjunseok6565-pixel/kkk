@@ -25,6 +25,10 @@ from ..asset_catalog import (
 
 from .types import DealGeneratorConfig
 
+SURPLUS_BUCKETS_EFFECTIVE: Tuple[BucketId, ...] = (
+    "SURPLUS_EXPENDABLE",
+)
+
 # =============================================================================
 # Rule SSOT helpers (trade_rules / apron thresholds)
 # =============================================================================
@@ -435,7 +439,7 @@ def _split_young_candidates(
     Filters:
     - receiver return_ban_teams + learned banned_receivers_by_player
     - aggregation_solo_only excluded if must_be_aggregation_friendly=True
-    - uses buckets (SURPLUS_LOW_FIT, SURPLUS_REDUNDANT, FILLER_CHEAP, CONSOLIDATE)
+    - uses buckets (SURPLUS_EXPENDABLE, FILLER_CHEAP, CONSOLIDATE)
 
     """
     receiver = str(receiver_team_id).upper() if receiver_team_id else None
@@ -473,7 +477,7 @@ def _split_young_candidates(
 
     # Base pool from outgoing player buckets (same as existing v1 youngish selection)
     base: List[PlayerTradeCandidate] = []
-    for b in ("SURPLUS_LOW_FIT", "SURPLUS_REDUNDANT", "FILLER_CHEAP", "CONSOLIDATE"):
+    for b in SURPLUS_BUCKETS_EFFECTIVE + ("FILLER_CHEAP", "CONSOLIDATE"):
         for pid in out.player_ids_by_bucket.get(b, tuple()):
             pid_s = str(pid)
             if pid_s in banned_players:
@@ -807,9 +811,7 @@ def _pick_return_player_salaryish_with_need(
 
     # v2의 "match" 후보 풀 감각을 v1에 맞게 최소 구현:
     # (즉시전력/가치자산/샐매 가능 바디가 섞이되 CORE는 포함하지 않음)
-    buckets: Tuple[BucketId, ...] = (
-        "SURPLUS_LOW_FIT",
-        "SURPLUS_REDUNDANT",
+    buckets: Tuple[BucketId, ...] = SURPLUS_BUCKETS_EFFECTIVE + (
         "CONSOLIDATE",
         "FILLER_CHEAP",
         "FILLER_BAD_CONTRACT",

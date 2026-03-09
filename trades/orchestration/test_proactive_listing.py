@@ -16,7 +16,12 @@ class ProactiveListingTests(unittest.TestCase):
         agency=None,
         player_ids_by_bucket=None,
     ):
-        out = SimpleNamespace(players=players, player_ids_by_bucket=dict(player_ids_by_bucket or {}))
+        normalized_players = {}
+        for pid, p in (players or {}).items():
+            if getattr(p, "trade_block_score", None) is None:
+                setattr(p, "trade_block_score", float(getattr(p, "surplus_score", 0.0) or 0.0))
+            normalized_players[pid] = p
+        out = SimpleNamespace(players=normalized_players, player_ids_by_bucket=dict(player_ids_by_bucket or {}))
         ts = SimpleNamespace(
             trade_posture=posture,
             time_horizon=horizon,
@@ -46,32 +51,27 @@ class ProactiveListingTests(unittest.TestCase):
             ai_proactive_listing_threshold_default=0.55,
             ai_proactive_listing_bucket_thresholds={
                 "AGGRESSIVE_BUY": {
-                    "SURPLUS_LOW_FIT": 0.30,
-                    "SURPLUS_REDUNDANT": 0.35,
+                    "SURPLUS_EXPENDABLE": 0.66,
                     "FILLER_BAD_CONTRACT": 0.80,
                     "VETERAN_SALE": 0.90,
                 },
                 "SOFT_BUY": {
-                    "SURPLUS_LOW_FIT": 0.38,
-                    "SURPLUS_REDUNDANT": 0.42,
+                    "SURPLUS_EXPENDABLE": 0.62,
                     "FILLER_BAD_CONTRACT": 0.82,
                     "VETERAN_SALE": 0.92,
                 },
                 "STAND_PAT": {
-                    "SURPLUS_LOW_FIT": 0.50,
-                    "SURPLUS_REDUNDANT": 0.55,
+                    "SURPLUS_EXPENDABLE": 0.56,
                     "FILLER_BAD_CONTRACT": 0.86,
                     "VETERAN_SALE": 0.95,
                 },
                 "SOFT_SELL": {
-                    "SURPLUS_LOW_FIT": 0.40,
-                    "SURPLUS_REDUNDANT": 0.45,
+                    "SURPLUS_EXPENDABLE": 0.46,
                     "FILLER_BAD_CONTRACT": 0.70,
                     "VETERAN_SALE": 0.45,
                 },
                 "SELL": {
-                    "SURPLUS_LOW_FIT": 0.32,
-                    "SURPLUS_REDUNDANT": 0.38,
+                    "SURPLUS_EXPENDABLE": 0.40,
                     "FILLER_BAD_CONTRACT": 0.62,
                     "VETERAN_SALE": 0.35,
                 },
@@ -90,7 +90,7 @@ class ProactiveListingTests(unittest.TestCase):
     def test_proactive_listing_adds_candidate_without_props(self):
         players = {
             "p1": SimpleNamespace(
-                buckets=("SURPLUS_LOW_FIT",),
+                buckets=("SURPLUS_EXPENDABLE",),
                 lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.9,
@@ -100,7 +100,7 @@ class ProactiveListingTests(unittest.TestCase):
         trade_market = {"listings": {}, "events": []}
         listed = apply_ai_proactive_listings(
             team_id="LAL",
-            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_LOW_FIT": ("p1",)}),
+            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
             trade_market=trade_market,
             today=date(2026, 2, 1),
             config=self._cfg(),
@@ -119,7 +119,7 @@ class ProactiveListingTests(unittest.TestCase):
                 is_expiring=False,
             ),
             "locked": SimpleNamespace(
-                buckets=("SURPLUS_LOW_FIT",),
+                buckets=("SURPLUS_EXPENDABLE",),
                 lock=SimpleNamespace(is_locked=True),
                 recent_signing_banned_until=None,
                 surplus_score=1.0,
@@ -131,7 +131,7 @@ class ProactiveListingTests(unittest.TestCase):
             team_id="LAL",
             tick_ctx=self._tick_ctx(
                 players,
-                player_ids_by_bucket={"UNKNOWN_BUCKET": ("not_allowed",), "SURPLUS_LOW_FIT": ("locked",)},
+                player_ids_by_bucket={"UNKNOWN_BUCKET": ("not_allowed",), "SURPLUS_EXPENDABLE": ("locked",)},
             ),
             trade_market=trade_market,
             today=date(2026, 2, 1),
@@ -188,7 +188,7 @@ class ProactiveListingTests(unittest.TestCase):
     def test_proactive_listing_respects_player_cooldown(self):
         players = {
             "p1": SimpleNamespace(
-                buckets=("SURPLUS_LOW_FIT",),
+                buckets=("SURPLUS_EXPENDABLE",),
                 lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.9,
@@ -207,7 +207,7 @@ class ProactiveListingTests(unittest.TestCase):
         }
         listed = apply_ai_proactive_listings(
             team_id="LAL",
-            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_LOW_FIT": ("p1",)}),
+            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
             trade_market=trade_market,
             today=date(2026, 2, 3),
             config=self._cfg(ai_proactive_listing_player_cooldown_days=7),
@@ -217,7 +217,7 @@ class ProactiveListingTests(unittest.TestCase):
     def test_threshold_excludes_below_cutoff(self):
         players = {
             "p1": SimpleNamespace(
-                buckets=("SURPLUS_LOW_FIT",),
+                buckets=("SURPLUS_EXPENDABLE",),
                 lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.40,
@@ -227,7 +227,7 @@ class ProactiveListingTests(unittest.TestCase):
         trade_market = {"listings": {}, "events": []}
         listed = apply_ai_proactive_listings(
             team_id="LAL",
-            tick_ctx=self._tick_ctx(players, posture="STAND_PAT", player_ids_by_bucket={"SURPLUS_LOW_FIT": ("p1",)}),
+            tick_ctx=self._tick_ctx(players, posture="STAND_PAT", player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
             trade_market=trade_market,
             today=date(2026, 2, 2),
             config=self._cfg(),
@@ -237,7 +237,7 @@ class ProactiveListingTests(unittest.TestCase):
     def test_weekly_cadence_skips_non_anchor_day(self):
         players = {
             "p1": SimpleNamespace(
-                buckets=("SURPLUS_LOW_FIT",),
+                buckets=("SURPLUS_EXPENDABLE",),
                 lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.9,
@@ -247,7 +247,7 @@ class ProactiveListingTests(unittest.TestCase):
         trade_market = {"listings": {}, "events": [], "proactive_listing_meta": {}}
         listed = apply_ai_proactive_listings(
             team_id="LAL",
-            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_LOW_FIT": ("p1",)}),
+            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
             trade_market=trade_market,
             today=date(2026, 2, 3),  # Tuesday
             config=self._cfg(ai_proactive_listing_cadence="WEEKLY", ai_proactive_listing_anchor_weekday=0),
@@ -258,7 +258,7 @@ class ProactiveListingTests(unittest.TestCase):
     def test_threshold_allows_above_cutoff(self):
         players = {
             "p1": SimpleNamespace(
-                buckets=("SURPLUS_LOW_FIT",),
+                buckets=("SURPLUS_EXPENDABLE",),
                 lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.80,
@@ -268,7 +268,7 @@ class ProactiveListingTests(unittest.TestCase):
         trade_market = {"listings": {}, "events": []}
         listed = apply_ai_proactive_listings(
             team_id="LAL",
-            tick_ctx=self._tick_ctx(players, posture="STAND_PAT", player_ids_by_bucket={"SURPLUS_LOW_FIT": ("p1",)}),
+            tick_ctx=self._tick_ctx(players, posture="STAND_PAT", player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
             trade_market=trade_market,
             today=date(2026, 2, 2),
             config=self._cfg(),
@@ -278,34 +278,34 @@ class ProactiveListingTests(unittest.TestCase):
     def test_posture_specific_threshold_diff(self):
         players = {
             "p1": SimpleNamespace(
-                buckets=("SURPLUS_LOW_FIT",),
+                buckets=("SURPLUS_EXPENDABLE",),
                 lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
-                surplus_score=0.45,
+                surplus_score=0.60,
                 is_expiring=False,
             )
         }
         buy_listed = apply_ai_proactive_listings(
             team_id="LAL",
-            tick_ctx=self._tick_ctx(players, posture="AGGRESSIVE_BUY", player_ids_by_bucket={"SURPLUS_LOW_FIT": ("p1",)}),
+            tick_ctx=self._tick_ctx(players, posture="AGGRESSIVE_BUY", player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
             trade_market={"listings": {}, "events": []},
             today=date(2026, 2, 2),
             config=self._cfg(),
         )
         pat_listed = apply_ai_proactive_listings(
             team_id="LAL",
-            tick_ctx=self._tick_ctx(players, posture="STAND_PAT", player_ids_by_bucket={"SURPLUS_LOW_FIT": ("p1",)}),
+            tick_ctx=self._tick_ctx(players, posture="STAND_PAT", player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
             trade_market={"listings": {}, "events": []},
             today=date(2026, 2, 2),
             config=self._cfg(),
         )
-        self.assertEqual(buy_listed, ["p1"])
-        self.assertEqual(pat_listed, [])
+        self.assertEqual(buy_listed, [])
+        self.assertEqual(pat_listed, ["p1"])
 
     def test_weekly_cadence_stamps_last_eval_even_when_no_rows(self):
         players = {
             "p1": SimpleNamespace(
-                buckets=("SURPLUS_LOW_FIT",),
+                buckets=("SURPLUS_EXPENDABLE",),
                 lock=SimpleNamespace(is_locked=True),
                 recent_signing_banned_until=None,
                 surplus_score=0.90,
@@ -316,7 +316,7 @@ class ProactiveListingTests(unittest.TestCase):
         today = date(2026, 2, 2)  # Monday
         listed = apply_ai_proactive_listings(
             team_id="LAL",
-            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_LOW_FIT": ("p1",)}),
+            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
             trade_market=trade_market,
             today=today,
             config=self._cfg(ai_proactive_listing_cadence="WEEKLY", ai_proactive_listing_anchor_weekday=0),
@@ -327,7 +327,7 @@ class ProactiveListingTests(unittest.TestCase):
     def test_weekly_cadence_skips_within_7_days_since_last_eval(self):
         players = {
             "p1": SimpleNamespace(
-                buckets=("SURPLUS_LOW_FIT",),
+                buckets=("SURPLUS_EXPENDABLE",),
                 lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.90,
@@ -341,7 +341,7 @@ class ProactiveListingTests(unittest.TestCase):
         }
         listed = apply_ai_proactive_listings(
             team_id="LAL",
-            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_LOW_FIT": ("p1",)}),
+            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
             trade_market=trade_market,
             today=date(2026, 2, 2),  # Monday
             config=self._cfg(ai_proactive_listing_cadence="WEEKLY", ai_proactive_listing_anchor_weekday=0),
@@ -352,7 +352,7 @@ class ProactiveListingTests(unittest.TestCase):
     def test_daily_cadence_ignores_weekly_meta(self):
         players = {
             "p1": SimpleNamespace(
-                buckets=("SURPLUS_LOW_FIT",),
+                buckets=("SURPLUS_EXPENDABLE",),
                 lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.90,
@@ -366,10 +366,57 @@ class ProactiveListingTests(unittest.TestCase):
         }
         listed = apply_ai_proactive_listings(
             team_id="LAL",
-            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_LOW_FIT": ("p1",)}),
+            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
             trade_market=trade_market,
             today=date(2026, 2, 2),
             config=self._cfg(ai_proactive_listing_cadence="DAILY"),
+        )
+        self.assertEqual(listed, ["p1"])
+
+    def test_surplus_expendable_threshold_applies(self):
+        players = {
+            "p1": SimpleNamespace(
+                buckets=("SURPLUS_EXPENDABLE",),
+                lock=SimpleNamespace(is_locked=False),
+                recent_signing_banned_until=None,
+                surplus_score=0.10,
+                raw_trade_block_score=0.70,
+                trade_block_score=0.80,
+                is_expiring=False,
+            )
+        }
+        listed = apply_ai_proactive_listings(
+            team_id="LAL",
+            tick_ctx=self._tick_ctx(players, posture="SELL", player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
+            trade_market={"listings": {}, "events": []},
+            today=date(2026, 2, 2),
+            config=self._cfg(),
+        )
+        self.assertEqual(listed, ["p1"])
+
+    def test_surplus_expendable_threshold_uses_direct_key(self):
+        players = {
+            "p1": SimpleNamespace(
+                buckets=("SURPLUS_EXPENDABLE",),
+                lock=SimpleNamespace(is_locked=False),
+                recent_signing_banned_until=None,
+                surplus_score=0.50,
+                is_expiring=False,
+            )
+        }
+        cfg = self._cfg(
+            ai_proactive_listing_bucket_thresholds={
+                "SELL": {
+                    "SURPLUS_EXPENDABLE": 0.47,
+                }
+            }
+        )
+        listed = apply_ai_proactive_listings(
+            team_id="LAL",
+            tick_ctx=self._tick_ctx(players, posture="SELL", player_ids_by_bucket={"SURPLUS_EXPENDABLE": ("p1",)}),
+            trade_market={"listings": {}, "events": []},
+            today=date(2026, 2, 2),
+            config=cfg,
         )
         self.assertEqual(listed, ["p1"])
 
