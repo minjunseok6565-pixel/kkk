@@ -2,6 +2,7 @@
 
 본 문서는 `docs/SURPLUS_EXPENDABLE_통합_적용_계획.md`를 구현 가능한 작업 단위로 분해한 **실행 명세서**다.
 목표는 기존 시스템 호환성을 유지하면서 `SURPLUS_LOW_FIT`/`SURPLUS_REDUNDANT`를 `SURPLUS_EXPENDABLE`로 통합하는 것이다.
+본 문서에 명시되지 않은 임의 구현은 허용하지 않으며, 패치 시 모든 판단 근거는 아래 명세를 따른다.
 
 ---
 
@@ -10,6 +11,9 @@
 - 런타임 파손 방지를 위해 **2단계 배포**를 전제로 한다.
   - Step A: 내부 신호/점수/게이트 도입 + alias 유지
   - Step B: 외부 기본 버킷을 `SURPLUS_EXPENDABLE`로 전환
+- 정렬/threshold 전환은 **필수 feature flag + dual-read**로만 수행한다.
+  - 신규 키(`raw_trade_block_score`/`trade_block_score`)가 없으면 반드시 `surplus_score` fallback
+  - 기본값 전환 전 최소 1개 릴리즈에서 dual-read telemetry를 수집
 - 기존 문자열 의존 코드가 많으므로, 최소 1 릴리즈 동안 아래 alias를 유지한다.
   - `SURPLUS_LOW_FIT` → `SURPLUS_EXPENDABLE`
   - `SURPLUS_REDUNDANT` → `SURPLUS_EXPENDABLE`
@@ -44,6 +48,14 @@
 - `surplus_reason_flags: Tuple[str, ...]`
 - `surplus_protection_flags: Tuple[str, ...]`
 
+추가 필드의 데이터 소스는 아래로 고정한다:
+- `contract_gap_cap_share`, `expected_cap_share_avg`, `actual_cap_share_avg`, `basketball_total`는
+  현재 `PlayerTradeCandidate` 직접 필드가 아니라 value_breakdown/`IncomingPlayerRef` 경로에 있으므로,
+  `asset_catalog`에서 candidate 생성 직전에 명시적으로 주입한다.
+- 주입 경로는 2안 중 1개를 반드시 택해 구현한다(혼용 금지).
+  1) `PlayerTradeCandidate` 확장 필드로 영구 이관
+  2) `asset_catalog` 내부 임시 dict에서 계산 후 최종 score/flag만 candidate에 기록
+
 호환을 위해 기존 `fit_vs_team`, `surplus_score`, `buckets`는 그대로 유지.
 
 ### C. Configurable threshold 상수 추가
@@ -74,11 +86,11 @@
 선수 `p`별:
 
 - `peer_supply_without_p[tag] = max(0, team_supply_total[tag] - supply_p[tag])`
-- `peer_need_map(p)`는 기존 `fit_engine` 사용 경로에 맞춰 아래 중 하나 선택
-  1) 권장: `fit_engine.compute_team_need_from_supply(peer_supply_without_p, roster_meta)`
-  2) 대안: 기존 `dc.need_map`을 기준으로 `supply_p` 기여분을 역보정하는 근사 함수
-
-> 구현 우선순위: 1) 가능하면 정확 계산, 불가 시 2)로 시작하고 TODO 남김.
+- `peer_need_map(p)`는 R1에서 아래 근사식으로 **고정 구현**한다.
+  - 기준: `dc.need_map`
+  - 보정: `team_supply_total` 대비 `supply_p` 차감량을 반영한 역보정
+- `fit_engine.compute_team_need_from_supply(...)`는 현재 API가 없으므로 R1 범위에서 사용하지 않는다.
+  - 해당 API는 R2+ 신규 과제로 분리하고, 도입 전까지는 근사식을 SSOT로 유지한다.
 
 ## 2.2 신호 정의
 
@@ -110,8 +122,8 @@ else:
     contract_pressure = clamp01(max(0.0, salary_m - basketball_fair_value_m) / 10.0)
 ```
 
-  - `basketball_fair_value_m`는 가능하면 `basketball_total` 기반 역매핑 함수로 추정하고,
-    역매핑이 없으면 이 fallback 분기는 비활성화(0.0) 권장.
+  - `basketball_fair_value_m` 역매핑 SSOT가 없으므로 R1에서는 해당 분기를 기본 비활성화(0.0)한다.
+  - 역매핑 함수가 추가되는 릴리즈에서만 활성화한다.
 
 - `minutes_squeeze_proxy`
   - 동일 `top_tags`를 공유하는 팀 동료 수를 이용
@@ -194,10 +206,13 @@ trade_block_score = clamp01(raw_trade_block_score)
 운영 원칙:
 - **정렬/랭킹/분포 분석은 `raw_trade_block_score` 우선 사용**
 - **임계치 게이트/표시는 `trade_block_score`(normalized) 사용**
-- 팀/포지션별 스윕 튜닝 시 raw 분포(p10/p50/p90) 로그를 함께 저장
+- 팀/포지션별 스윕 튜닝 시 raw 분포(p10/p50/p90) + 기존 `surplus_score` 분포를 함께 저장
 
 `surplus_score`는 호환상 기존대로 유지(`1 - fit_vs_team`).
-단, 신규 정책에서는 `trade_block_score`/`raw_trade_block_score`를 우선 사용.
+전환 규칙은 아래로 고정한다.
+- feature flag OFF: 기존 `surplus_score` 경로만 사용
+- feature flag ON: 신규 점수 우선 사용 + 키 부재 시 `surplus_score` fallback
+- 최소 1개 릴리즈 동안 dual-read 텔레메트리 저장 후 기본값 전환
 
 ---
 
@@ -274,6 +289,11 @@ SELL 후보 정렬키 변경:
 변경
 - `(..., -raw_trade_block_score, -timing_liquidity, -contract_pressure, market_total, player_id)`
 
+세부 구현(필수):
+- `ai_use_expendable_priority_signals`(bool, default=False) 추가
+- flag ON: `raw_trade_block_score` 우선, 없으면 `trade_block_score`, 없으면 `surplus_score`
+- flag OFF: 기존 `surplus_score` 정렬 유지
+
 버킷 priority에 `SURPLUS_EXPENDABLE` 추가(기존 surplus 둘보다 상위).
 
 ## 4.3 `trades/orchestration/listing_policy.py`
@@ -282,8 +302,9 @@ SELL 후보 정렬키 변경:
 - bucket threshold 조회 시 fallback 순서:
   1) `SURPLUS_EXPENDABLE`
   2) (없으면) `SURPLUS_LOW_FIT`/`SURPLUS_REDUNDANT` 평균 또는 max
-- `_bucket_priority_key`가 `raw_trade_block_score` 우선 사용하도록 변경
-  - 없으면 `trade_block_score` -> `surplus_score` 순 fallback
+- `_bucket_priority_key`/threshold 평가에 `ai_use_expendable_priority_signals`를 동일 적용
+  - flag ON: `raw_trade_block_score` -> `trade_block_score` -> `surplus_score` 순 fallback
+  - flag OFF: `surplus_score`만 사용
 
 ## 4.4 `trades/generation/dealgen/types.py`
 
@@ -332,11 +353,14 @@ SURPLUS_BUCKETS_EFFECTIVE = ("SURPLUS_EXPENDABLE", "SURPLUS_LOW_FIT", "SURPLUS_R
 
 3. `trades/generation/dealgen/test_targets_priority_signals.py` 확장
    - `raw_trade_block_score` 정렬 우선 검증
+   - flag OFF에서 기존 `surplus_score` 정렬 유지 검증
+   - 신규 필드 결손 시 fallback 검증
 
 ## 5.2 회귀 테스트 포인트
 
 - alias 모드에서 기존 `SURPLUS_LOW_FIT` 참조 테스트가 계속 통과하는지 확인
 - 버킷 비어도 딜 생성 파이프라인이 fail-open이 아닌 deterministic fallback 하는지 확인
+- dual-read 기간에 신규/기존 점수 분포 로그가 동시에 기록되는지 확인
 
 ---
 
@@ -360,8 +384,8 @@ SURPLUS_BUCKETS_EFFECTIVE = ("SURPLUS_EXPENDABLE", "SURPLUS_LOW_FIT", "SURPLUS_R
 - [ ] `PlayerTradeCandidate` 신규 필드 추가 및 직렬화 영향 확인
 - [ ] leave-one-out 계산 도입 (성능 O(N·T) 유지)
 - [ ] 게이트/보호 플래그/사유 플래그 적용
-- [ ] SELL 정렬 키 `raw_trade_block_score` 전환
-- [ ] raw/normalized 동시 저장 및 로깅
+- [ ] SELL 정렬/threshold 전환 feature flag(`ai_use_expendable_priority_signals`) 추가
+- [ ] raw/normalized + `surplus_score` 동시 저장 및 로깅(dual-read)
 - [ ] listing threshold resolver에 신규 키 + fallback 추가
 - [ ] counter-offer/dealgen 버킷 순회 상수화
 - [ ] 테스트 추가/갱신 및 회귀 통과
