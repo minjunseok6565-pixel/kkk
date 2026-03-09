@@ -43,7 +43,7 @@ class DealGeneratorConfig:
 
     # --- base budgets (scaled)
     base_max_targets: int = 14
-    base_beam_width: int = 8
+    base_beam_width: int = 12
     base_max_attempts_per_target: int = 45
     base_max_validations: int = 360
     base_max_evaluations: int = 180
@@ -65,11 +65,16 @@ class DealGeneratorConfig:
     young_throwin_max_candidates: int = 6
 
     # --- deal shape constraints (generator-side)
-    max_assets_per_side: int = 6
-    max_players_moved_total: int = 4
-    max_players_per_side: int = 2
-    max_picks_per_side: int = 3
-    max_seconds_per_side: int = 2
+    skeleton_overhaul_enabled: bool = True
+    skeleton_modifiers_enabled: bool = True
+    modifier_max_variants_per_candidate: int = 3
+    modifier_protection_enabled: bool = True
+    modifier_swap_substitute_enabled: bool = True
+    max_assets_per_side: int = 9
+    max_players_moved_total: int = 7
+    max_players_per_side: int = 4
+    max_picks_per_side: int = 4
+    max_seconds_per_side: int = 4
 
     # --- sweetener loop
     sweetener_enabled: bool = True
@@ -338,6 +343,12 @@ class DealGeneratorStats:
     fit_swap_candidates_tried: int = 0
     fit_swap_success: int = 0
 
+    # hard-cap monitoring
+    budget_validation_cap_hits: int = 0
+    budget_evaluation_cap_hits: int = 0
+    hard_validation_cap_hits: int = 0
+    hard_evaluation_cap_hits: int = 0
+
     # failure kind -> count
     failures_by_kind: Dict[str, int] = field(default_factory=dict)
 
@@ -387,6 +398,13 @@ class DealCandidate:
     # for debug/tagging
     focal_player_id: str
     archetype: str
+
+    # v3 skeleton metadata (phase-1 compatibility introduction)
+    skeleton_id: str = ""
+    skeleton_domain: str = ""
+    target_tier: str = ""
+    compat_archetype: str = ""
+    modifier_trace: List[str] = field(default_factory=list)
 
     tags: List[str] = field(default_factory=list)
     repairs_used: int = 0
