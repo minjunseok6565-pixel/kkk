@@ -294,7 +294,7 @@ class DealGeneratorConfig:
     ai_proactive_listing_ttl_days_default: int = 5
     ai_proactive_listing_priority_base: float = 0.45
     ai_proactive_listing_priority_span: float = 0.35
-    ai_use_expendable_priority_signals: bool = False
+    ai_use_expendable_priority_signals: bool = True
 
     # proactive listing cadence (listing only; proposal generation cadence is unchanged)
     ai_proactive_listing_cadence: str = "WEEKLY"  # DAILY | WEEKLY
