@@ -48,40 +48,30 @@ class ProactiveListingTests(unittest.TestCase):
                 "AGGRESSIVE_BUY": {
                     "SURPLUS_LOW_FIT": 0.30,
                     "SURPLUS_REDUNDANT": 0.35,
-                    "CONSOLIDATE": 0.55,
-                    "FILLER_CHEAP": 0.65,
                     "FILLER_BAD_CONTRACT": 0.80,
                     "VETERAN_SALE": 0.90,
                 },
                 "SOFT_BUY": {
                     "SURPLUS_LOW_FIT": 0.38,
                     "SURPLUS_REDUNDANT": 0.42,
-                    "CONSOLIDATE": 0.60,
-                    "FILLER_CHEAP": 0.68,
                     "FILLER_BAD_CONTRACT": 0.82,
                     "VETERAN_SALE": 0.92,
                 },
                 "STAND_PAT": {
                     "SURPLUS_LOW_FIT": 0.50,
                     "SURPLUS_REDUNDANT": 0.55,
-                    "CONSOLIDATE": 0.70,
-                    "FILLER_CHEAP": 0.72,
                     "FILLER_BAD_CONTRACT": 0.86,
                     "VETERAN_SALE": 0.95,
                 },
                 "SOFT_SELL": {
                     "SURPLUS_LOW_FIT": 0.40,
                     "SURPLUS_REDUNDANT": 0.45,
-                    "CONSOLIDATE": 0.85,
-                    "FILLER_CHEAP": 0.62,
                     "FILLER_BAD_CONTRACT": 0.70,
                     "VETERAN_SALE": 0.45,
                 },
                 "SELL": {
                     "SURPLUS_LOW_FIT": 0.32,
                     "SURPLUS_REDUNDANT": 0.38,
-                    "CONSOLIDATE": 0.90,
-                    "FILLER_CHEAP": 0.58,
                     "FILLER_BAD_CONTRACT": 0.62,
                     "VETERAN_SALE": 0.35,
                 },
@@ -172,6 +162,28 @@ class ProactiveListingTests(unittest.TestCase):
         )
         self.assertEqual(listed, [])
         self.assertNotIn("cheap", trade_market.get("listings", {}))
+
+
+    def test_proactive_listing_skips_consolidate_bucket(self):
+        players = {
+            "c1": SimpleNamespace(
+                buckets=("CONSOLIDATE",),
+                lock=SimpleNamespace(is_locked=False),
+                recent_signing_banned_until=None,
+                surplus_score=1.0,
+                is_expiring=False,
+            )
+        }
+        trade_market = {"listings": {}, "events": []}
+        listed = apply_ai_proactive_listings(
+            team_id="LAL",
+            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"CONSOLIDATE": ("c1",)}),
+            trade_market=trade_market,
+            today=date(2026, 2, 1),
+            config=self._cfg(),
+        )
+        self.assertEqual(listed, [])
+        self.assertNotIn("c1", trade_market.get("listings", {}))
 
     def test_proactive_listing_respects_player_cooldown(self):
         players = {

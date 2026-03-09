@@ -151,21 +151,19 @@ SELL 우선순위:
 즉, 한 선수가 동시에 `VETERAN_SALE`과 `SURPLUS_LOW_FIT` 조건을 만족하면, SELL에서는 앞선 `VETERAN_SALE`로 먼저 잡히고 뒤 bucket에서는 중복 제외됩니다.
 
 ### C. Proactive Listing(자동 공개 매물 등록)에서는 일부 bucket만 사용
-현재 로직에서 자동 공개 매물(트레이드 블록) 대상으로 허용되는 bucket은 아래 5개입니다.
+현재 로직에서 자동 공개 매물(트레이드 블록) 대상으로 허용되는 bucket은 아래 4개입니다.
 - `VETERAN_SALE`
 - `SURPLUS_LOW_FIT`
 - `SURPLUS_REDUNDANT`
 - `FILLER_BAD_CONTRACT`
-- `CONSOLIDATE`
 
-즉, `FILLER_CHEAP`는 **딜 구조(샐러리 매칭/보조 조각) 용도**로는 쓰이지만, 자동 트레이드 블록 공개 대상에서는 제외됩니다.
+즉, `FILLER_CHEAP`와 `CONSOLIDATE`는 **딜 구조(샐러리 매칭/자산 묶기) 용도**로는 쓰이지만, 자동 트레이드 블록 공개 대상에서는 제외됩니다.
 
 SELL posture에서 기본 threshold(낮을수록 등록 쉬움):
 - `SURPLUS_LOW_FIT`: 0.32
 - `SURPLUS_REDUNDANT`: 0.38
 - `FILLER_BAD_CONTRACT`: 0.62
 - `VETERAN_SALE`: 0.35
-- `CONSOLIDATE`: 0.90
 
 허용 bucket에 한해 `surplus_score >= bucket별 threshold`를 만족해야 자동 등록 후보가 됩니다.
 
