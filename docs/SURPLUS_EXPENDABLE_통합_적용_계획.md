@@ -77,7 +77,8 @@ leave-one-out(해당 선수를 뺀 동료 로스터 기준) 계산은 없다.
 1. **호환성 우선**: 1차 단계에서 기존 버킷 문자열을 유지한다.
 2. **의미 우선**: outgoing 전용 신호(`fit_vs_peers`, `peer_cover`, `dependence_risk`)를 먼저 도입한다.
 3. **게이트 우선**: `LOW_FIT 단독 진입 금지`를 우선 반영한다.
-4. **설명 가능성 유지**: 최종 버킷은 1개로 가더라도 reason flag는 다중 보관한다.
+4. **마이그레이션 강제**: 정렬/threshold 전환은 feature flag + dual-read(신규 키 부재 시 기존 `surplus_score` fallback)를 필수로 적용한다.
+5. **설명 가능성 유지**: 최종 버킷은 1개로 가더라도 reason flag는 다중 보관한다.
 
 ---
 
@@ -105,6 +106,8 @@ leave-one-out(해당 선수를 뺀 동료 로스터 기준) 계산은 없다.
 선수 `p`별로 아래를 계산한다.
 
 - `peer_need_map(p)`: p 제외 팀 로스터 기준 need
+  - R1 기본 구현: `dc.need_map` + `team_supply_total - supply_p` 기반 역보정 근사
+  - `fit_engine.compute_team_need_from_supply(...)`는 현재 코드에 없으므로 신규 API 과제로 분리
 - `fit_vs_peers(p)`: p 공급 vs `peer_need_map`
 - `misfit_peer = 1 - fit_vs_peers`
 - `redundancy_peer`: p 공급 × `(1 - peer_need_map)`
@@ -113,7 +116,7 @@ leave-one-out(해당 선수를 뺀 동료 로스터 기준) 계산은 없다.
 
 ### 2) 보호/보정 신호 (현재 데이터에서 가능한 범위)
 
-신규 데이터 소스 없이 현 필드로 1차 근사치 구성.
+신규 데이터 소스 없이 현 필드로 1차 근사치 구성하되, `PlayerTradeCandidate`에 없는 value_breakdown 계열 값은 `asset_catalog` 내부에서 명시적으로 주입 경로를 정의한다.
 
 - `core_proxy`
   - 팀 내 market rank
@@ -121,7 +124,9 @@ leave-one-out(해당 선수를 뺀 동료 로스터 기준) 계산은 없다.
 - `identity_risk_proxy`
   - 팀 상위 강점 태그 기여 비중(분전시간 없으면 공급 합 기반)
 - `contract_pressure`
-  - `salary_m - market.total` 기반 + expiring 보정
+  - 1순위: `contract_gap_cap_share`
+  - 2순위: `actual_cap_share_avg - expected_cap_share_avg`
+  - 둘 다 없을 때만 `salary_m - market.total` 기반 근사
 - `minutes_squeeze_proxy`
   - 포지션/태그 중복도 기반 근사
 
@@ -132,8 +137,11 @@ leave-one-out(해당 선수를 뺀 동료 로스터 기준) 계산은 없다.
 - `trade_block_score = expendable_base - protection_weight * protection_score`
 
 주의:
-- 기존 `surplus_score`는 호환을 위해 유지하되,
-  proactive listing/SELL 정렬에서 점진적으로 `trade_block_score`를 사용 가능하게 feature flag 제공.
+- 기존 `surplus_score`는 호환을 위해 유지한다.
+- 정렬/threshold 전환은 **필수 feature flag**로 제어한다.
+- 최소 1개 릴리즈 동안 dual-read를 강제한다.
+  - 신규 점수 존재 시: `raw_trade_block_score`/`trade_block_score` 사용
+  - 신규 점수 부재 시: `surplus_score` fallback
 
 ## Phase 2 — 게이트 적용 + 우선순위 수정
 
@@ -211,9 +219,11 @@ SELL 후보 정렬에서 우선 순위를 다음으로 교체.
    - surplus 게이트 반영
    - 통합 버킷 및 alias 처리
 2. `trades/generation/dealgen/targets.py`
-   - SELL 정렬 키 교체 (`trade_block_score`, `contract_pressure`)
+   - SELL 정렬 키 교체 (`raw_trade_block_score` 우선)
+   - feature flag + dual-read fallback (`surplus_score`) 적용
 3. `trades/orchestration/listing_policy.py`
    - proactive listing 허용 버킷/threshold를 통합 버킷 기준으로 확장
+   - feature flag + dual-read fallback (`surplus_score`) 적용
 4. `trades/generation/dealgen/types.py`
    - posture별 threshold 테이블 키 추가/마이그레이션
 5. `trades/counter_offer/config.py`, `trades/generation/dealgen/utils.py`, `repair.py` 등
@@ -226,7 +236,7 @@ SELL 후보 정렬에서 우선 순위를 다음으로 교체.
 ## 7) 리스크 및 완화
 
 - **리스크 A: 딜 생성량 급감/급증**
-  - 완화: feature flag + posture별 threshold 스윕 테스트
+  - 완화: feature flag(필수) + dual-read 기간 운영 + posture별 threshold 스윕 테스트
 - **리스크 B: 기존 테스트 대량 깨짐(버킷 문자열 고정)**
   - 완화: alias 기간 운영 + 테스트 fixture 이중 허용
 - **리스크 C: 계산 비용 증가(leave-one-out)**
@@ -253,7 +263,7 @@ SELL 후보 정렬에서 우선 순위를 다음으로 교체.
 
 1. Phase 1 일부: `fit_vs_peers`, `redundancy_peer`, `peer_cover`, `dependence_risk` 계산 및 로그 노출
 2. Phase 2 일부: `LOW_FIT 단독 진입 금지` 게이트 도입
-3. 정렬 키에서 `surplus_score` 단독 의존 완화 (`trade_block_score` 병행)
+3. 정렬/threshold 경로에 feature flag + dual-read를 반영해 `surplus_score` 단독 의존 완화
 
 이 3개만 반영해도,
 - 코어/정체성 자원의 과잉 매물화 감소
