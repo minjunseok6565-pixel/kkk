@@ -151,6 +151,28 @@ class ProactiveListingTests(unittest.TestCase):
         self.assertNotIn("not_allowed", listed)
         self.assertNotIn("locked", listed)
 
+
+    def test_proactive_listing_skips_filler_cheap_bucket(self):
+        players = {
+            "cheap": SimpleNamespace(
+                buckets=("FILLER_CHEAP",),
+                lock=SimpleNamespace(is_locked=False),
+                recent_signing_banned_until=None,
+                surplus_score=1.0,
+                is_expiring=False,
+            )
+        }
+        trade_market = {"listings": {}, "events": []}
+        listed = apply_ai_proactive_listings(
+            team_id="LAL",
+            tick_ctx=self._tick_ctx(players, player_ids_by_bucket={"FILLER_CHEAP": ("cheap",)}),
+            trade_market=trade_market,
+            today=date(2026, 2, 1),
+            config=self._cfg(),
+        )
+        self.assertEqual(listed, [])
+        self.assertNotIn("cheap", trade_market.get("listings", {}))
+
     def test_proactive_listing_respects_player_cooldown(self):
         players = {
             "p1": SimpleNamespace(
