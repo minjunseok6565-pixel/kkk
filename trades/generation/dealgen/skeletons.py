@@ -9,6 +9,8 @@ from ..generation_tick import TradeGenerationTickContext
 from ..asset_catalog import TradeAssetCatalog, TeamOutgoingCatalog, BucketId
 
 from .types import DealGeneratorConfig, DealGeneratorBudget, TargetCandidate, DealCandidate, SellAssetCandidate
+from .skeleton_registry import BuildContext, build_default_registry
+from .skeleton_modifiers import apply_modifiers
 from .utils import (
     _add_pick_package,
     _best_need_tag,
@@ -20,6 +22,7 @@ from .utils import (
     _pick_return_player_salaryish_with_need,
     _split_young_candidates,
     _shape_ok,
+    classify_target_tier,
 )
 
 
@@ -38,6 +41,33 @@ def _with_core_tags(tags: List[str], *, mode: str, focal_player_id: str, archety
     return out
 
 
+def _attach_v3_meta(candidate: DealCandidate, *, spec: object, target_tier: str) -> None:
+    skeleton_id = str(getattr(spec, "skeleton_id", "") or "")
+    domain = str(getattr(spec, "domain", "") or "")
+    compat = str(getattr(spec, "compat_archetype", "") or candidate.archetype)
+
+    if skeleton_id:
+        candidate.skeleton_id = skeleton_id
+    if domain:
+        candidate.skeleton_domain = domain
+    candidate.compat_archetype = compat
+    candidate.target_tier = str(target_tier).upper()
+    candidate.archetype = compat
+
+    if not isinstance(candidate.tags, list):
+        candidate.tags = list(candidate.tags or [])
+
+    for t in (
+        f"skeleton:{candidate.skeleton_id}",
+        f"domain:{candidate.skeleton_domain}",
+        f"target_tier:{candidate.target_tier}",
+        f"arch_compat:{candidate.compat_archetype}",
+        f"arch:{candidate.archetype}",
+    ):
+        if t not in candidate.tags:
+            candidate.tags.append(t)
+
+
 def build_offer_skeletons_buy(
     buyer_id: str,
     seller_id: str,
@@ -53,6 +83,47 @@ def build_offer_skeletons_buy(
     banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
 ) -> List[DealCandidate]:
     """BUY 모드: target 1명 기준 2~4개 archetype 스켈레톤."""
+
+    if bool(getattr(config, "skeleton_overhaul_enabled", True)):
+        registry = build_default_registry()
+        target_tier = classify_target_tier(target=target, config=config)
+        ctx = BuildContext(
+            mode="BUY",
+            buyer_id=buyer_id,
+            seller_id=seller_id,
+            target=target,
+            tick_ctx=tick_ctx,
+            catalog=catalog,
+            config=config,
+            budget=budget,
+            rng=rng,
+            banned_asset_keys=banned_asset_keys,
+            banned_players=banned_players,
+            banned_receivers_by_player=banned_receivers_by_player,
+        )
+        out_v3: List[DealCandidate] = []
+        for spec in registry.get_specs_for_mode_and_tier("BUY", target_tier, config, ctx=ctx):
+            built = spec.build_fn(ctx)
+            for cand in built:
+                _attach_v3_meta(cand, spec=spec, target_tier=target_tier)
+            out_v3.extend(built)
+        out_v3 = apply_modifiers(
+            out_v3,
+            catalog=catalog,
+            config=config,
+            banned_asset_keys=banned_asset_keys,
+            max_variants_per_candidate=int(getattr(config, "modifier_max_variants_per_candidate", 3) or 3),
+        )
+
+        trimmed_v3: List[DealCandidate] = []
+        for c in out_v3:
+            if not c.compat_archetype:
+                c.compat_archetype = c.archetype
+            if not c.target_tier:
+                c.target_tier = str(target_tier).upper()
+            if _shape_ok(c.deal, config=config, catalog=catalog):
+                trimmed_v3.append(c)
+        return trimmed_v3[: max(2, int(budget.beam_width))]
 
     buyer_out = catalog.outgoing_by_team.get(str(buyer_id).upper())
     seller_out = catalog.outgoing_by_team.get(str(seller_id).upper())
@@ -314,6 +385,48 @@ def build_offer_skeletons_sell(
     banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
 ) -> List[DealCandidate]:
     """SELL 모드: (seller sends sale_asset.player_id) 기준 BUYER 패키지를 생성."""
+
+    if bool(getattr(config, "skeleton_overhaul_enabled", True)):
+        registry = build_default_registry()
+        target_tier = classify_target_tier(sale_asset=sale_asset, match_tag=match_tag, config=config)
+        ctx = BuildContext(
+            mode="SELL",
+            buyer_id=buyer_id,
+            seller_id=seller_id,
+            sale_asset=sale_asset,
+            match_tag=match_tag,
+            tick_ctx=tick_ctx,
+            catalog=catalog,
+            config=config,
+            budget=budget,
+            rng=rng,
+            banned_asset_keys=banned_asset_keys,
+            banned_players=banned_players,
+            banned_receivers_by_player=banned_receivers_by_player,
+        )
+        out_v3: List[DealCandidate] = []
+        for spec in registry.get_specs_for_mode_and_tier("SELL", target_tier, config, ctx=ctx):
+            built = spec.build_fn(ctx)
+            for cand in built:
+                _attach_v3_meta(cand, spec=spec, target_tier=target_tier)
+            out_v3.extend(built)
+        out_v3 = apply_modifiers(
+            out_v3,
+            catalog=catalog,
+            config=config,
+            banned_asset_keys=banned_asset_keys,
+            max_variants_per_candidate=int(getattr(config, "modifier_max_variants_per_candidate", 3) or 3),
+        )
+
+        trimmed_v3: List[DealCandidate] = []
+        for c in out_v3:
+            if not c.compat_archetype:
+                c.compat_archetype = c.archetype
+            if not c.target_tier:
+                c.target_tier = str(target_tier).upper()
+            if _shape_ok(c.deal, config=config, catalog=catalog):
+                trimmed_v3.append(c)
+        return trimmed_v3[: max(2, int(budget.beam_width))]
 
     buyer_out = catalog.outgoing_by_team.get(str(buyer_id).upper())
     seller_out = catalog.outgoing_by_team.get(str(seller_id).upper())

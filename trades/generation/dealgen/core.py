@@ -242,6 +242,48 @@ def _derive_buy_retrieval_budget_guard_config(
     )
 
 
+def _budget_or_hard_cap_reached(stats: DealGeneratorStats, budget: DealGeneratorBudget, config: DealGeneratorConfig) -> bool:
+    hit_budget_v = int(stats.validations) >= int(budget.max_validations)
+    hit_budget_e = int(stats.evaluations) >= int(budget.max_evaluations)
+    hit_hard_v = int(stats.validations) >= int(getattr(config, "max_validations_hard", budget.max_validations) or budget.max_validations)
+    hit_hard_e = int(stats.evaluations) >= int(getattr(config, "max_evaluations_hard", budget.max_evaluations) or budget.max_evaluations)
+
+    if hit_budget_v:
+        stats.budget_validation_cap_hits += 1
+    if hit_budget_e:
+        stats.budget_evaluation_cap_hits += 1
+    if hit_hard_v:
+        stats.hard_validation_cap_hits += 1
+    if hit_hard_e:
+        stats.hard_evaluation_cap_hits += 1
+    return bool(hit_budget_v or hit_budget_e or hit_hard_v or hit_hard_e)
+
+
+def _record_candidate_observability(stats: DealGeneratorStats, cand: DealCandidate) -> None:
+    sid = str(getattr(cand, "skeleton_id", "") or "")
+    domain = str(getattr(cand, "skeleton_domain", "") or "")
+    tier = str(getattr(cand, "target_tier", "") or "")
+    arch = str(getattr(cand, "compat_archetype", "") or getattr(cand, "archetype", "") or "")
+
+    stats.bump_counter(stats.skeleton_id_counts, sid)
+    stats.bump_counter(stats.skeleton_domain_counts, domain)
+    stats.bump_counter(stats.target_tier_counts, tier)
+    stats.bump_counter(stats.arch_compat_counts, arch)
+
+    stats.modifier_candidates += 1
+    trace = list(getattr(cand, "modifier_trace", []) or [])
+    if trace:
+        stats.modifier_applied_candidates += 1
+    for mod in trace:
+        stats.bump_counter(stats.modifier_trace_counts, str(mod))
+
+
+def _finalize_observability_stats(stats: DealGeneratorStats) -> None:
+    stats.unique_skeleton_count = len([k for k in stats.skeleton_id_counts.keys() if str(k)])
+    denom = max(1, int(stats.modifier_candidates))
+    stats.modifier_success_rate = float(stats.modifier_applied_candidates) / float(denom)
+
+
 
 
 # =============================================================================
@@ -349,7 +391,7 @@ def _generate_buy_mode(
     for t in targets:
         if len(proposals) >= pool_cap:
             break
-        if stats.validations >= budget.max_validations or stats.evaluations >= budget.max_evaluations:
+        if _budget_or_hard_cap_reached(stats, budget, config):
             break
 
         # Tier2 early-stop linkage: budget 임계치 근접 시 탐색을 조기 종료.
@@ -389,6 +431,8 @@ def _generate_buy_mode(
             continue
 
         stats.skeletons_built += len(candidates)
+        for c in candidates:
+            _record_candidate_observability(stats, c)
 
         # 변형 확장: 타깃당 6~12개로 제한(폭발 방지)
         candidates = expand_variants(
@@ -429,7 +473,7 @@ def _generate_buy_mode(
                 break
             if len(proposals) >= pool_cap:
                 break
-            if stats.validations >= budget.max_validations or stats.evaluations >= budget.max_evaluations:
+            if _budget_or_hard_cap_reached(stats, budget, config):
                 break
 
             attempts += 1
@@ -670,6 +714,7 @@ def _generate_buy_mode(
         partner_side="seller",  # BUY: 다양화 기준 = seller
         cap=partner_cap,
     )
+    _finalize_observability_stats(stats)
     return proposals
 
 
@@ -741,7 +786,7 @@ def _generate_sell_mode(
     for s in sale_assets:
         if len(proposals) >= pool_cap:
             break
-        if stats.validations >= budget.max_validations or stats.evaluations >= budget.max_evaluations:
+        if _budget_or_hard_cap_reached(stats, budget, config):
             break
 
         stats.targets_considered += 1
@@ -761,7 +806,7 @@ def _generate_sell_mode(
         for buyer_id, match_tag in buyer_candidates:
             if len(proposals) >= pool_cap:
                 break
-            if stats.validations >= budget.max_validations or stats.evaluations >= budget.max_evaluations:
+            if _budget_or_hard_cap_reached(stats, budget, config):
                 break
 
             buyer_id = str(buyer_id).upper()
@@ -790,6 +835,8 @@ def _generate_sell_mode(
                 continue
 
             stats.skeletons_built += len(candidates)
+            for c in candidates:
+                _record_candidate_observability(stats, c)
 
             # soft guard: payroll_after_est 기준 2nd apron one-for-one 위반 가능 후보 제거(탐색 낭비/invalid 감소)
             if getattr(config, "soft_guard_second_apron_by_constraints", False):
@@ -813,7 +860,7 @@ def _generate_sell_mode(
                     break
                 if len(proposals) >= pool_cap:
                     break
-                if stats.validations >= budget.max_validations or stats.evaluations >= budget.max_evaluations:
+                if _budget_or_hard_cap_reached(stats, budget, config):
                     break
 
                 attempts += 1
@@ -1045,6 +1092,7 @@ def _generate_sell_mode(
         partner_side="buyer",  # SELL: 다양화 기준 = buyer
         cap=partner_cap,
     )
+    _finalize_observability_stats(stats)
     return proposals
 
 
@@ -1340,7 +1388,11 @@ def _beam_select_candidates(
     rng: random.Random,
     cap: int,
 ) -> List[DealCandidate]:
-    """랜덤 shuffle+slice 대신: pre-score 정렬 + 제한적 랜덤 샘플링(다양성 유지)."""
+    """도메인 균등 슬롯 + pre-score 기반 빔 선택.
+
+    - 가능한 범위에서 skeleton_domain별 최소 1슬롯씩 배분해 다양성을 보장.
+    - 잔여 슬롯은 기존 pre-score 정렬 순서로 채운다.
+    """
     cap_n = max(1, int(cap))
     if len(candidates) <= cap_n:
         return candidates
@@ -1351,16 +1403,43 @@ def _beam_select_candidates(
         scored.append((_prescore_candidate(c, buyer_id=buyer_id, seller_id=seller_id, tick_ctx=tick_ctx, catalog=catalog), rng.random(), c))
     scored.sort(key=lambda x: (-x[0], x[1]))
 
-    # 상위 일부는 고정, 나머지는 상위 풀에서 랜덤 추출
-    n_fixed = max(2, cap_n // 2)
-    fixed = [c for _, __, c in scored[:n_fixed]]
+    # 1) domain 균등 슬롯(라운드-로빈)
+    by_domain: Dict[str, List[DealCandidate]] = {}
+    for _, __, c in scored:
+        domain = str(getattr(c, "skeleton_domain", "") or getattr(c, "archetype", "misc") or "misc")
+        by_domain.setdefault(domain, []).append(c)
 
-    pool = [c for _, __, c in scored[n_fixed : min(len(scored), n_fixed + cap_n * 3)]]
-    rng.shuffle(pool)
+    domains = sorted(by_domain.keys())
+    out: List[DealCandidate] = []
+    used: Set[int] = set()
 
-    out = list(fixed)
-    need = cap_n - len(out)
-    if need > 0:
-        out.extend(pool[:need])
+    # domain 수가 너무 많아도 cap 안에서 최대한 균등 배분
+    made_progress = True
+    while len(out) < cap_n and made_progress:
+        made_progress = False
+        for d in domains:
+            if len(out) >= cap_n:
+                break
+            arr = by_domain.get(d, [])
+            while arr:
+                cand = arr.pop(0)
+                cid = id(cand)
+                if cid in used:
+                    continue
+                used.add(cid)
+                out.append(cand)
+                made_progress = True
+                break
+
+    # 2) 잔여 슬롯은 global score 순으로 보충
+    if len(out) < cap_n:
+        for _, __, c in scored:
+            cid = id(c)
+            if cid in used:
+                continue
+            out.append(c)
+            used.add(cid)
+            if len(out) >= cap_n:
+                break
+
     return out[:cap_n]
-

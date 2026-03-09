@@ -43,7 +43,7 @@ class DealGeneratorConfig:
 
     # --- base budgets (scaled)
     base_max_targets: int = 14
-    base_beam_width: int = 8
+    base_beam_width: int = 12
     base_max_attempts_per_target: int = 45
     base_max_validations: int = 360
     base_max_evaluations: int = 180
@@ -65,11 +65,95 @@ class DealGeneratorConfig:
     young_throwin_max_candidates: int = 6
 
     # --- deal shape constraints (generator-side)
-    max_assets_per_side: int = 6
-    max_players_moved_total: int = 4
-    max_players_per_side: int = 2
-    max_picks_per_side: int = 3
-    max_seconds_per_side: int = 2
+    skeleton_overhaul_enabled: bool = True
+    skeleton_modifiers_enabled: bool = True
+    modifier_max_variants_per_candidate: int = 3
+    modifier_protection_enabled: bool = True
+    modifier_swap_substitute_enabled: bool = True
+    modifier_protection_default_ladder: Tuple[str, ...] = ("prot_light", "prot_mid", "prot_heavy")
+    skeleton_gate_strictness: float = 0.35
+    skeleton_false_negative_bias: float = 0.75
+    max_assets_per_side: int = 9
+    max_players_moved_total: int = 7
+    max_players_per_side: int = 4
+    max_picks_per_side: int = 4
+    max_seconds_per_side: int = 4
+
+    # --- target tier routing (phase-4)
+    skeleton_route_role: Tuple[str, ...] = (
+        "compat.picks_only",
+        "compat.young_plus_pick",
+        "compat.p4p_salary",
+        "compat.consolidate_2_for_1",
+        "player_swap.role_swap_small_delta",
+        "player_swap.fit_swap_2_for_2",
+        "player_swap.one_for_two_depth",
+        "player_swap.bench_bundle_for_role",
+        "player_swap.change_of_scenery_young",
+        "timeline.veteran_for_young",
+        "salary_cleanup.rental_expiring_plus_second",
+        "salary_cleanup.pure_absorb_for_asset",
+        "salary_cleanup.partial_dump_for_expiring",
+        "salary_cleanup.bad_money_swap",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+        "pick_engineering.swap_purchase",
+        "pick_engineering.swap_substitute_for_first",
+    )
+    skeleton_route_starter: Tuple[str, ...] = (
+        "compat.picks_only",
+        "compat.young_plus_pick",
+        "compat.p4p_salary",
+        "compat.consolidate_2_for_1",
+        "player_swap.role_swap_small_delta",
+        "player_swap.fit_swap_2_for_2",
+        "player_swap.one_for_two_depth",
+        "player_swap.starter_for_two_rotation",
+        "player_swap.three_for_one_upgrade",
+        "player_swap.bench_bundle_for_role",
+        "player_swap.change_of_scenery_young",
+        "timeline.veteran_for_young",
+        "timeline.veteran_for_young_plus_protected_first",
+        "salary_cleanup.rental_expiring_plus_second",
+        "salary_cleanup.pure_absorb_for_asset",
+        "salary_cleanup.partial_dump_for_expiring",
+        "salary_cleanup.bad_money_swap",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+        "pick_engineering.swap_purchase",
+        "pick_engineering.swap_substitute_for_first",
+    )
+    skeleton_route_high_starter: Tuple[str, ...] = (
+        "compat.picks_only",
+        "compat.young_plus_pick",
+        "compat.p4p_salary",
+        "compat.consolidate_2_for_1",
+        "player_swap.role_swap_small_delta",
+        "player_swap.fit_swap_2_for_2",
+        "player_swap.one_for_two_depth",
+        "player_swap.starter_for_two_rotation",
+        "player_swap.three_for_one_upgrade",
+        "player_swap.star_lateral_plus_delta",
+        "timeline.veteran_for_young",
+        "timeline.veteran_for_young_plus_protected_first",
+        "timeline.bluechip_plus_first_plus_swap",
+        "salary_cleanup.rental_expiring_plus_second",
+        "salary_cleanup.pure_absorb_for_asset",
+        "salary_cleanup.partial_dump_for_expiring",
+        "salary_cleanup.bad_money_swap",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+        "pick_engineering.swap_purchase",
+        "pick_engineering.swap_substitute_for_first",
+    )
+    skeleton_route_pick_only: Tuple[str, ...] = (
+        "compat.picks_only",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+        "pick_engineering.swap_purchase",
+        "pick_engineering.swap_substitute_for_first",
+        "salary_cleanup.pure_absorb_for_asset",
+    )
 
     # --- sweetener loop
     sweetener_enabled: bool = True
@@ -363,11 +447,35 @@ class DealGeneratorStats:
     fit_swap_candidates_tried: int = 0
     fit_swap_success: int = 0
 
+    # hard-cap monitoring
+    budget_validation_cap_hits: int = 0
+    budget_evaluation_cap_hits: int = 0
+    hard_validation_cap_hits: int = 0
+    hard_evaluation_cap_hits: int = 0
+
+    # skeleton observability (phase-5)
+    unique_skeleton_count: int = 0
+    modifier_candidates: int = 0
+    modifier_applied_candidates: int = 0
+    modifier_success_rate: float = 0.0
+
+    skeleton_id_counts: Dict[str, int] = field(default_factory=dict)
+    skeleton_domain_counts: Dict[str, int] = field(default_factory=dict)
+    target_tier_counts: Dict[str, int] = field(default_factory=dict)
+    arch_compat_counts: Dict[str, int] = field(default_factory=dict)
+    modifier_trace_counts: Dict[str, int] = field(default_factory=dict)
+
     # failure kind -> count
     failures_by_kind: Dict[str, int] = field(default_factory=dict)
 
     def bump_failure(self, kind: str) -> None:
         self.failures_by_kind[kind] = int(self.failures_by_kind.get(kind, 0)) + 1
+
+    def bump_counter(self, bucket: Dict[str, int], key: str) -> None:
+        k = str(key or "")
+        if not k:
+            return
+        bucket[k] = int(bucket.get(k, 0)) + 1
 
 
 # =============================================================================
@@ -412,6 +520,13 @@ class DealCandidate:
     # for debug/tagging
     focal_player_id: str
     archetype: str
+
+    # v3 skeleton metadata (phase-1 compatibility introduction)
+    skeleton_id: str = ""
+    skeleton_domain: str = ""
+    target_tier: str = ""
+    compat_archetype: str = ""
+    modifier_trace: List[str] = field(default_factory=list)
 
     tags: List[str] = field(default_factory=list)
     repairs_used: int = 0
