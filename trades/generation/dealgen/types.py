@@ -80,6 +80,9 @@ class DealGeneratorConfig:
     max_seconds_per_side: int = 4
 
     # --- target tier routing (phase-4)
+    # NOTE:
+    # - route tuples are intended as priority hints (soft preference), not a strict allowlist.
+    # - legacy fields below are BUY-oriented defaults kept for backward compatibility.
     skeleton_route_role: Tuple[str, ...] = (
         "compat.picks_only",
         "compat.young_plus_pick",
@@ -148,6 +151,82 @@ class DealGeneratorConfig:
     )
     skeleton_route_pick_only: Tuple[str, ...] = (
         "compat.picks_only",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+        "pick_engineering.swap_purchase",
+        "pick_engineering.swap_substitute_for_first",
+        "salary_cleanup.pure_absorb_for_asset",
+    )
+
+    # --- target tier routing (SELL mode defaults)
+    # SELL generation uses SELL compat archetypes as baseline, then cross-mode families.
+    skeleton_route_role_sell: Tuple[str, ...] = (
+        "compat.buyer_picks",
+        "compat.buyer_young_plus_pick",
+        "compat.buyer_p4p",
+        "player_swap.role_swap_small_delta",
+        "player_swap.fit_swap_2_for_2",
+        "player_swap.one_for_two_depth",
+        "player_swap.bench_bundle_for_role",
+        "player_swap.change_of_scenery_young",
+        "timeline.veteran_for_young",
+        "salary_cleanup.rental_expiring_plus_second",
+        "salary_cleanup.pure_absorb_for_asset",
+        "salary_cleanup.partial_dump_for_expiring",
+        "salary_cleanup.bad_money_swap",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+        "pick_engineering.swap_purchase",
+        "pick_engineering.swap_substitute_for_first",
+    )
+    skeleton_route_starter_sell: Tuple[str, ...] = (
+        "compat.buyer_picks",
+        "compat.buyer_young_plus_pick",
+        "compat.buyer_p4p",
+        "compat.buyer_consolidate",
+        "player_swap.role_swap_small_delta",
+        "player_swap.fit_swap_2_for_2",
+        "player_swap.one_for_two_depth",
+        "player_swap.starter_for_two_rotation",
+        "player_swap.three_for_one_upgrade",
+        "player_swap.bench_bundle_for_role",
+        "player_swap.change_of_scenery_young",
+        "timeline.veteran_for_young",
+        "timeline.veteran_for_young_plus_protected_first",
+        "salary_cleanup.rental_expiring_plus_second",
+        "salary_cleanup.pure_absorb_for_asset",
+        "salary_cleanup.partial_dump_for_expiring",
+        "salary_cleanup.bad_money_swap",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+        "pick_engineering.swap_purchase",
+        "pick_engineering.swap_substitute_for_first",
+    )
+    skeleton_route_high_starter_sell: Tuple[str, ...] = (
+        "compat.buyer_picks",
+        "compat.buyer_young_plus_pick",
+        "compat.buyer_p4p",
+        "compat.buyer_consolidate",
+        "player_swap.role_swap_small_delta",
+        "player_swap.fit_swap_2_for_2",
+        "player_swap.one_for_two_depth",
+        "player_swap.starter_for_two_rotation",
+        "player_swap.three_for_one_upgrade",
+        "player_swap.star_lateral_plus_delta",
+        "timeline.veteran_for_young",
+        "timeline.veteran_for_young_plus_protected_first",
+        "timeline.bluechip_plus_first_plus_swap",
+        "salary_cleanup.rental_expiring_plus_second",
+        "salary_cleanup.pure_absorb_for_asset",
+        "salary_cleanup.partial_dump_for_expiring",
+        "salary_cleanup.bad_money_swap",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+        "pick_engineering.swap_purchase",
+        "pick_engineering.swap_substitute_for_first",
+    )
+    skeleton_route_pick_only_sell: Tuple[str, ...] = (
+        "compat.buyer_picks",
         "pick_engineering.first_split",
         "pick_engineering.second_ladder_to_protected_first",
         "pick_engineering.swap_purchase",
