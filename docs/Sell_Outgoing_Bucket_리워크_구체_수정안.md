@@ -15,14 +15,12 @@
 - 위치: 기존 threshold 상수(`_TOP_TAG_MIN`, `_LOW_FIT_MAX`) 근처
 - 추가 항목:
   - 정규화용 상수
-    - `_NEGATIVE_MONEY_NORM_M = 12.0`
-    - `_CONTRACT_GAP_PRESSURE_NORM = 0.08`  (cap share 8%를 강한 부담 기준으로 가정)
+    - `_NEGATIVE_MONEY_NORM_CAP_SHARE = 0.05`
     - `_MARKET_NOW_NORM = 12.0`
   - 게이트 상수
-    - `_BAD_CONTRACT_NEGATIVE_MONEY_MIN_M = 2.5`
+    - `_BAD_CONTRACT_NEGATIVE_MONEY_MIN_CAP_SHARE = 0.015`
     - `_BAD_CONTRACT_YEARS_MIN = 2.0`
     - `_BAD_CONTRACT_FLEX_PRESSURE_MIN = 0.55`
-    - `_BAD_CONTRACT_CAP_GAP_PRESSURE_MIN = 0.35`
     - `_VETERAN_MARKET_NOW_MIN = 6.0` (기존 유지)
     - `_TIMELINE_MISMATCH_MIN = 0.45`
 
@@ -41,44 +39,39 @@ class BadContractEval:
     score: float
     negative_money: float
     years_factor: float
-    cap_gap_pressure: float
     team_flex_pressure: float
     expendability: float
 ```
 
 ```python
-def _eval_bad_contract_candidate(*, c: PlayerTradeCandidate, ts: Any, contract_gap_cap_share: float) -> BadContractEval:
-    negative_money = max(0.0, float(c.salary_m - c.market.total))
+def _eval_bad_contract_candidate(*, c: PlayerTradeCandidate, ts: Any, expected_cap_share_avg: float, actual_cap_share_avg: float) -> BadContractEval:
+    negative_money = max(0.0, float(actual_cap_share_avg - expected_cap_share_avg))
     years_factor = _clamp01(float(c.remaining_years) / 4.0)
-    cap_gap_pressure = _norm(max(0.0, float(-contract_gap_cap_share)), _CONTRACT_GAP_PRESSURE_NORM)
 
     flexibility = _safe_team_signal(getattr(ts, "signals", None), "flexibility", 0.5)
     team_flex_pressure = _clamp01(1.0 - flexibility)
     expendability = _clamp01(float(c.surplus_score))
 
-    negative_money_norm = _norm(negative_money, _NEGATIVE_MONEY_NORM_M)
+    negative_money_norm = _norm(negative_money, _NEGATIVE_MONEY_NORM_CAP_SHARE)
 
     score = (
-        0.45 * negative_money_norm
+        0.55 * negative_money_norm
         + 0.20 * years_factor
-        + 0.15 * cap_gap_pressure
-        + 0.10 * team_flex_pressure
+        + 0.15 * team_flex_pressure
         + 0.10 * expendability
     )
 
     support_gate = (
         float(c.remaining_years) >= _BAD_CONTRACT_YEARS_MIN
         or team_flex_pressure >= _BAD_CONTRACT_FLEX_PRESSURE_MIN
-        or cap_gap_pressure >= _BAD_CONTRACT_CAP_GAP_PRESSURE_MIN
     )
-    enter = (negative_money >= _BAD_CONTRACT_NEGATIVE_MONEY_MIN_M) and support_gate
+    enter = (negative_money >= _BAD_CONTRACT_NEGATIVE_MONEY_MIN_CAP_SHARE) and support_gate
 
     return BadContractEval(
         enter=bool(enter),
         score=float(score),
         negative_money=float(negative_money),
         years_factor=float(years_factor),
-        cap_gap_pressure=float(cap_gap_pressure),
         team_flex_pressure=float(team_flex_pressure),
         expendability=float(expendability),
     )
@@ -137,7 +130,9 @@ def _eval_veteran_sale_candidate(*, c: PlayerTradeCandidate, ts: Any) -> Veteran
         or str(getattr(ts, "time_horizon", "") or "").upper() == "REBUILD"
     )
 
-    enter = team_ok and (float(c.market.now) >= _VETERAN_MARKET_NOW_MIN) and (timeline_mismatch >= _TIMELINE_MISMATCH_MIN)
+    mismatch_gate = timeline_mismatch >= _TIMELINE_MISMATCH_MIN
+    contract_window_gate = (age_decline >= 0.35) and (contract_window_risk >= 0.55)
+    enter = team_ok and (float(c.market.now) >= _VETERAN_MARKET_NOW_MIN) and (mismatch_gate or contract_window_gate)
 
     return VeteranSaleEval(
         enter=bool(enter),
@@ -152,7 +147,7 @@ def _eval_veteran_sale_candidate(*, c: PlayerTradeCandidate, ts: Any) -> Veteran
 ### C. 기존 bucket 선정부 교체
 - 기존 `filler_bad` 계산 블록 교체:
   - `market.total <= 6.0` 단독 진입 제거
-  - `_extract_player_value_breakdown`에서 이미 수집한 `incoming_player_value_by_id[pid]["contract_gap_cap_share"]` 사용
+  - `_extract_player_value_breakdown`에서 이미 수집한 `incoming_player_value_by_id[pid]["expected_cap_share_avg"]`, `incoming_player_value_by_id[pid]["actual_cap_share_avg"]` 사용
   - `score` 중심 정렬로 변경
 
 정렬 키 제안:
@@ -192,29 +187,26 @@ veteran.sort(key=lambda t: (-t[0].score, -t[1].market.now, -(t[1].snap.age or 0.
 ## 2. 계산 로직 요약 (최종안)
 
 ## 2-1) FILLER_BAD_CONTRACT
-- 핵심: `negative_money` 필수 + (기간/유연성압박/cap gap) 보조게이트
+- 핵심: `negative_money` 필수 + (기간/유연성압박) 보조게이트
 
 
-negative_money = max(0, salary_m - market.total)
-negative_money_norm = clamp01(negative_money / 12.0)
+negative_money = max(0, actual_cap_share_avg - expected_cap_share_avg)
+negative_money_norm = clamp01(negative_money / 0.05)
 years_factor = clamp01(remaining_years / 4.0)
-cap_gap_pressure = clamp01(max(0, -contract_gap_cap_share) / 0.08)
 team_flex_pressure = clamp01(1 - flexibility)
 expendability = clamp01(surplus_score)
 
 bad_contract_score =
-    0.45*negative_money_norm +
+    0.55*negative_money_norm +
     0.20*years_factor +
-    0.15*cap_gap_pressure +
-    0.10*team_flex_pressure +
+    0.15*team_flex_pressure +
     0.10*expendability
 
 enter if:
-    negative_money >= 2.5
+    negative_money >= 0.015
     and (
         remaining_years >= 2.0
         or team_flex_pressure >= 0.55
-        or cap_gap_pressure >= 0.35
     )
 
 ## 2-2) VETERAN_SALE
@@ -237,7 +229,10 @@ team_ok = posture in {SELL, SOFT_SELL} or horizon == REBUILD
 enter if:
     team_ok
     and market.now >= 6.0
-    and timeline_mismatch >= 0.45
+    and (
+        timeline_mismatch >= 0.45
+        or (age_decline >= 0.35 and contract_window_risk >= 0.55)
+    )
 
 ---
 
