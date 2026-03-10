@@ -22,13 +22,14 @@ This module MUST NOT:
 from dataclasses import replace
 from datetime import date
 from typing import Any, Dict, Optional, Sequence, Tuple
+import os
 
 import random
 
 import game_time
 
 # --- Project-level trade types / errors ---
-from ..models import Deal
+from ..models import Deal, PickAsset, PlayerAsset, SwapAsset
 from ..errors import TradeError
 from ..validator import validate_deal
 
@@ -37,8 +38,12 @@ from .deal_evaluator import evaluate_deal_for_team as _evaluate_deal_for_team
 from .env import ValuationEnv
 from .market_pricing import MarketPricingConfig
 from .team_utility import TeamUtilityConfig
+from .package_effects import PackageEffectsConfig
 from .decision_policy import decide_deal as _decide_deal
+from .decision_policy import DecisionPolicyConfig
 from .types import DealDecision, TeamDealEvaluation, TeamSideValuation
+from .context_v2 import build_valuation_context_v2
+from .types import PickExpectation
 
 # --- Valuation data provider (Repo IO layer) ---
 from .data_context import (
@@ -226,6 +231,102 @@ def _strip_breakdown(side: TeamSideValuation, evaluation: TeamDealEvaluation) ->
     return side2, eval2
 
 
+def _resolve_bool_flag(explicit: Optional[bool], *, env_name: str, default: bool) -> bool:
+    if explicit is not None:
+        return bool(explicit)
+    raw = os.getenv(env_name, "")
+    if not raw:
+        return bool(default)
+    return str(raw).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _build_context_v2_asset_ids(
+    deal: Deal,
+    *,
+    standings_order_worst_to_best: Optional[Sequence[str]],
+) -> Dict[str, Sequence[str]]:
+    player_ids: list[str] = []
+    pick_ids: list[str] = []
+    swap_ids: list[str] = []
+
+    for assets in (deal.legs or {}).values():
+        if not isinstance(assets, list):
+            continue
+        for a in assets:
+            if isinstance(a, PlayerAsset):
+                pid = str(a.player_id)
+                if pid and pid not in player_ids:
+                    player_ids.append(pid)
+            elif isinstance(a, PickAsset):
+                pkid = str(a.pick_id)
+                if pkid and pkid not in pick_ids:
+                    pick_ids.append(pkid)
+            elif isinstance(a, SwapAsset):
+                sid = str(a.swap_id)
+                if sid and sid not in swap_ids:
+                    swap_ids.append(sid)
+
+    out: Dict[str, Sequence[str]] = {
+        "players": tuple(player_ids),
+        "picks": tuple(pick_ids),
+        "swaps": tuple(swap_ids),
+    }
+    if standings_order_worst_to_best:
+        out["standings_order_worst_to_best"] = tuple(str(t) for t in standings_order_worst_to_best)
+    return out
+
+
+class _ContextV2ProviderAdapter:
+    """v2 context를 SSOT로 사용하는 provider adapter.
+
+    - snapshots(player/pick/swap/fixed)은 base provider를 위임 사용
+    - pick expectation은 context_v2.pick_distributions를 기준으로 synthesize
+    - market_pricing v2 입력을 위해 get_pick_distribution()를 제공
+    """
+
+    def __init__(self, *, base_provider: RepoValuationDataContext, v2_ctx: Any):
+        self._base = base_provider
+        self._v2 = v2_ctx
+
+    def get_player_snapshot(self, player_id):
+        return self._base.get_player_snapshot(player_id)
+
+    def get_pick_snapshot(self, pick_id):
+        return self._base.get_pick_snapshot(pick_id)
+
+    def get_swap_snapshot(self, swap_id):
+        return self._base.get_swap_snapshot(swap_id)
+
+    def get_fixed_asset_snapshot(self, asset_id):
+        return self._base.get_fixed_asset_snapshot(asset_id)
+
+    def get_pick_distribution(self, pick_id):
+        return self._v2.pick_distributions.get(str(pick_id))
+
+    def get_pick_expectation(self, pick_id):
+        bundle = self.get_pick_distribution(pick_id)
+        if bundle is None:
+            return self._base.get_pick_expectation(pick_id)
+        return PickExpectation(
+            pick_id=str(pick_id),
+            expected_pick_number=(float(bundle.compat_expected_pick_number) if bundle.compat_expected_pick_number is not None else None),
+            confidence=0.65,
+            meta={
+                "source": "context_v2.pick_distributions",
+                "ev_pick": float(bundle.ev_pick),
+                "variance": float(bundle.variance),
+            },
+        )
+
+    @property
+    def current_season_year(self):
+        return self._base.current_season_year
+
+    @property
+    def current_date_iso(self):
+        return self._base.current_date_iso
+
+
 # -----------------------------------------------------------------------------
 # Public API (service entrypoint)
 # -----------------------------------------------------------------------------
@@ -246,6 +347,9 @@ def evaluate_deal_for_team(
     rng_seed: Optional[int] = None,
     allow_locked_by_deal_id: Optional[str] = None,
     validate: bool = True,
+    use_valuation_context_v2: Optional[bool] = None,
+    valuation_context_v2_stage: str = "full",
+    valuation_context_v2_dual_read: bool = True,
 ) -> Tuple[DealDecision, TeamDealEvaluation]:
     """
     Evaluate a deal from `team_id`'s perspective and return (decision, evaluation).
@@ -281,6 +385,15 @@ def evaluate_deal_for_team(
         Pass-through to validate_deal for committed-deal lock exceptions.
     validate:
         If True, runs validate_deal first. (Recommended for server usage.)
+    use_valuation_context_v2:
+        Feature flag. If False(off), 기존 경로와 완전히 동일하게 동작.
+        If True(on), context_v2를 빌드하고 stage에 따라 점진 반영.
+    valuation_context_v2_stage:
+        - "shadow": debug 전용(진단 중심, 보수 설정)
+        - "gradual": package_effects texture weight를 보수적으로 적용
+        - "full": package_effects texture weight 기본값으로 적용
+    valuation_context_v2_dual_read:
+        context_v2 dual-read diff telemetry 수집 여부.
     """
     tid = normalize_team_id(team_id, strict=False)
 
@@ -448,17 +561,118 @@ def evaluate_deal_for_team(
             
     market_cfg = MarketPricingConfig(salary_cap=salary_cap) if salary_cap is not None else MarketPricingConfig()
     team_cfg = TeamUtilityConfig(salary_cap=salary_cap) if salary_cap is not None else TeamUtilityConfig()
+    use_v2 = _resolve_bool_flag(
+        use_valuation_context_v2,
+        env_name="TRADE_VALUATION_CONTEXT_V2",
+        default=True,
+    )
+    stage = str(valuation_context_v2_stage or "full").strip().lower()
+    if stage not in {"shadow", "gradual", "full"}:
+        stage = "full"
+    package_cfg: Optional[PackageEffectsConfig] = None
+    if use_v2 and stage in {"shadow", "gradual", "full"}:
+        base = PackageEffectsConfig()
+        if stage == "shadow":
+            package_cfg = replace(
+                base,
+                dual_read_v2_components=True,
+                texture_overlap_weight=0.0,
+                contract_texture_control_weight=0.0,
+                contract_texture_trigger_weight=0.0,
+                contract_texture_toxic_weight=0.0,
+            )
+        elif stage == "gradual":
+            package_cfg = replace(
+                base,
+                dual_read_v2_components=bool(valuation_context_v2_dual_read),
+                texture_overlap_weight=0.55,
+                contract_texture_control_weight=0.08,
+                contract_texture_trigger_weight=0.05,
+                contract_texture_toxic_weight=0.04,
+            )
+        else:
+            package_cfg = replace(
+                base,
+                dual_read_v2_components=bool(valuation_context_v2_dual_read),
+            )
+
+    active_provider = provider
+    v2_ctx = None
+    if use_v2:
+        try:
+            decision_context_by_team: Dict[str, DecisionContext] = {tid: ctx}
+            if tick_ctx is not None:
+                dc_all = getattr(tick_ctx, "decision_contexts", None)
+                if isinstance(dc_all, dict):
+                    for team_key, team_ctx in dc_all.items():
+                        if isinstance(team_ctx, DecisionContext):
+                            decision_context_by_team[str(team_key)] = team_ctx
+
+            asset_ids_by_kind = _build_context_v2_asset_ids(
+                deal,
+                standings_order_worst_to_best=(order if isinstance(order, Sequence) else None),
+            )
+            v2_ctx = build_valuation_context_v2(
+                provider=provider,
+                decision_context_by_team=decision_context_by_team,
+                current_season_year=int(season_year),
+                current_date_iso=cd.isoformat(),
+                market_pricing_config=market_cfg,
+                team_utility_config=team_cfg,
+                package_effects_config=(package_cfg or PackageEffectsConfig()),
+                decision_policy_config=DecisionPolicyConfig(),
+                asset_ids_by_kind=asset_ids_by_kind,
+                dual_read=bool(valuation_context_v2_dual_read),
+            )
+            active_provider = _ContextV2ProviderAdapter(base_provider=provider, v2_ctx=v2_ctx)
+        except Exception:
+            v2_ctx = None
+
     side, evaluation = _evaluate_deal_for_team(
         deal=deal,
         team_id=tid,
         ctx=ctx,
-        provider=provider,
+        provider=active_provider,
         env=env,
         include_package_effects=include_package_effects,
         attach_leg_metadata=True,
         market_config=market_cfg,
         team_config=team_cfg,
+        package_config=package_cfg,
     )
+
+    if use_v2:
+        v2_diag_meta: Dict[str, Any] = {
+            "enabled": True,
+            "stage": stage,
+            "dual_read": bool(valuation_context_v2_dual_read),
+        }
+        try:
+            if v2_ctx is None:
+                raise RuntimeError("context_v2_build_failed")
+            v2_diag_meta["diagnostics"] = {
+                "source_coverage": dict(v2_ctx.diagnostics.source_coverage),
+                "reason_flags": list(v2_ctx.diagnostics.reason_flags),
+                "diff_report": (
+                    {
+                        "pick_ev_delta": float(v2_ctx.diagnostics.diff_report.pick_ev_delta),
+                        "contract_burden_delta": float(v2_ctx.diagnostics.diff_report.contract_burden_delta),
+                        "cap_flex_delta": float(v2_ctx.diagnostics.diff_report.cap_flex_delta),
+                        "missing_metrics": list(v2_ctx.diagnostics.diff_report.missing_metrics),
+                    }
+                    if v2_ctx.diagnostics.diff_report is not None
+                    else None
+                ),
+            }
+        except Exception as exc:
+            v2_diag_meta["error"] = {
+                "type": type(exc).__name__,
+                "message": str(exc),
+            }
+
+        new_meta = dict(evaluation.meta or {})
+        new_meta["context_v2"] = v2_diag_meta
+        evaluation = replace(evaluation, meta=new_meta)
 
     # 6) Decision
     decision = _decide_deal(

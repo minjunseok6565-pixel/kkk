@@ -34,15 +34,14 @@ from decision_context import DecisionContext
 from contracts.terms import player_contract_terms
 
 from .env import ValuationEnv
-
-try:  # path safety (project integration will likely use relative import)
-    from role_need_tags import role_to_need_tag_only
-except Exception:  # pragma: no cover
-    from .role_need_tags import role_to_need_tag_only
+from .fit_engine import FitEngine
+from .contract_texture import ContractTexture, build_contract_textures
+from .role_texture import RoleTexture, build_role_textures
 
 from .types import (
     AssetKind,
     AssetSnapshot,
+    ContractSnapshot,
     PlayerSnapshot,
     TeamValuation,
     ValueComponents,
@@ -158,39 +157,6 @@ def _team_total_grade(tv: TeamValuation) -> float:
     return _safe_float(tv.team_value.total, 0.0)
 
 
-def _primary_archetype_tag(player: PlayerSnapshot) -> str:
-    """Pick a single archetype tag used for diminishing-returns bucketing.
-
-    - Prefer role_fit (if present) -> map role->need_tag.
-    - Fallback to depth bucket (GUARD/WING/BIG).
-
-    This is intentionally simple: we only need a *stable* grouping.
-    """
-    role_fit = None
-    if isinstance(player.meta, dict):
-        role_fit = player.meta.get("role_fit")
-    if role_fit is None and isinstance(player.attrs, dict):
-        role_fit = player.attrs.get("role_fit")
-
-    best_tag = None
-    best_score = 0.0
-    if isinstance(role_fit, dict):
-        for role, score in role_fit.items():
-            tag = role_to_need_tag_only(str(role))
-            if tag == "ROLE_GAP":
-                continue
-            sc = _safe_float(score, 0.0)
-            if sc > best_score:
-                best_score = sc
-                best_tag = tag
-    if best_tag:
-        return str(best_tag)
-
-    # fallback to positional bucket
-    buckets = classify_depth_buckets(player)
-    return buckets[0] if buckets else "WING"
-
-
 def _defense_signal(player: PlayerSnapshot) -> float:
     """0..1 defense signal proxy based on attrs/meta if available."""
     # 1) explicit meta/attrs override
@@ -222,22 +188,6 @@ def _defense_signal(player: PlayerSnapshot) -> float:
     if best <= 1e-9:
         return 0.5
     return best
-
-
-def _commitment_metric(player: PlayerSnapshot, *, current_season_year: int) -> float:
-    """Contract commitment proxy (salary * remaining_years).
-
-    This is intentionally a *soft* approximation:
-    - Options/partial guarantees are ignored in v1.
-    - If remaining years cannot be derived, fallback to contract.years.
-    """
-
-    cur = int(current_season_year)
-    terms = player_contract_terms(player, current_season_year=cur)
-
-    salary_now = max(_safe_float(getattr(player, "salary_amount", None), 0.0), _safe_float(terms.salary_now, 0.0))
-    years = float(max(0, int(terms.remaining_years)))
-    return max(0.0, float(salary_now)) * years
 
 
 # -----------------------------------------------------------------------------
@@ -302,6 +252,13 @@ class PackageEffectsConfig:
 
     eps: float = 1e-9
 
+    # --- texture injection
+    dual_read_v2_components: bool = True
+    texture_overlap_weight: float = 1.0
+    contract_texture_control_weight: float = 0.20
+    contract_texture_trigger_weight: float = 0.10
+    contract_texture_toxic_weight: float = 0.10
+
 
 # -----------------------------------------------------------------------------
 # Engine
@@ -345,8 +302,10 @@ class PackageEffects:
         # 5) Consolidation / dispersion structure
         delta1 = self._consolidation_effect(incoming, outgoing, ctx, package_scale_total, steps)
 
-        # 6) Diminishing returns for redundant incoming players
-        delta2 = self._diminishing_returns(incoming, steps)
+        # 6) Basketball component (RoleTexture score matrix / overlap 기반)
+        delta2 = self._diminishing_returns_texture(incoming, steps=steps)
+        if abs(delta2.total) > self.config.eps:
+            steps.append(self._build_basketball_component_step(delta2, source="role_texture_matrix"))
 
         # 7) Soft roster slot / rotation waste (too many incoming players)
         delta3 = self._roster_excess_waste(incoming, outgoing, base_out_mass, steps)
@@ -357,8 +316,8 @@ class PackageEffects:
         # 8) Outgoing hole penalty (position discontinuity)
         delta5 = self._outgoing_hole_penalty(incoming, outgoing, base_out_mass, steps)
 
-        # CAP_FLEX adjustment (contract commitment delta)
-        delta6 = self._cap_flex_adjustment(incoming, outgoing, ctx, env, steps)
+        # CAP_FLEX adjustment (contract component injection)
+        delta6, contract_dual_meta = self._cap_flex_adjustment(incoming, outgoing, ctx, env, steps)
 
         # OFF/DEF upgrade adjustments
         delta7 = self._upgrade_adjustment(incoming, outgoing, ctx, steps)
@@ -371,8 +330,27 @@ class PackageEffects:
         meta["base_out"] = {"now": base_out.now, "future": base_out.future, "total": base_out.total, "mass": base_out_mass}
         meta["package_delta"] = {"now": total.now, "future": total.future, "total": total.total}
         meta["team_id"] = str(team_id)
+        if self.config.dual_read_v2_components:
+            meta["v2_texture_diff"] = {
+                "basketball_component_delta": {
+                    "now": 0.0,
+                    "future": 0.0,
+                    "total": 0.0,
+                },
+                "contract_component_delta": contract_dual_meta,
+            }
 
         return total, tuple(steps), meta
+
+    def _build_basketball_component_step(self, delta: ValueComponents, *, source: str) -> ValuationStep:
+        return ValuationStep(
+            stage=ValuationStage.PACKAGE,
+            mode=StepMode.ADD,
+            code="BASKETBALL_COMPONENT",
+            label="농구 컴포넌트(역할 질감/중복) 보정",
+            delta=delta,
+            meta={"source": source},
+        )
 
     # ------------------------------------------------------------------
     # Utilities
@@ -475,82 +453,111 @@ class PackageEffects:
     # ------------------------------------------------------------------
     # 6) Diminishing returns
     # ------------------------------------------------------------------
-    def _diminishing_returns(
+    def _diminishing_returns_texture(
         self,
         incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        steps: List[ValuationStep],
+        steps: Optional[List[ValuationStep]],
     ) -> ValueComponents:
         cfg = self.config
         players = self._players(incoming)
         if len(players) <= 1:
             return ValueComponents.zero()
 
-        # bucket incoming players by a single archetype tag
-        buckets: Dict[str, List[Tuple[TeamValuation, PlayerSnapshot]]] = {}
-        for tv, p in players:
-            if _team_total_grade(tv) < cfg.diminishing_min_bucket_grade:
-                continue
-            tag = _primary_archetype_tag(p)
-            buckets.setdefault(tag, []).append((tv, p))
+        snaps = [p for _, p in players]
+        role_textures = build_role_textures(snaps, fit_engine=FitEngine())
+
+        items_sorted = sorted(
+            [(tv, p) for tv, p in players if _team_total_grade(tv) >= cfg.diminishing_min_bucket_grade],
+            key=lambda x: _team_total_grade(x[0]),
+            reverse=True,
+        )
+        if len(items_sorted) <= 1:
+            return ValueComponents.zero()
+
+        factors = list(cfg.diminishing_factors)
+        if len(items_sorted) > len(factors):
+            factors.extend([factors[-1]] * (len(items_sorted) - len(factors)))
+
+        pairwise_overlap: dict[str, dict[str, float]] = {}
+        for _, p in items_sorted:
+            pairwise_overlap[p.player_id] = {}
+        for i, (_, p1) in enumerate(items_sorted):
+            for j in range(i + 1, len(items_sorted)):
+                _, p2 = items_sorted[j]
+                ov = self._texture_overlap(p1.player_id, p2.player_id, role_textures)
+                pairwise_overlap[p1.player_id][p2.player_id] = ov
+                pairwise_overlap[p2.player_id][p1.player_id] = ov
 
         penalty = ValueComponents.zero()
-        per_bucket: Dict[str, Any] = {}
-
-        for tag, items in buckets.items():
-            if len(items) <= 1:
+        details: list[dict[str, Any]] = []
+        for i, (tv, p) in enumerate(items_sorted):
+            if i == 0:
                 continue
-            # most valuable first
-            items_sorted = sorted(items, key=lambda x: _team_total_grade(x[0]), reverse=True)
-
-            # factors: 1.0 for first, then diminishing
-            factors = list(cfg.diminishing_factors)
-            if len(items_sorted) > len(factors):
-                factors.extend([factors[-1]] * (len(items_sorted) - len(factors)))
-
-            bucket_pen = ValueComponents.zero()
-            details: List[Dict[str, Any]] = []
-            for i, (tv, p) in enumerate(items_sorted):
-                f = _clamp(factors[i], 0.0, 1.0)
-                if f >= 0.999:
-                    continue
-                # we already counted full tv.team_value; subtract wasted portion
-                w = 1.0 - f
-                bucket_pen = bucket_pen + _vc(
-                    now=tv.team_value.now * w * cfg.diminishing_now_weight,
-                    future=tv.team_value.future * w * cfg.diminishing_future_weight,
-                )
-                details.append(
-                    {
-                        "player_id": p.player_id,
-                        "asset_key": tv.asset_key,
-                        "rank": i + 1,
-                        "factor": f,
-                        "waste_ratio": w,
-                        "team_value_total": tv.team_value.total,
-                    }
-                )
-
-            if bucket_pen.total > cfg.eps:
-                penalty = penalty - bucket_pen  # negative adjustment
-                per_bucket[tag] = {
-                    "penalty": {"now": bucket_pen.now, "future": bucket_pen.future, "total": bucket_pen.total},
-                    "players": details,
+            f = _clamp(factors[i], 0.0, 1.0)
+            if f >= 0.999:
+                continue
+            prev_ids = [pp.player_id for _, pp in items_sorted[:i]]
+            overlap = max((pairwise_overlap[p.player_id].get(pid, 0.0) for pid in prev_ids), default=0.0)
+            overlap = _clamp(overlap * cfg.texture_overlap_weight, 0.0, 1.0)
+            w = (1.0 - f) * overlap
+            if w <= cfg.eps:
+                continue
+            pen = _vc(
+                now=tv.team_value.now * w * cfg.diminishing_now_weight,
+                future=tv.team_value.future * w * cfg.diminishing_future_weight,
+            )
+            penalty = penalty - pen
+            details.append(
+                {
+                    "player_id": p.player_id,
+                    "rank": i + 1,
+                    "factor": f,
+                    "texture_overlap": overlap,
+                    "weighted_waste_ratio": w,
+                    "team_value_total": tv.team_value.total,
                 }
+            )
 
         if abs(penalty.total) <= cfg.eps:
             return ValueComponents.zero()
 
-        steps.append(
-            ValuationStep(
-                stage=ValuationStage.PACKAGE,
-                mode=StepMode.ADD,
-                code="DIMINISHING_RETURNS",
-                label="중복/체감 감소(비슷한 역할/포지션 다수 인바운드)",
-                delta=penalty,
-                meta={"buckets": per_bucket},
+        if steps is not None:
+            steps.append(
+                ValuationStep(
+                    stage=ValuationStage.PACKAGE,
+                    mode=StepMode.ADD,
+                    code="DIMINISHING_RETURNS",
+                    label="중복/체감 감소(RoleTexture matrix/overlap)",
+                    delta=penalty,
+                    meta={"details": details, "pairwise_overlap": pairwise_overlap},
+                )
             )
-        )
         return penalty
+
+    def _texture_overlap(
+        self,
+        left_player_id: str,
+        right_player_id: str,
+        role_textures: Mapping[str, RoleTexture],
+    ) -> float:
+        left = role_textures.get(left_player_id)
+        right = role_textures.get(right_player_id)
+        if left is None or right is None:
+            return 0.0
+
+        def vec(rt: RoleTexture) -> tuple[float, float, float, float, float]:
+            return (
+                _clamp(rt.creation_proxy, 0.0, 1.0),
+                _clamp(rt.spacing_proxy, 0.0, 1.0),
+                _clamp(rt.rim_pressure_proxy, 0.0, 1.0),
+                _clamp(rt.defense_proxy, 0.0, 1.0),
+                _clamp(rt.connector_index, 0.0, 1.0),
+            )
+
+        left_vec = vec(left)
+        right_vec = vec(right)
+        sim = 1.0 - (sum(abs(a - b) for a, b in zip(left_vec, right_vec)) / float(len(left_vec)))
+        return _clamp(sim, 0.0, 1.0)
 
     # ------------------------------------------------------------------
     # 7) Soft roster slot / rotation waste
@@ -771,7 +778,7 @@ class PackageEffects:
         ctx: DecisionContext,
         env: ValuationEnv,
         steps: List[ValuationStep],
-    ) -> ValueComponents:
+    ) -> tuple[ValueComponents, Dict[str, Any]]:
         cfg = self.config
 
         need_map = dict(ctx.need_map or {})
@@ -859,16 +866,26 @@ class PackageEffects:
         # --------------------------------------------------------------
         # (B) Commitment delta (FUTURE): long-term flexibility preference.
         # --------------------------------------------------------------
-        def sum_commit(items: Sequence[Tuple[TeamValuation, AssetSnapshot]]) -> float:
+        contract_textures = self._build_player_contract_textures(incoming, outgoing, current_season_year=int(cur_sy), env=env)
+
+        def sum_commit_texture(items: Sequence[Tuple[TeamValuation, AssetSnapshot]]) -> float:
             acc = 0.0
             for tv, snap in items:
                 if tv.kind != AssetKind.PLAYER or not isinstance(snap, PlayerSnapshot):
                     continue
-                acc += _commitment_metric(snap, current_season_year=int(cur_sy))
+                tex = contract_textures.get(snap.player_id)
+                if tex is None:
+                    continue
+                multiplier = 1.0
+                multiplier += cfg.contract_texture_control_weight * max(0.0, -float(tex.control_direction))
+                multiplier += cfg.contract_texture_trigger_weight * _clamp(float(tex.trigger_risk), 0.0, 1.0)
+                multiplier += cfg.contract_texture_toxic_weight * _clamp(float(tex.toxic_risk), 0.0, 1.0)
+                acc += max(0.0, float(tex.guaranteed_commitment)) * max(0.0, multiplier)
             return float(acc)
 
-        in_c = sum_commit(incoming)
-        out_c = sum_commit(outgoing)
+        in_c = sum_commit_texture(incoming)
+        out_c = sum_commit_texture(outgoing)
+        source = "contract_texture"
         delta_commit = in_c - out_c
 
         raw_fut = -w_need * delta_commit * cfg.cap_flex_scale
@@ -892,10 +909,71 @@ class PackageEffects:
                         "incoming_commit": in_c,
                         "outgoing_commit": out_c,
                         "abs_cap": cfg.cap_commit_abs_cap,
+                        "source": source,
                     },
                 )
             )
-        return delta_now + delta_fut
+        component_delta = delta_now + delta_fut
+        if abs(component_delta.total) > cfg.eps:
+            steps.append(
+                ValuationStep(
+                    stage=ValuationStage.PACKAGE,
+                    mode=StepMode.ADD,
+                    code="CONTRACT_COMPONENT",
+                    label="계약 컴포넌트(계약 질감/CAP_FLEX) 보정",
+                    delta=component_delta,
+                    meta={"source": source},
+                )
+            )
+
+        dual_meta = {
+            "texture": {
+                "incoming_commit": float(in_c),
+                "outgoing_commit": float(out_c),
+                "delta_commit": float(delta_commit),
+            },
+            "selected_source": source,
+        }
+        return delta_now + delta_fut, dual_meta
+
+    def _build_player_contract_textures(
+        self,
+        incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
+        outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
+        *,
+        current_season_year: int,
+        env: ValuationEnv,
+    ) -> Dict[str, ContractTexture]:
+        players: list[PlayerSnapshot] = []
+        for tv, snap in list(incoming) + list(outgoing):
+            if tv.kind == AssetKind.PLAYER and isinstance(snap, PlayerSnapshot):
+                players.append(snap)
+
+        contracts: list[ContractSnapshot] = []
+        seen_contract_ids: set[str] = set()
+        for p in players:
+            c = p.contract
+            if c is None or c.contract_id in seen_contract_ids:
+                continue
+            seen_contract_ids.add(c.contract_id)
+            contracts.append(c)
+        if not contracts:
+            return {}
+
+        salary_cap = float(env.cap_model.salary_cap_for_season(int(current_season_year)))
+        textures = build_contract_textures(
+            contracts,
+            current_season_year=int(current_season_year),
+            salary_cap=salary_cap,
+        )
+        out: Dict[str, ContractTexture] = {}
+        for p in players:
+            if p.contract is None:
+                continue
+            tex = textures.get(p.contract.contract_id)
+            if tex is not None:
+                out[p.player_id] = tex
+        return out
 
     # ------------------------------------------------------------------
     # OFF/DEF upgrade (need_map-driven)
