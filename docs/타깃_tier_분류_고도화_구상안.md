@@ -35,10 +35,10 @@
 ## 1) 입력 신호 확장 (Feature Layer)
 기존 신호(`market_total`, `salary_m`, `remaining_years`, `is_expiring`, tags) 위에 아래 축을 단계적으로 추가:
 
-- **가치 상대지표**: 리그 전체/역할군 내 percentile, z-score
-- **계약 질 지표**: 만료 프리미엄/장기 부담, 옵션·보장 구조 요약 플래그
-- **선수 상태 지표**: 최근 추세(상승/하락), 가용성 리스크(결장/부상 대체지표)
-- **팀 적합 지표**: need-fit, 로스터 공백도, timeline 적합성
+- **가치 상대지표(현재 연결됨)**: 리그 전체 market percentile + raw market 혼합
+- **계약 질 지표(현재 연결됨)**: `contract_proxy_toxic/trigger/matching/control` 기반 보정
+- **팀 전략 지표(현재 연결됨)**: `competitive_tier`, `trade_posture`, `time_horizon`, `urgency`, `deadline_pressure`
+- **기본 자산 지표(기존 유지)**: `market_total`, `salary_m`, `remaining_years`, `is_expiring`, tags
 
 > 원칙: 초기에는 "적은 feature + 높은 설명가능성"으로 시작하고, 분류 안정성이 검증되면 신호를 확장한다.
 
@@ -50,10 +50,10 @@
 - STARTER: 중간권
 - ROLE: 하위권
 
-정규화 축:
-- 리그 전체 분포(기본)
-- archetype/포지션별 분포(보정)
-- 시즌 단계(오프시즌/중반/데드라인)별 분포 이동
+정규화 축(현 프로젝트에서 즉시 사용 가능):
+- 리그 전체 분포 기반 market percentile(기본)
+- 팀 전략/데드라인 압박 기반 동적 오프셋
+- 계약 질 프록시 기반 리스크/유틸리티 오프셋
 
 효과:
 - 동일 선수라도 시즌/환경 변화에 따른 상대적 위치를 자연스럽게 반영.
@@ -62,9 +62,9 @@
 `DealGeneratorConfig`를 실제 정책 제어에 연결:
 
 - `tier_strictness`: 보수적/공격적 컷 이동
-- `tier_inflation_anchor`: 분포 스케일 보정 강도
-- `role_scarcity_weight`: 희소 역할 프리미엄
-- `win_now_bias` / `future_bias`: 팀 방향성에 따른 라벨 편향
+- `tier_market_percentile_weight`: raw market vs percentile anchor 혼합 강도
+- `tier_strategy_weight`: 팀 전략/데드라인 압박 반영 강도
+- `tier_contract_weight`: 계약 질 프록시 반영 강도
 
 효과:
 - 코드 변경 없이 운영/튜닝으로 분류 정책 조절 가능.
@@ -89,8 +89,8 @@
 2. **데드라인 시간가치 반영**
    - 데드라인 근접 시 만료 계약/로테이션 자원 tier 재평가 강도 상향.
 
-3. **희소성 반영**
-   - 리그 내 공급이 얇은 archetype(예: 3&D 윙)의 tier 보정.
+3. **리그 상대가치 반영**
+   - 리그 전체 market percentile을 활용해 시즌별 시장 스케일 변화에 대응.
 
 4. **자산 타입 분리**
    - `PICK_ONLY`는 별도 체계 유지하되, 픽 자체도 보호조건/예상구간에 따른 하위 클래스 고려.
@@ -103,8 +103,8 @@
 - 기존 분류와 후보 분류를 동시 계산하여 로그만 수집.
 - 주요 로그: 기존 tier, 신규 tier score, 팀 컨텍스트, 최종 딜 성과.
 
-### Phase 1: 상대컷 도입 (저위험)
-- 하드 임계값을 percentile 기반 컷으로 대체.
+### Phase 1: 상대컷 보정 도입 (저위험)
+- 기존 하드컷은 유지하되, percentile anchor 혼합으로 경직성을 완화.
 - 라벨 세트/호출 인터페이스는 동일 유지.
 
 ### Phase 2: 정책 레버 활성화
@@ -114,8 +114,8 @@
 - 히스테리시스 또는 soft decision 적용.
 - 경계 자산 flip rate를 KPI로 관리.
 
-### Phase 4: 팀전략 동적화
-- 팀 성향/시즌 단계/캡 상황을 동적으로 반영.
+### Phase 4: 라벨 운영 안정화
+- 관측 KPI 기반으로 weight 튜닝과 운영 가이드를 고정.
 
 ---
 
@@ -144,10 +144,10 @@
 ---
 
 ## 권장 우선순위 (실행 관점)
-1. percentile 컷 도입
-2. `config` strictness/bias 활성화
+1. percentile anchor + strategy/contract 오프셋 운영값 확정
+2. `config` weight(`tier_market_percentile_weight`, `tier_strategy_weight`, `tier_contract_weight`) 튜닝
 3. 히스테리시스 기반 라벨 안정화
-4. 팀 전략/데드라인 반영 확장
+4. 로그/KPI 기반 회귀 모니터링 체계 고정
 
 > 위 순서는 구현 난이도 대비 체감 개선이 크고, 회귀 리스크를 관리하기 쉽다.
 
@@ -162,15 +162,15 @@
 
 ## 재검토: 현재 프로젝트 구조 기준 달성 가능성 점검
 
-아래 점검은 실제 코드 구조를 기준으로 "지금 당장 연결 가능한 신호"와 "추가 파이프라인 작업이 필요한 신호"를 분리한 것이다.
+아래 점검은 실제 코드 구조를 기준으로 "지금 바로 운영 가능한 신호"를 정리한 것이다.
 
 ### 1) 함수 시그니처 관점의 현실성
-현행 `classify_target_tier()` 입력은 `target | sale_asset | match_tag | config`로 제한되어 있고, `tick_ctx`/`team_situation`/`decision_context`를 직접 받지 않는다.
+현행 `classify_target_tier()`는 `tier_ctx`를 받을 수 있으며, 호출 경로에서 팀 상태/리그 분포/계약 프록시가 이미 연결된다.
 
-- 즉시 가능: `target`/`sale_asset`에 이미 담긴 값 + `config` 기반 컷 이동
-- 추가 작업 필요: 팀 상태(urgency/posture/deadline), 리그 분포 기반 정규화, 동적 전략 반영
+- 즉시 가능: `target`/`sale_asset` 기본값 + `TierContext`(팀전략/percentile/계약프록시) + `config` weight 기반 컷 보정
+- 운영 포인트: weight 튜닝과 라벨 안정화(히스테리시스)
 
-> 결론: "정책 레버(config)"는 단기 반영 가능하지만, "컨텍스트 적응형 분류"는 함수 입력/호출 체인 확장이 선행되어야 한다.
+> 결론: 현재 구조에서도 "컨텍스트 적응형 분류"의 핵심은 이미 사용 가능하며, 남은 과제는 신규 feature 연결이 아니라 운영 튜닝/안정화다.
 
 ### 2) 현재 실제로 내려오는 값 (사용 가능)
 
@@ -192,33 +192,30 @@
 #### C. 분류 함수 내부에서 이미 쓰는 값
 - `market_total`, `salary_m`, `remaining_years`, `need_tag`(BUY), `match_tag`(SELL), `is_expiring`(SELL)
 
-#### D. Tick/팀 컨텍스트에서 조회 가능한 값(단, 분류 함수에 직접 주입 필요)
+#### D. Tick/팀 컨텍스트에서 조회되고 `TierContext`로 주입되는 값
 - `TeamSituation`: `trade_posture`, `urgency`, `time_horizon`, `constraints.deadline_pressure`, `preferences`, `signals.*`
 - `DecisionContext`: `need_map`, valuation knobs/policies
 
-### 3) 현재 값만으로는 부족한 항목 (추가 연결 필요)
-기존 문서에서 제안했던 지표 중 아래는 **현재 분류 함수 입력만으로는 직접 계산 불가**다.
+#### E. `classify_target_tier()`에 현재 직접 연결되어 계산 가능한 확장 입력
+1. 리그 market percentile(포지션 분포 제외)
+   - 근거: `TradeAssetCatalog.incoming_all_players` 전수 기준으로 `market_percentile_league`를 계산해 `TierContext.market_percentile_league`로 주입.
+   - 적용: `_tier_market_anchor()`에서 절대값 `market_total`과 percentile anchor를 혼합.
 
-1. 리그/포지션 percentile, z-score
-   - 이유: 분포 계산용 리그 전수 집합 접근이 분류 함수에 직접 연결되어 있지 않음.
+2. 팀 전략 기반 동적 컷(컨텐더/리빌더별 가중)
+   - 근거: `TeamSituation`의 `competitive_tier`, `trade_posture`, `time_horizon`, `urgency`, `deadline_pressure`를 `TierContext`로 주입.
+   - 적용: `_tier_strategy_offset()`에서 시장값 오프셋 계산 후 tier 컷에 반영.
 
-2. 선수 단기 추세(상승/하락) / 가용성 리스크
-   - 이유: `TargetCandidate`/`SellAssetCandidate`에 관련 필드 부재.
+3. 계약 질 프록시(옵션/부분보장 직접값은 아님)
+   - 근거: `IncomingPlayerRef`의 `contract_gap_cap_share`, cap share 편차, 잔여연수로 `contract_proxy_toxic/trigger/matching/control`을 계산해 `TierContext`로 전달.
+   - 적용: `_tier_contract_offset()`에서 tier 보정치로 반영.
 
-3. 옵션/부분보장 기반 계약 질 지표
-   - 이유: 계약 옵션 정보는 valuation 스냅샷 계층에 있으나 tier 분류 입력 DTO에는 전달되지 않음.
+### 3) 수정된 실행 우선순위(현 구조 친화)
+1. **1차(즉시 가능)**: `tier_market_percentile_weight`/`tier_strategy_weight`/`tier_contract_weight` 기본 운영값 확정
+2. **2차(중간 난이도)**: 팀 posture별(컨텐더/리빌더) 시나리오 튜닝 매트릭스 정리
+3. **3차(운영 고도화)**: 히스테리시스 강도와 expiring 할인 규칙을 로그 기반으로 안정화
+4. **4차(지속 운영)**: KPI 대시보드 기반 회귀 모니터링/재튜닝 루프 정착
 
-4. 팀 전략 기반 동적 컷(컨텐더/리빌더별 가중)
-   - 이유: `TeamSituation`은 존재하지만 `classify_target_tier()` 시그니처에 없음.
-
-### 4) 수정된 실행 우선순위(현 구조 친화)
-1. **1차(즉시 가능)**: `config`를 실사용하는 컷 이동/완충구간 도입
-   - 예: strictness, expiring 할인 강도, PICK 판정 민감도
-2. **2차(중간 난이도)**: 분류 함수에 최소 컨텍스트 주입(`team_situation` 또는 경량 `TierContext`)
-3. **3차(고도화)**: 리그 분포 캐시(틱 단위) 기반 percentile/z-score 정규화
-4. **4차(확장)**: 계약 옵션/가용성/추세 등 feature 확장
-
-### 5) 브리핑 결론
+### 4) 브리핑 결론
 - 이전 구상안의 방향성(적응형/안정화/정책화)은 유효하다.
-- 다만 현재 구조 기준으로는 **"즉시 구현 가능 범위"와 "입력 파이프라인 확장 전제 범위"를 분리해 추진해야 현실적**이다.
-- 당장 실행 가능한 핵심은 `config` 활성화와 라벨 안정화(히스테리시스)이며, percentile/팀전략 동적화는 `classify_target_tier` 입력 확장 이후 단계가 적합하다.
+- 현재 구조 기준으로도 핵심 입력 신호(percentile/팀전략/계약프록시)는 이미 연결되어 있어 운영 튜닝 중심으로 추진하는 것이 현실적이다.
+- 당장 실행 가능한 핵심은 `config` weight 튜닝과 라벨 안정화(히스테리시스)이며, 이미 연결된 percentile/팀전략/계약프록시 신호의 운영 가이드를 고정하는 것이다.
