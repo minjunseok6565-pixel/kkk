@@ -82,19 +82,31 @@ def build_role_textures(
 
         creation = _score_from_role_fit(
             role_fit,
-            ("SHOT_CREATION", "Engine_Primary", "PRIMARY_INITIATOR"),
+            (
+                "Engine_Primary",
+                "Engine_Secondary",
+                "Transition_Engine",
+                "Shot_Creator",
+            ),
         )
         spacing = _score_from_role_fit(
             role_fit,
-            ("SPACING", "Engine_Spacing"),
+            (
+                "SpotUp_Spacer",
+                "Movement_Shooter",
+            ),
         )
         rim_pressure = _score_from_role_fit(
             role_fit,
-            ("RIM_PRESSURE", "Engine_RimPressure"),
+            (
+                "Rim_Pressure",
+                "Cutter_Finisher",
+                "Roll_Man",
+            ),
         )
         defense = _score_from_role_fit(
             role_fit,
-            ("DEFENSE", "Engine_DefenseAnchor", "Engine_POA_Defender"),
+            tuple(),
         )
 
         supply: Mapping[str, float] | None = None
