@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional, Tuple, Iterable, List
 
+import json
 import math
 
 # SSOT helpers
@@ -17,7 +18,6 @@ from .types import (
     PickSnapshot,
     SwapSnapshot,
     FixedAssetSnapshot,
-    PickExpectation,
     ValuationStage,
     StepMode,
     ValueComponents,
@@ -42,7 +42,7 @@ League-wide asset pricing layer ("market price", team-agnostic).
 
 Inputs:
 - AssetSnapshot (player/pick/swap/fixed)
-- Optional PickExpectation (expected pick position / uncertainty)
+- Optional pick distribution summary (ev/variance/tails)
 
 Outputs:
 - MarketValuation with:
@@ -107,6 +107,26 @@ def _softplus(x: float) -> float:
 
 def _vc(now: float = 0.0, future: float = 0.0) -> ValueComponents:
     return ValueComponents(float(now), float(future))
+
+
+def _pick_distribution_signature(distribution: Optional[Mapping[str, Any]]) -> str:
+    if not distribution:
+        return ""
+    keys = (
+        "ev_pick",
+        "variance",
+        "tail_upside_prob",
+        "tail_downside_prob",
+        "p10_pick",
+        "p50_pick",
+        "p90_pick",
+        "compat_expected_pick_number",
+    )
+    payload = {k: distribution.get(k) for k in keys if k in distribution}
+    try:
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=str)
+    except Exception:
+        return str(payload)
 
 
 # =============================================================================
@@ -218,8 +238,8 @@ class MarketPricer:
     config: MarketPricingConfig = field(default_factory=MarketPricingConfig)
 
     _cache_player: Dict[Tuple[str, int], MarketValuation] = field(default_factory=dict, init=False)
-    _cache_pick: Dict[Tuple[str, int, str], MarketValuation] = field(default_factory=dict, init=False)
-    _cache_swap: Dict[Tuple[str, int], MarketValuation] = field(default_factory=dict, init=False)
+    _cache_pick: Dict[Tuple[str, int, str, str], MarketValuation] = field(default_factory=dict, init=False)
+    _cache_swap: Dict[Tuple[str, int, str, str], MarketValuation] = field(default_factory=dict, init=False)
     _cache_fixed: Dict[Tuple[str, int], MarketValuation] = field(default_factory=dict, init=False)
 
     # -------------------------------------------------------------------------
@@ -243,9 +263,8 @@ class MarketPricer:
         """
         deal_evaluator에서 호출하는 단일 진입점.
 
-        - pick: pick_expectation을 주입할 수 있음
-        - swap: swap의 pick_id_a/b를 resolve한 PickSnapshot을 같이 주입할 수 있음
-          (swap pricing은 pick snapshot + 기대순번/연도할인 기대치가 필요)
+        - pick: pick_distribution(v2)을 주입할 수 있음
+        - swap: swap의 pick_id_a/b를 resolve한 PickSnapshot + 분포를 같이 주입할 수 있음
         """
         kind = snapshot_kind(snap)
         ref_id = snapshot_ref_id(snap)
@@ -269,7 +288,8 @@ class MarketPricer:
             if isinstance(snap, PickSnapshot):
                 prot_sig = pick_protection_signature(snap.protection)
 
-            pick_cache_key = (str(ref_id), int(env_key), str(prot_sig))
+            dist_sig = _pick_distribution_signature(pick_distribution)
+            pick_cache_key = (str(ref_id), int(env_key), str(prot_sig), dist_sig)
 
             cached = self._cache_pick.get(pick_cache_key)
             if cached is not None:
@@ -285,7 +305,13 @@ class MarketPricer:
             return out
 
         if kind == AssetKind.SWAP:
-            cached = self._cache_swap.get(cache_key)
+            swap_cache_key = (
+                str(ref_id),
+                int(env_key),
+                _pick_distribution_signature(resolved_pick_a_distribution),
+                _pick_distribution_signature(resolved_pick_b_distribution),
+            )
+            cached = self._cache_swap.get(swap_cache_key)
             if cached is not None:
                 return cached
             out = self._price_swap(
@@ -299,7 +325,7 @@ class MarketPricer:
                 pick_b_distribution=resolved_pick_b_distribution,
                 env=env,
             )
-            self._cache_swap[cache_key] = out
+            self._cache_swap[swap_cache_key] = out
             return out
 
         cached = self._cache_fixed.get(cache_key)
@@ -833,11 +859,45 @@ class MarketPricer:
         )
         value = value.scale(disc)
 
-        # 4) protection expectation (TOP_N)
-        prot = snap.protection
-        if isinstance(prot, dict) and (prot.get("type") or prot.get("rule")):
-            value, prot_steps = self._apply_pick_protection(value, exp_num=float(exp_num), protection=prot)
-            steps.extend(prot_steps)
+        if distribution is not None:
+            variance = _safe_float(distribution.get("variance"), 0.0)
+            if variance > cfg.eps:
+                var_bonus = min(0.30 * variance, 3.0)
+                steps.append(
+                    ValuationStep(
+                        stage=ValuationStage.MARKET,
+                        mode=StepMode.ADD,
+                        code="PICK_DISTRIBUTION_VARIANCE",
+                        label="픽 분포 분산 기반 옵션가치",
+                        delta=_vc(now=0.0, future=var_bonus),
+                        meta={"variance": float(variance)},
+                    )
+                )
+                value = _vc(now=value.now, future=value.future + var_bonus)
+
+            up = _safe_float(distribution.get("tail_upside_prob"), 0.0)
+            down = _safe_float(distribution.get("tail_downside_prob"), 0.0)
+            tail_adjust = (up - down) * 2.0
+            if abs(tail_adjust) > cfg.eps:
+                steps.append(
+                    ValuationStep(
+                        stage=ValuationStage.MARKET,
+                        mode=StepMode.ADD,
+                        code="PICK_DISTRIBUTION_TAIL_ADJUST",
+                        label="픽 분포 꼬리리스크 보정",
+                        delta=_vc(now=0.0, future=tail_adjust),
+                        meta={
+                            "tail_upside_prob": up,
+                            "tail_downside_prob": down,
+                            "p10_pick": distribution.get("p10_pick"),
+                            "p50_pick": distribution.get("p50_pick"),
+                            "p90_pick": distribution.get("p90_pick"),
+                        },
+                    )
+                )
+                value = _vc(now=value.now, future=value.future + tail_adjust)
+        # v2 cutover: protection/swap semantics are already reflected in distribution build path.
+        # Keep price path free of legacy expectation-based protection approximation.
 
         return MarketValuation(
             asset_key=asset_key,
@@ -1018,7 +1078,7 @@ class MarketPricer:
         )
 
         gap = abs(exp_a - exp_b)
-        exercise_prob = _clamp(gap * cfg.swap_gap_to_prob_scale / 10.0, 0.15, 0.85)
+        exercise_prob = 1.0
 
         steps.append(
             ValuationStep(
@@ -1042,9 +1102,9 @@ class MarketPricer:
             ValuationStep(
                 stage=ValuationStage.MARKET,
                 mode=StepMode.MUL,
-                code="SWAP_EXERCISE_PROB",
-                label="스왑 행사 확률(근사)",
-                factor=exercise_prob,
+                code="SWAP_EXERCISE_PROB_SKIPPED_V2",
+                label="v2 분포 경로에서는 스왑 행사확률 근사 미적용",
+                factor=1.0,
                 meta={"gap": gap},
             )
         )

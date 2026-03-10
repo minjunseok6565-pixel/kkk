@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
+from contracts.terms import remaining_years, salary_for_season
+
 from cap_model import CapModel
 from decision_context import DecisionContext
 
@@ -110,6 +112,74 @@ def _build_team_payroll_map(players: Mapping[str, PlayerSnapshot]) -> dict[str, 
     return out
 
 
+
+
+def _safe_float(x: object, default: float = 0.0) -> float:
+    try:
+        return float(x)
+    except Exception:
+        return float(default)
+
+
+def _legacy_contract_commitment(contract: ContractSnapshot, *, current_season_year: int) -> float:
+    sal_now = max(0.0, _safe_float(salary_for_season(contract, int(current_season_year)), 0.0))
+    years = max(0, int(remaining_years(contract, current_season_year=int(current_season_year))))
+    return float(sal_now * years)
+
+
+def _build_v1_metrics(
+    *,
+    provider: ValuationDataProvider,
+    picks: Mapping[str, PickSnapshot],
+    contracts: Mapping[str, ContractSnapshot],
+    team_payroll_map: Mapping[str, float],
+    salary_cap: float,
+    current_season_year: int,
+    reason_flags: list[str],
+) -> dict[str, float]:
+    v1_pick_ev = 0.0
+    for pick_id in picks.keys():
+        exp = provider.get_pick_expectation(pick_id)
+        if exp is None or exp.expected_pick_number is None:
+            reason_flags.append(f"MISSING_INPUT_V1_PICK_EXPECTATION:{pick_id}")
+            v1_pick_ev += 16.0
+            continue
+        v1_pick_ev += _safe_float(exp.expected_pick_number, 16.0)
+
+    team_commitment: dict[str, float] = {}
+    total_commitment = 0.0
+    for contract in contracts.values():
+        commitment = _legacy_contract_commitment(contract, current_season_year=int(current_season_year))
+        total_commitment += commitment
+        tid = str(contract.team_id or "").upper().strip()
+        if tid:
+            team_commitment[tid] = team_commitment.get(tid, 0.0) + commitment
+
+    cap_base = max(float(salary_cap), 1.0)
+    cap_flex = 0.0
+    for team_id, payroll in team_payroll_map.items():
+        room_ratio = (cap_base - _safe_float(payroll, 0.0)) / cap_base
+        burden_ratio = team_commitment.get(str(team_id).upper(), 0.0) / cap_base
+        cap_flex += room_ratio - burden_ratio
+
+    return {
+        "pick_ev_delta": float(v1_pick_ev),
+        "contract_burden_delta": float(total_commitment),
+        "cap_flex_delta": float(cap_flex),
+    }
+
+
+def _build_v2_metrics(
+    *,
+    pick_distributions: Mapping[str, PickDistributionBundle],
+    contract_textures: Mapping[str, ContractTexture],
+    cap_ledgers: Mapping[str, CapLedgerView],
+) -> dict[str, float]:
+    return {
+        "pick_ev_delta": float(sum(b.ev_pick for b in pick_distributions.values())),
+        "contract_burden_delta": float(sum(t.guaranteed_commitment for t in contract_textures.values())),
+        "cap_flex_delta": float(sum(v.posture_adjusted_flex for v in cap_ledgers.values())),
+    }
 def collect_v1_v2_diff(
     v1_metrics: Mapping[str, float],
     v2_metrics: Mapping[str, float],
@@ -250,12 +320,25 @@ def build_valuation_context_v2(
 
     diff_report = None
     if dual_read:
-        v2_metrics = {
-            "pick_ev_delta": float(sum(b.ev_pick for b in pick_distributions.values())),
-            "contract_burden_delta": float(sum(t.guaranteed_commitment for t in contract_textures.values())),
-            "cap_flex_delta": float(sum(v.posture_adjusted_flex for v in cap_ledgers.values())),
-        }
-        diff_report = collect_v1_v2_diff(v1_metrics={}, v2_metrics=v2_metrics)
+        season_cap = float(market_pricing_config.salary_cap or 0.0)
+        if season_cap <= 0.0:
+            season_cap = float(CapModel.defaults().numbers_for_season(int(current_season_year)).salary_cap)
+
+        v1_metrics = _build_v1_metrics(
+            provider=provider,
+            picks=picks,
+            contracts=contracts,
+            team_payroll_map=team_payroll_map,
+            salary_cap=season_cap,
+            current_season_year=int(current_season_year),
+            reason_flags=reason_flags,
+        )
+        v2_metrics = _build_v2_metrics(
+            pick_distributions=pick_distributions,
+            contract_textures=contract_textures,
+            cap_ledgers=cap_ledgers,
+        )
+        diff_report = collect_v1_v2_diff(v1_metrics=v1_metrics, v2_metrics=v2_metrics)
 
     if not decision_context_by_team:
         reason_flags.append("MISSING_INPUT_DECISION_CONTEXT")

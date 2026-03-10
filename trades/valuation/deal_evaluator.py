@@ -53,7 +53,6 @@ from .types import (
     PlayerSnapshot,
     PickSnapshot,
     SwapSnapshot,
-    PickExpectation,
 )
 from .pick_distribution import PickDistributionBundle
 

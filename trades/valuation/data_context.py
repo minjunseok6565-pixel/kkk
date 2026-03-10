@@ -23,6 +23,9 @@ This module provides simple helpers to build expectations from standings order.
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+from .draft_lottery_rules import get_draft_lottery_rules
+from .pick_distribution import build_pick_distributions_from_standings
+
 from .types import (
     PlayerId,
     TeamId,
@@ -221,6 +224,7 @@ class RepoValuationDataContext(ValuationDataProvider):
 
     # optional pick expectations
     pick_expectations: PickExpectationMap = field(default_factory=dict)
+    pick_distributions: Dict[str, Any] = field(default_factory=dict)
 
     # caches
     _player_cache: Dict[str, PlayerSnapshot] = field(default_factory=dict)
@@ -366,6 +370,25 @@ class RepoValuationDataContext(ValuationDataProvider):
 
     def get_pick_expectation(self, pick_id: PickId) -> Optional[PickExpectation]:
         return self.pick_expectations.get(str(pick_id))
+
+    def get_pick_distribution(self, pick_id: PickId) -> Optional[Mapping[str, Any]]:
+        dist = self.pick_distributions.get(str(pick_id))
+        if dist is None:
+            return None
+        if isinstance(dist, Mapping):
+            return dist
+        # dataclass-like fallback (PickDistributionBundle)
+        return {
+            "ev_pick": getattr(dist, "ev_pick", None),
+            "variance": getattr(dist, "variance", None),
+            "p10_pick": getattr(dist, "p10_pick", None),
+            "p50_pick": getattr(dist, "p50_pick", None),
+            "p90_pick": getattr(dist, "p90_pick", None),
+            "tail_upside_prob": getattr(dist, "tail_upside_prob", None),
+            "tail_downside_prob": getattr(dist, "tail_downside_prob", None),
+            "compat_expected_pick_number": getattr(dist, "compat_expected_pick_number", None),
+            "source_coverage": getattr(dist, "source_coverage", None),
+        }
 
     # ------------------------------------------------------------------
     # Optional utilities
@@ -586,15 +609,73 @@ def build_repo_valuation_data_context(
     active_contract_id_by_player = dict((ledger.get("active_contract_id_by_player") or {}))
 
     pe: PickExpectationMap = {}
-    if pick_expectations is not None:
-        pe = dict(pick_expectations)
-    elif standings_order_worst_to_best is not None:
-        pe = build_pick_expectations_from_standings(
-            draft_picks_map,
-            standings_order_worst_to_best=standings_order_worst_to_best,
+    pd: Dict[str, Any] = {}
+
+    if standings_order_worst_to_best is not None:
+        season_rules = get_draft_lottery_rules(int(current_season_year))
+        if season_rules is not None:
+            pick_snaps = []
+            for pid in draft_picks_map.keys():
+                try:
+                    pick_snaps.append(
+                        PickSnapshot(
+                            kind="pick",
+                            pick_id=str(pid),
+                            year=_safe_int(draft_picks_map[pid].get("year"), 0),
+                            round=_safe_int(draft_picks_map[pid].get("round"), 0),
+                            original_team=str(draft_picks_map[pid].get("original_team") or "").upper(),
+                            owner_team=str(draft_picks_map[pid].get("owner_team") or "").upper(),
+                            protection=(draft_picks_map[pid].get("protection") if isinstance(draft_picks_map[pid].get("protection"), (dict, type(None))) else None),
+                            meta={},
+                        )
+                    )
+                except Exception:
+                    continue
+
+            swap_snaps = []
+            for sid in swap_rights_map.keys():
+                try:
+                    s = swap_rights_map[sid]
+                    swap_snaps.append(
+                        SwapSnapshot(
+                            kind="swap",
+                            swap_id=str(sid),
+                            pick_id_a=str(s.get("pick_id_a") or ""),
+                            pick_id_b=str(s.get("pick_id_b") or ""),
+                            year=(_safe_int(s.get("year"), 0) if s.get("year") is not None else None),
+                            round=(_safe_int(s.get("round"), 0) if s.get("round") is not None else None),
+                            owner_team=str(s.get("owner_team") or "").upper(),
+                            active=bool(s.get("active", True)),
+                            created_by_deal_id=(str(s.get("created_by_deal_id")) if s.get("created_by_deal_id") else None),
+                            created_at=(str(s.get("created_at")) if s.get("created_at") else None),
+                            meta={},
+                        )
+                    )
+                except Exception:
+                    continue
+
+            pd = build_pick_distributions_from_standings(
+                picks=tuple(pick_snaps),
+                swaps=tuple(swap_snaps),
+                standings_order_worst_to_best=tuple(standings_order_worst_to_best),
+                season_rules=season_rules,
+            )
+
+    # v2 migration: PickExpectation is now a compatibility view over distribution EV.
+    for pick_id, bundle in pd.items():
+        compat_expected = getattr(bundle, "compat_expected_pick_number", None)
+        if compat_expected is None:
+            continue
+        pe[str(pick_id)] = PickExpectation(
+            pick_id=str(pick_id),
+            expected_pick_number=float(compat_expected),
             confidence=float(expectation_confidence),
-            year_filter=expectation_year_filter,
+            meta={"method": "distribution_ev", "current_season_year": int(current_season_year)},
         )
+
+    # Explicit caller expectations are accepted only as compatibility fallback.
+    if not pe and pick_expectations is not None:
+        pe = dict(pick_expectations)
 
     # Normalize PickExpectations: ensure meta carries current_season_year so
     # market_pricing can apply pick year discount consistently.
@@ -626,4 +707,5 @@ def build_repo_valuation_data_context(
         active_contract_id_by_player=active_contract_id_by_player,
         agency_state_by_player=agency_state_by_player,
         pick_expectations=pe,
+        pick_distributions=pd,
     )
