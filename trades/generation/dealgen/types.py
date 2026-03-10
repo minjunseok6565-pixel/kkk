@@ -234,6 +234,14 @@ class DealGeneratorConfig:
         "salary_cleanup.pure_absorb_for_asset",
     )
 
+    # --- target tier dynamic adjustment (phase-1)
+    # Context-aware tier 분류에 쓰이는 보정 파라미터(가중치/안정화).
+    # 기본값은 보수적으로 유지하여 기존 하드컷 동작과의 괴리를 최소화한다.
+    tier_strategy_weight: float = 0.20
+    tier_contract_weight: float = 0.15
+    tier_market_percentile_weight: float = 0.35
+    tier_hysteresis_band: float = 0.05
+
     # --- sweetener loop
     sweetener_enabled: bool = True
     sweetener_max_additions: int = 2
@@ -559,6 +567,33 @@ class TargetCandidate:
     salary_m: float
     remaining_years: float
     age: Optional[float]
+
+
+@dataclass(frozen=True, slots=True)
+class TierContext:
+    """Dynamic context payload for `classify_target_tier()`.
+
+    Note: injury/availability signals are intentionally excluded in current phase.
+    """
+
+    # Team strategy (buyer-centric)
+    buyer_competitive_tier: str = ""
+    buyer_trade_posture: str = ""
+    buyer_time_horizon: str = ""
+    buyer_urgency: float = 0.0
+    buyer_deadline_pressure: float = 0.0
+
+    # Optional seller-side hint
+    seller_time_horizon: str = ""
+
+    # Relative market scale
+    market_percentile_league: float = 0.5
+
+    # Contract texture / risk proxies
+    contract_control_direction: float = 0.0
+    contract_trigger_risk: float = 0.0
+    contract_toxic_risk: float = 0.0
+    contract_matching_utility: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)

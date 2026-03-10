@@ -65,3 +65,25 @@ def _scale_buy_retrieval_limits(cfg: DealGeneratorConfig, team_situation: Any) -
     caps["tier2_budget_share"] = max(0.0, min(1.0, float(getattr(cfg, "buy_target_expand_tier2_budget_share", 0.35) or 0.0)))
     caps["retrieval_iteration_cap"] = float(max(1, int(getattr(cfg, "buy_target_retrieval_iteration_cap", 1) or 1)))
     return caps
+
+
+def _normalize_tier_dynamic_knobs(cfg: DealGeneratorConfig) -> dict[str, float]:
+    """Return clamped dynamic-tier knob values from config.
+
+    Step-1 skeleton helper: centralize bounds for TierContext-aware classify logic.
+    """
+
+    def _clamp01(v: Any, default: float) -> float:
+        try:
+            x = float(v)
+        except Exception:
+            x = float(default)
+        return max(0.0, min(1.0, x))
+
+    return {
+        "tier_strategy_weight": _clamp01(getattr(cfg, "tier_strategy_weight", 0.20), 0.20),
+        "tier_contract_weight": _clamp01(getattr(cfg, "tier_contract_weight", 0.15), 0.15),
+        "tier_market_percentile_weight": _clamp01(getattr(cfg, "tier_market_percentile_weight", 0.35), 0.35),
+        # hysteresis는 완충 구간 폭이므로 0.0~0.25로 제한
+        "tier_hysteresis_band": max(0.0, min(0.25, float(getattr(cfg, "tier_hysteresis_band", 0.05) or 0.05))),
+    }

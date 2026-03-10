@@ -23,7 +23,7 @@ from ..asset_catalog import (
     BucketId,
 )
 
-from .types import DealGeneratorConfig
+from .types import DealGeneratorConfig, TierContext
 
 SURPLUS_BUCKETS_EFFECTIVE: Tuple[BucketId, ...] = (
     "SURPLUS_EXPENDABLE",
@@ -195,12 +195,119 @@ def compute_buy_retrieval_caps(team_situation: Any, cfg: DealGeneratorConfig) ->
     }
 
 
+def _tier_strategy_offset(tier_ctx: TierContext, cfg: Optional[DealGeneratorConfig]) -> float:
+    """Compute strategy-driven market offset for tier classification.
+
+    Positive => easier to classify as higher tier, Negative => stricter.
+    """
+
+    w = float(getattr(cfg, "tier_strategy_weight", 0.20) if cfg is not None else 0.20)
+    w = max(0.0, min(1.0, w))
+
+    tier = str(getattr(tier_ctx, "buyer_competitive_tier", "") or "").upper()
+    posture = str(getattr(tier_ctx, "buyer_trade_posture", "") or "").upper()
+    horizon = str(getattr(tier_ctx, "buyer_time_horizon", "") or "").upper()
+
+    try:
+        urg = float(getattr(tier_ctx, "buyer_urgency", 0.0) or 0.0)
+    except Exception:
+        urg = 0.0
+    try:
+        ddl = float(getattr(tier_ctx, "buyer_deadline_pressure", 0.0) or 0.0)
+    except Exception:
+        ddl = 0.0
+    urg = max(0.0, min(1.0, urg))
+    ddl = max(0.0, min(1.0, ddl))
+
+    tier_bias = {
+        "CONTENDER": 0.30,
+        "PLAYOFF_BUYER": 0.20,
+        "FRINGE": 0.05,
+        "RESET": -0.05,
+        "REBUILD": -0.20,
+        "TANK": -0.30,
+    }.get(tier, 0.0)
+
+    posture_bias = {
+        "AGGRESSIVE_BUY": 0.25,
+        "SOFT_BUY": 0.12,
+        "STAND_PAT": -0.04,
+        "SOFT_SELL": -0.12,
+        "SELL": -0.22,
+    }.get(posture, 0.0)
+
+    horizon_bias = {
+        "WIN_NOW": 0.18,
+        "RE_TOOL": 0.04,
+        "REBUILD": -0.16,
+    }.get(horizon, 0.0)
+
+    pressure = 0.12 * urg + 0.08 * ddl
+    raw = tier_bias + posture_bias + horizon_bias + pressure
+    # market_total 스케일에서 완만한 보정(대략 ±8)
+    return max(-8.0, min(8.0, raw * 12.0 * w))
+
+
+def _tier_contract_offset(tier_ctx: TierContext, cfg: Optional[DealGeneratorConfig]) -> float:
+    """Compute contract-quality offset for tier classification.
+
+    Positive => contract quality supports a higher tier, Negative => penalize toxic/risky deals.
+    """
+
+    w = float(getattr(cfg, "tier_contract_weight", 0.15) if cfg is not None else 0.15)
+    w = max(0.0, min(1.0, w))
+
+    try:
+        control = float(getattr(tier_ctx, "contract_control_direction", 0.0) or 0.0)
+    except Exception:
+        control = 0.0
+    try:
+        trig = float(getattr(tier_ctx, "contract_trigger_risk", 0.0) or 0.0)
+    except Exception:
+        trig = 0.0
+    try:
+        toxic = float(getattr(tier_ctx, "contract_toxic_risk", 0.0) or 0.0)
+    except Exception:
+        toxic = 0.0
+    try:
+        util = float(getattr(tier_ctx, "contract_matching_utility", 0.0) or 0.0)
+    except Exception:
+        util = 0.0
+
+    control = max(-1.0, min(1.0, control))
+    trig = max(0.0, min(1.0, trig))
+    toxic = max(0.0, min(1.0, toxic))
+    util = max(0.0, min(1.0, util))
+
+    # Better matching utility/control lifts, toxic/trigger risk lowers.
+    raw = 0.35 * control + 0.25 * util - 0.25 * toxic - 0.15 * trig
+    return max(-6.0, min(6.0, raw * 10.0 * w))
+
+
+def _tier_market_anchor(market: float, tier_ctx: TierContext, cfg: Optional[DealGeneratorConfig]) -> float:
+    """Blend raw market with percentile-anchored market to reduce absolute-threshold brittleness."""
+
+    w = float(getattr(cfg, "tier_market_percentile_weight", 0.35) if cfg is not None else 0.35)
+    w = max(0.0, min(1.0, w))
+
+    try:
+        p = float(getattr(tier_ctx, "market_percentile_league", 0.5) or 0.5)
+    except Exception:
+        p = 0.5
+    p = max(0.0, min(1.0, p))
+
+    # Legacy bands roughly span 52..86. Percentile anchor maps 0..1 -> 46..92.
+    anchor = 46.0 + 46.0 * p
+    return float((1.0 - w) * float(market) + w * float(anchor))
+
+
 def classify_target_tier(
     *,
     target: Optional[Any] = None,
     sale_asset: Optional[Any] = None,
     match_tag: str = "",
     config: Optional[DealGeneratorConfig] = None,
+    tier_ctx: Optional[TierContext] = None,
 ) -> str:
     """거래 focal asset을 tier로 분류한다.
 
@@ -208,8 +315,6 @@ def classify_target_tier(
     - target(BUY) 또는 sale_asset(SELL) 중 하나를 입력한다.
     - threshold는 문서 기준의 단순 초기값이며, strictness 파라미터로 완화/강화 가능.
     """
-
-    _ = config  # phase-2: 인터페이스 고정(추후 strictness/bias 반영 시 사용)
 
     focus = target if target is not None else sale_asset
     if focus is None:
@@ -225,14 +330,32 @@ def classify_target_tier(
     if "PICK" in need_tag or "PICK" in tag:
         return "PICK_ONLY"
 
+    # Backward-compatible path: keep legacy behavior 100% identical when tier_ctx is absent.
+    if tier_ctx is None:
+        if is_expiring and market <= 58.0 and salary_m <= 30.0:
+            return "ROLE"
+
+        if market >= 86.0:
+            return "STAR"
+        if market >= 72.0:
+            return "HIGH_STARTER"
+        if market >= 52.0:
+            return "STARTER"
+        return "ROLE"
+
+    # Context-aware path
+    market_ctx = _tier_market_anchor(market, tier_ctx, config)
+    market_ctx += _tier_strategy_offset(tier_ctx, config)
+    market_ctx += _tier_contract_offset(tier_ctx, config)
+
     if is_expiring and market <= 58.0 and salary_m <= 30.0:
         return "ROLE"
 
-    if market >= 86.0:
+    if market_ctx >= 86.0:
         return "STAR"
-    if market >= 72.0:
+    if market_ctx >= 72.0:
         return "HIGH_STARTER"
-    if market >= 52.0:
+    if market_ctx >= 52.0:
         return "STARTER"
     return "ROLE"
 

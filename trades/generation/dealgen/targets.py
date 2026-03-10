@@ -245,7 +245,15 @@ def _final_rank(
     contract_base_w = float(getattr(config, "buy_target_contract_base_weight", 0.30) or 0.30)
     contract_term = contract_base_w * contract_score * team_sens
 
-    rank = player_core + contract_term + max(0.0, float(listing_boost or 0.0))
+    # Step-4 wiring: reuse catalog-exposed market/contract proxies when available.
+    market_pct = _clamp01(float(getattr(ref, "market_percentile_league", 0.5) or 0.5))
+    market_pct_term = 0.08 * (market_pct - 0.5)
+
+    contract_proxy_match = _clamp01(float(getattr(ref, "contract_proxy_matching", 0.0) or 0.0))
+    contract_proxy_toxic = _clamp01(float(getattr(ref, "contract_proxy_toxic", 0.0) or 0.0))
+    contract_proxy_term = 0.06 * (contract_proxy_match - contract_proxy_toxic)
+
+    rank = player_core + contract_term + market_pct_term + contract_proxy_term + max(0.0, float(listing_boost or 0.0))
     rank += rng.random() * 0.01
     return float(rank)
 

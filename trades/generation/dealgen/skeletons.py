@@ -8,7 +8,7 @@ from ...models import Deal, PlayerAsset
 from ..generation_tick import TradeGenerationTickContext
 from ..asset_catalog import TradeAssetCatalog, TeamOutgoingCatalog, BucketId
 
-from .types import DealGeneratorConfig, DealGeneratorBudget, TargetCandidate, DealCandidate, SellAssetCandidate
+from .types import DealGeneratorConfig, DealGeneratorBudget, TargetCandidate, DealCandidate, SellAssetCandidate, TierContext
 from .skeleton_registry import BuildContext, build_default_registry
 from .skeleton_modifiers import apply_modifiers
 from .utils import (
@@ -29,6 +29,120 @@ from .utils import (
 # =============================================================================
 # Offer skeletons
 # =============================================================================
+
+
+def _clamp01(x: float) -> float:
+    try:
+        xv = float(x)
+    except Exception:
+        return 0.0
+    return 0.0 if xv <= 0.0 else 1.0 if xv >= 1.0 else xv
+
+
+def _market_percentile_league_for_player(catalog: TradeAssetCatalog, player_id: str, fallback_market: float) -> float:
+    """Best-effort market percentile(0..1, higher is better) from catalog incoming pool."""
+
+    rows = tuple(getattr(catalog, "incoming_all_players", tuple()) or tuple())
+    if not rows:
+        # fallback heuristic in legacy market band
+        return _clamp01((float(fallback_market) - 46.0) / 46.0)
+
+    values = sorted(float(getattr(r, "market_total", 0.0) or 0.0) for r in rows)
+    n = len(values)
+    if n <= 1:
+        return 0.5
+
+    target_v = float(fallback_market)
+    for r in rows:
+        if str(getattr(r, "player_id", "") or "") == str(player_id):
+            target_v = float(getattr(r, "market_total", fallback_market) or fallback_market)
+            break
+
+    # percentile as share of values <= target_v
+    le = 0
+    for v in values:
+        if v <= target_v:
+            le += 1
+    return _clamp01(float(le - 1) / float(n - 1))
+
+
+def _incoming_ref_for_player(catalog: TradeAssetCatalog, player_id: str) -> Optional[object]:
+    pid = str(player_id or "")
+    if not pid:
+        return None
+    for r in tuple(getattr(catalog, "incoming_all_players", tuple()) or tuple()):
+        if str(getattr(r, "player_id", "") or "") == pid:
+            return r
+    return None
+
+
+def _build_tier_context_for_buy(
+    *,
+    buyer_id: str,
+    seller_id: str,
+    target: TargetCandidate,
+    tick_ctx: TradeGenerationTickContext,
+    catalog: TradeAssetCatalog,
+) -> TierContext:
+    ts_buyer = tick_ctx.get_team_situation(buyer_id)
+    ts_seller = tick_ctx.get_team_situation(seller_id)
+
+    ref = _incoming_ref_for_player(catalog, target.player_id)
+    market_pct = float(getattr(ref, "market_percentile_league", 0.5) or 0.5) if ref is not None else _market_percentile_league_for_player(catalog, target.player_id, float(target.market_total))
+
+    # Contract proxy: prefer catalog-exposed source fields (Step-4 data path), fallback to neutral.
+    toxic = float(getattr(ref, "contract_proxy_toxic", 0.0) or 0.0) if ref is not None else 0.0
+    trigger = float(getattr(ref, "contract_proxy_trigger", 0.0) or 0.0) if ref is not None else 0.0
+    matching = float(getattr(ref, "contract_proxy_matching", 0.0) or 0.0) if ref is not None else 0.0
+    control = float(getattr(ref, "contract_proxy_control", 0.0) or 0.0) if ref is not None else 0.0
+
+    return TierContext(
+        buyer_competitive_tier=str(getattr(ts_buyer, "competitive_tier", "") or ""),
+        buyer_trade_posture=str(getattr(ts_buyer, "trade_posture", "") or ""),
+        buyer_time_horizon=str(getattr(ts_buyer, "time_horizon", "") or ""),
+        buyer_urgency=float(getattr(ts_buyer, "urgency", 0.0) or 0.0),
+        buyer_deadline_pressure=float(getattr(getattr(ts_buyer, "constraints", None), "deadline_pressure", 0.0) or 0.0),
+        seller_time_horizon=str(getattr(ts_seller, "time_horizon", "") or ""),
+        market_percentile_league=market_pct,
+        contract_control_direction=control,
+        contract_trigger_risk=trigger,
+        contract_toxic_risk=toxic,
+        contract_matching_utility=matching,
+    )
+
+
+def _build_tier_context_for_sell(
+    *,
+    seller_id: str,
+    buyer_id: str,
+    sale_asset: SellAssetCandidate,
+    tick_ctx: TradeGenerationTickContext,
+    catalog: TradeAssetCatalog,
+) -> TierContext:
+    ts_buyer = tick_ctx.get_team_situation(buyer_id)
+    ts_seller = tick_ctx.get_team_situation(seller_id)
+
+    ref = _incoming_ref_for_player(catalog, sale_asset.player_id)
+    market_pct = float(getattr(ref, "market_percentile_league", 0.5) or 0.5) if ref is not None else _market_percentile_league_for_player(catalog, sale_asset.player_id, float(sale_asset.market_total))
+
+    toxic = float(getattr(ref, "contract_proxy_toxic", 0.0) or 0.0) if ref is not None else 0.0
+    trigger = float(getattr(ref, "contract_proxy_trigger", 0.0) or 0.0) if ref is not None else 0.0
+    matching = float(getattr(ref, "contract_proxy_matching", 0.0) or 0.0) if ref is not None else 0.0
+    control = float(getattr(ref, "contract_proxy_control", 0.0) or 0.0) if ref is not None else 0.0
+
+    return TierContext(
+        buyer_competitive_tier=str(getattr(ts_buyer, "competitive_tier", "") or ""),
+        buyer_trade_posture=str(getattr(ts_buyer, "trade_posture", "") or ""),
+        buyer_time_horizon=str(getattr(ts_buyer, "time_horizon", "") or ""),
+        buyer_urgency=float(getattr(ts_buyer, "urgency", 0.0) or 0.0),
+        buyer_deadline_pressure=float(getattr(getattr(ts_buyer, "constraints", None), "deadline_pressure", 0.0) or 0.0),
+        seller_time_horizon=str(getattr(ts_seller, "time_horizon", "") or ""),
+        market_percentile_league=market_pct,
+        contract_control_direction=control,
+        contract_trigger_risk=trigger,
+        contract_toxic_risk=toxic,
+        contract_matching_utility=matching,
+    )
 
 
 def _with_core_tags(tags: List[str], *, mode: str, focal_player_id: str, archetype: str) -> List[str]:
@@ -86,7 +200,14 @@ def build_offer_skeletons_buy(
 
     if bool(getattr(config, "skeleton_overhaul_enabled", True)):
         registry = build_default_registry()
-        target_tier = classify_target_tier(target=target, config=config)
+        tier_ctx = _build_tier_context_for_buy(
+            buyer_id=buyer_id,
+            seller_id=seller_id,
+            target=target,
+            tick_ctx=tick_ctx,
+            catalog=catalog,
+        )
+        target_tier = classify_target_tier(target=target, config=config, tier_ctx=tier_ctx)
         ctx = BuildContext(
             mode="BUY",
             buyer_id=buyer_id,
@@ -388,7 +509,14 @@ def build_offer_skeletons_sell(
 
     if bool(getattr(config, "skeleton_overhaul_enabled", True)):
         registry = build_default_registry()
-        target_tier = classify_target_tier(sale_asset=sale_asset, match_tag=match_tag, config=config)
+        tier_ctx = _build_tier_context_for_sell(
+            seller_id=seller_id,
+            buyer_id=buyer_id,
+            sale_asset=sale_asset,
+            tick_ctx=tick_ctx,
+            catalog=catalog,
+        )
+        target_tier = classify_target_tier(sale_asset=sale_asset, match_tag=match_tag, config=config, tier_ctx=tier_ctx)
         ctx = BuildContext(
             mode="SELL",
             buyer_id=buyer_id,

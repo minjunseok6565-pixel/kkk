@@ -23,7 +23,7 @@ Design
   - Stepien: stepien_policy SSOT (shared with PickRulesRule)
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Literal
 
@@ -111,6 +111,22 @@ def _safe_float(x: Any, default: Optional[float] = 0.0) -> Optional[float]:
         return float(x)
     except Exception:
         return default
+
+
+def _safe_norm(x: Any, lo: float, hi: float) -> float:
+    try:
+        xv = float(x)
+        lov = float(lo)
+        hiv = float(hi)
+    except Exception:
+        return 0.0
+    if hiv <= lov:
+        return 0.0
+    if xv <= lov:
+        return 0.0
+    if xv >= hiv:
+        return 1.0
+    return (xv - lov) / (hiv - lov)
 
 
 def _to_iso(d: Optional[date]) -> Optional[str]:
@@ -298,6 +314,11 @@ class IncomingPlayerRef:
     contract_gap_cap_share: float = 0.0
     expected_cap_share_avg: float = 0.0
     actual_cap_share_avg: float = 0.0
+    market_percentile_league: float = 0.5
+    contract_proxy_toxic: float = 0.0
+    contract_proxy_trigger: float = 0.0
+    contract_proxy_matching: float = 0.0
+    contract_proxy_control: float = 0.0
     # multi-tag supply profile for need-similarity scoring (tag, strength in [0,1])
     supply_items: Tuple[Tuple[str, float], ...] = tuple()
 
@@ -1504,6 +1525,39 @@ def build_trade_asset_catalog(
 
     # --- Finalize league-wide incoming index
     incoming_all_players: List[IncomingPlayerRef] = list(incoming_all_players_by_id.values())
+
+    # --- enrich incoming index with league-relative market percentile + contract proxies
+    if incoming_all_players:
+        sorted_for_pct = sorted(incoming_all_players, key=lambda r: (float(r.market_total), str(r.player_id)))
+        denom = float(max(1, len(sorted_for_pct) - 1))
+        rank_map: Dict[str, float] = {
+            str(r.player_id): (float(i) / denom) for i, r in enumerate(sorted_for_pct)
+        }
+
+        enriched: List[IncomingPlayerRef] = []
+        for r in incoming_all_players:
+            gap = abs(float(getattr(r, "contract_gap_cap_share", 0.0) or 0.0))
+            expected_cs = float(getattr(r, "expected_cap_share_avg", 0.0) or 0.0)
+            actual_cs = float(getattr(r, "actual_cap_share_avg", 0.0) or 0.0)
+            years = float(getattr(r, "remaining_years", 0.0) or 0.0)
+
+            toxic = _safe_norm(gap, 0.0, 0.08)
+            trigger = _safe_norm(max(0.0, actual_cs - expected_cs), 0.0, 0.08)
+            matching = 1.0 - toxic
+            control = max(-1.0, min(1.0, (years - 2.0) / 3.0))
+
+            enriched.append(
+                replace(
+                    r,
+                    market_percentile_league=float(rank_map.get(str(r.player_id), 0.5)),
+                    contract_proxy_toxic=float(max(0.0, min(1.0, toxic))),
+                    contract_proxy_trigger=float(max(0.0, min(1.0, trigger))),
+                    contract_proxy_matching=float(max(0.0, min(1.0, matching))),
+                    contract_proxy_control=float(control),
+                )
+            )
+        incoming_all_players = enriched
+
     incoming_all_players.sort(key=lambda r: (-r.market_total, r.salary_m, -r.remaining_years, r.player_id))
 
     return TradeAssetCatalog(
