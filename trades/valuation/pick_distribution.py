@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
+from trades.pick_semantics import resolve_pick_protection, resolve_swap_outcome
 from trades.protection import normalize_protection
 
 from .draft_lottery_rules import DraftLotteryRules
@@ -110,55 +111,73 @@ def _baseline_pmf_for_pick(
     return ({int(overall_pick): 1.0}, notes, coverage)
 
 
-def _apply_top_n_protection(
+def _validate_supported_protection(
     pmf: Mapping[int, float],
     pick: PickSnapshot,
-) -> tuple[dict[int, float], list[str], bool]:
+) -> tuple[dict[int, float], list[str], bool, bool]:
     notes: list[str] = []
     coverage_ok = True
+    has_protection = False
 
     raw_protection = pick.protection
     if raw_protection is None:
-        return (dict(pmf), notes, coverage_ok)
+        return (dict(pmf), notes, coverage_ok, has_protection)
+
+    has_protection = True
 
     try:
         normalized = normalize_protection(raw_protection, pick_id=pick.pick_id)
     except Exception:
         notes.append(f"UNSUPPORTED_RULE_PROTECTION:{pick.pick_id}")
         coverage_ok = False
-        return (dict(pmf), notes, coverage_ok)
+        return (dict(pmf), notes, coverage_ok, has_protection)
 
     p_type = str(normalized.get("type") or "").upper()
     if p_type != "TOP_N":
         notes.append(f"UNSUPPORTED_RULE_PROTECTION:{pick.pick_id}")
         coverage_ok = False
-        return (dict(pmf), notes, coverage_ok)
+        return (dict(pmf), notes, coverage_ok, has_protection)
 
-    n_val = int(normalized.get("n") or 0)
-    conveyed_only = {k: v for k, v in pmf.items() if int(k) > n_val}
-    conveyed_norm = _normalize_pmf(conveyed_only)
-    if not conveyed_norm:
-        notes.append(f"MISSING_INPUT_PROTECTION_CONVEYED_MASS:{pick.pick_id}")
-        coverage_ok = False
-        return (dict(pmf), notes, coverage_ok)
-
-    notes.append(f"APPLIED_TOP_N_PROTECTION:{pick.pick_id}:{n_val}")
-    return (conveyed_norm, notes, coverage_ok)
+    return (dict(pmf), notes, coverage_ok, has_protection)
 
 
-def _combine_swap(
-    pmf_a: Mapping[int, float],
-    pmf_b: Mapping[int, float],
+def _apply_protection_semantics_probability_wrapper(
     *,
-    better_for_a: bool,
-) -> dict[int, float]:
+    pick: PickSnapshot,
+    pmf: Mapping[int, float],
+) -> tuple[dict[int, float], list[str], bool]:
+    notes: list[str] = []
+    coverage_ok = True
+    if not pmf or pick.protection is None:
+        return (dict(pmf), notes, coverage_ok)
+
+    conveyed_prob = 0.0
+    protected_prob = 0.0
     out: dict[int, float] = {}
-    for pa, ppa in pmf_a.items():
-        for pb, ppb in pmf_b.items():
-            joint = float(ppa) * float(ppb)
-            resolved = min(int(pa), int(pb)) if better_for_a else max(int(pa), int(pb))
-            out[resolved] = out.get(resolved, 0.0) + joint
-    return _normalize_pmf(out)
+    for slot, prob in pmf.items():
+        try:
+            res = resolve_pick_protection(
+                pick_id=pick.pick_id,
+                slot=int(slot),
+                owner_team=pick.owner_team,
+                original_team=pick.original_team,
+                protection=pick.protection,
+            )
+        except Exception:
+            notes.append(f"UNSUPPORTED_RULE_PROTECTION:{pick.pick_id}")
+            coverage_ok = False
+            return (dict(pmf), notes, coverage_ok)
+
+        if res.owner_team_after == str(pick.owner_team).upper():
+            conveyed_prob += float(prob)
+        if res.protected:
+            protected_prob += float(prob)
+        # protection 정산은 owner/보상에 영향, slot 값 자체는 유지된다.
+        out[int(slot)] = out.get(int(slot), 0.0) + float(prob)
+
+    notes.append(f"PROTECTION_PROTECTED_PROB:{pick.pick_id}:{protected_prob:.6f}")
+    notes.append(f"PROTECTION_CONVEYED_PROB:{pick.pick_id}:{conveyed_prob:.6f}")
+    return (_normalize_pmf(out), notes, coverage_ok)
 
 
 def _apply_swaps(
@@ -191,17 +210,70 @@ def _apply_swaps(
             coverage_ok = False
             continue
 
-        owner_team = str(swap.owner_team).upper()
-        owner_a = str(pick_by_id.get(swap.pick_id_a).owner_team).upper() if swap.pick_id_a in pick_by_id else ""
-        owner_b = str(pick_by_id.get(swap.pick_id_b).owner_team).upper() if swap.pick_id_b in pick_by_id else ""
-        if owner_team not in {owner_a, owner_b}:
-            notes.append(f"SWAP_UNEXERCISABLE:{swap.swap_id}")
+        swap_out: dict[int, float] = {}
+        swap_applied = False
+        for slot_self, prob_self in pmf.items():
+            for slot_other, prob_other in other_pmf.items():
+                joint = float(prob_self) * float(prob_other)
+                if joint <= 0.0:
+                    continue
+
+                try:
+                    prot_self = resolve_pick_protection(
+                        pick_id=pick.pick_id,
+                        slot=int(slot_self),
+                        owner_team=pick.owner_team,
+                        original_team=pick.original_team,
+                        protection=pick.protection,
+                    )
+                    prot_other = resolve_pick_protection(
+                        pick_id=other_pick.pick_id,
+                        slot=int(slot_other),
+                        owner_team=other_pick.owner_team,
+                        original_team=other_pick.original_team,
+                        protection=other_pick.protection,
+                    )
+                    swap_res = resolve_swap_outcome(
+                        swap_id=swap.swap_id,
+                        pick_id_a=swap.pick_id_a,
+                        pick_id_b=swap.pick_id_b,
+                        slot_a=int(slot_self) if pick.pick_id == swap.pick_id_a else int(slot_other),
+                        slot_b=int(slot_other) if pick.pick_id == swap.pick_id_a else int(slot_self),
+                        owner_team=swap.owner_team,
+                        owner_a=(prot_self.owner_team_after if pick.pick_id == swap.pick_id_a else prot_other.owner_team_after),
+                        owner_b=(prot_other.owner_team_after if pick.pick_id == swap.pick_id_a else prot_self.owner_team_after),
+                    )
+                except Exception:
+                    notes.append(f"UNSUPPORTED_RULE_SWAP:{swap.swap_id}")
+                    coverage_ok = False
+                    swap_out = dict(pmf)
+                    break
+
+                if not swap_res.exercisable:
+                    resolved = int(slot_self)
+                elif not swap_res.swap_executed:
+                    resolved = int(slot_self)
+                else:
+                    pick_owner_before_swap = prot_self.owner_team_after
+                    owner_team = str(swap.owner_team).upper()
+                    if pick_owner_before_swap == owner_team:
+                        resolved = min(int(slot_self), int(slot_other))
+                    else:
+                        resolved = max(int(slot_self), int(slot_other))
+                    swap_applied = True
+
+                swap_out[resolved] = swap_out.get(resolved, 0.0) + joint
+            else:
+                continue
+            break
+
+        if not swap_out:
+            notes.append(f"MISSING_INPUT_SWAP_OUTCOME:{swap.swap_id}")
+            coverage_ok = False
             continue
 
-        pick_owner = str(pick.owner_team).upper()
-        better_for_this_pick = owner_team == pick_owner
-        pmf = _combine_swap(pmf, other_pmf, better_for_a=better_for_this_pick)
-        notes.append(f"APPLIED_SWAP:{swap.swap_id}")
+        pmf = _normalize_pmf(swap_out)
+        notes.append(f"APPLIED_SWAP:{swap.swap_id}" if swap_applied else f"SWAP_NOOP:{swap.swap_id}")
 
     return (pmf, notes, coverage_ok)
 
@@ -231,10 +303,18 @@ def build_pick_distributions_from_standings(
     # 1) PickSnapshot.protection 경로 고정
     for pick in picks:
         base_pmf, notes, coverage = _baseline_pmf_for_pick(pick, standings_index, season_rules)
-        protected_pmf, p_notes, protection_ok = _apply_top_n_protection(base_pmf, pick)
+        protected_pmf, p_notes, protection_ok, has_protection = _validate_supported_protection(base_pmf, pick)
         coverage["protection"] = bool(coverage.get("protection", True) and protection_ok)
-        baseline_by_pick_id[pick.pick_id] = _normalize_pmf(protected_pmf)
-        baseline_notes[pick.pick_id] = [*notes, *p_notes]
+        wrapped_pmf, pw_notes, pw_ok = _apply_protection_semantics_probability_wrapper(
+            pick=pick,
+            pmf=protected_pmf,
+        )
+        coverage["protection"] = bool(coverage.get("protection", True) and pw_ok)
+        baseline_by_pick_id[pick.pick_id] = _normalize_pmf(wrapped_pmf)
+        protection_notes: list[str] = []
+        if has_protection and protection_ok and pw_ok:
+            protection_notes.append(f"APPLIED_TOP_N_PROTECTION_SEMANTICS:{pick.pick_id}")
+        baseline_notes[pick.pick_id] = [*notes, *p_notes, *pw_notes, *protection_notes]
         baseline_coverage[pick.pick_id] = coverage
 
     bundles: dict[str, PickDistributionBundle] = {}
