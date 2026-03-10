@@ -249,6 +249,7 @@ def build_counter_message(
     provider: Any = None,
     relationship: Optional[Mapping[str, Any]] = None,
     strategy: Optional[str] = None,
+    ecosystem_reasons: Optional[Mapping[str, Any]] = None,
 ) -> str:
     """Create a negotiation UI message (Korean) describing the counter offer."""
 
@@ -264,7 +265,13 @@ def build_counter_message(
 
     # --- opener (why counter)
     m = _margin(base_evaluation, base_decision)
-    if _has_reason(base_decision, "FIT_FAILS"):
+    eco = dict(ecosystem_reasons or {})
+    eco_plus = list(eco.get("plus") or [])
+    eco_minus = list(eco.get("minus") or [])
+
+    if eco_minus:
+        opener = "현재 제안은 로테이션/전술 핏에서 충돌이 있어."
+    elif _has_reason(base_decision, "FIT_FAILS"):
         opener = "현재 제안은 우리 로스터/시스템 핏이 애매해."
     else:
         if m >= -0.75:
@@ -293,6 +300,17 @@ def build_counter_message(
     # Keep this subtle; detailed diff is already available.
     if not s["user_added"] and s["user_removed"]:
         asks.append(f"{ _list_join(list(s['user_removed'])) }는 빼고 다른 자산으로 맞춰보자.")
+
+    # Ecosystem reason hints (structured reason-code -> short KR hints)
+    if eco_minus:
+        if any(str(c).startswith("FIT_ECO_TOUCHES_") for c in eco_minus):
+            asks.append("볼 점유가 겹치지 않도록 구성은 조정해줘.")
+        if any(str(c).startswith("FIT_ECO_REDUNDANCY_") for c in eco_minus):
+            asks.append("역할 중복이 줄어드는 쪽으로 맞춰보자.")
+        if any(str(c).startswith("FIT_ECO_COVERAGE_") for c in eco_minus):
+            asks.append("로테이션 커버가 비지 않게 보강이 필요해.")
+    elif eco_plus and _has_reason(base_decision, "FIT_FAILS"):
+        asks.append("핏 관점에선 방향이 나쁘지 않아. 조건만 조금 더 맞춰보자.")
 
     # If nothing detected (should be rare)
     if not asks:
