@@ -27,6 +27,7 @@ from .types import (
     snapshot_ref_id,
     pick_protection_signature,
 )
+from .pick_distribution import PickDistributionBundle
 
 
 # =============================================================================
@@ -231,10 +232,13 @@ class MarketPricer:
         asset_key: str,
         env: ValuationEnv,
         pick_expectation: Optional[PickExpectation] = None,
+        pick_distribution: Optional[PickDistributionBundle] = None,
         resolved_pick_a: Optional[PickSnapshot] = None,
         resolved_pick_b: Optional[PickSnapshot] = None,
         resolved_pick_a_expectation: Optional[PickExpectation] = None,
         resolved_pick_b_expectation: Optional[PickExpectation] = None,
+        resolved_pick_a_distribution: Optional[PickDistributionBundle] = None,
+        resolved_pick_b_distribution: Optional[PickDistributionBundle] = None,
     ) -> MarketValuation:
         """
         deal_evaluator에서 호출하는 단일 진입점.
@@ -270,7 +274,13 @@ class MarketPricer:
             cached = self._cache_pick.get(pick_cache_key)
             if cached is not None:
                 return cached
-            out = self._price_pick(snap, asset_key=asset_key, expectation=pick_expectation, env=env)
+            out = self._price_pick(
+                snap,
+                asset_key=asset_key,
+                expectation=pick_expectation,
+                distribution=pick_distribution,
+                env=env,
+            )
             self._cache_pick[pick_cache_key] = out
             return out
 
@@ -285,6 +295,8 @@ class MarketPricer:
                 pick_b=resolved_pick_b,
                 pick_a_expectation=resolved_pick_a_expectation,
                 pick_b_expectation=resolved_pick_b_expectation,
+                pick_a_distribution=resolved_pick_a_distribution,
+                pick_b_distribution=resolved_pick_b_distribution,
                 env=env,
             )
             self._cache_swap[cache_key] = out
@@ -729,6 +741,7 @@ class MarketPricer:
         *,
         asset_key: str,
         expectation: Optional[PickExpectation],
+        distribution: Optional[PickDistributionBundle],
         env: ValuationEnv,
     ) -> MarketValuation:
         cfg = self.config
@@ -752,7 +765,9 @@ class MarketPricer:
 
         # 2) expected pick number curve (if known)
         exp_num = None
-        if expectation is not None:
+        if distribution is not None:
+            exp_num = distribution.compat_expected_pick_number
+        if exp_num is None and expectation is not None:
             exp_num = expectation.expected_pick_number
 
         # fallback: use mid pick when unknown
@@ -773,6 +788,30 @@ class MarketPricer:
             )
 
         value = _vc(now=0.0, future=base + curve_bonus)
+
+        if distribution is not None:
+            var = max(0.0, float(distribution.variance))
+            tail_up = max(0.0, float(distribution.tail_upside_prob or 0.0))
+            tail_dn = max(0.0, float(distribution.tail_downside_prob or 0.0))
+            # variance/tail-aware bonus: upside > downside면 소폭 가산, 반대면 감산
+            dist_adj = (tail_up - tail_dn) * (0.08 + min(var / 60.0, 0.22)) * (8.0 if rnd == 1 else 2.5)
+            if abs(dist_adj) > cfg.eps:
+                steps.append(
+                    ValuationStep(
+                        stage=ValuationStage.MARKET,
+                        mode=StepMode.ADD,
+                        code="PICK_DISTRIBUTION_ADJUST",
+                        label="픽 분포(분산/테일) 보정",
+                        delta=_vc(now=0.0, future=dist_adj),
+                        meta={
+                            "variance": var,
+                            "tail_upside_prob": tail_up,
+                            "tail_downside_prob": tail_dn,
+                            "ev_pick": float(distribution.ev_pick),
+                        },
+                    )
+                )
+                value = value + _vc(now=0.0, future=dist_adj)
 
         # 3) year discount (SSOT: env.current_season_year)
         cur_sy_i = int(env.current_season_year)
@@ -812,6 +851,7 @@ class MarketPricer:
                 "original_team": snap.original_team,
                 "owner_team": snap.owner_team,
                 "expected_pick_number": float(exp_num) if exp_num is not None else None,
+                "pricing_input": ("pick_distribution" if distribution is not None else "pick_expectation"),
             },
         )
 
@@ -910,6 +950,8 @@ class MarketPricer:
         pick_b: Optional[PickSnapshot],
         pick_a_expectation: Optional[PickExpectation],
         pick_b_expectation: Optional[PickExpectation],
+        pick_a_distribution: Optional[PickDistributionBundle],
+        pick_b_distribution: Optional[PickDistributionBundle],
         env: ValuationEnv,
     ) -> MarketValuation:
         cfg = self.config
@@ -947,12 +989,14 @@ class MarketPricer:
             pick_a,
             asset_key=f"pick:{pick_a.pick_id}",
             expectation=pick_a_expectation,
+            distribution=pick_a_distribution,
             env=env,
         )
         mv_b = self._price_pick(
             pick_b,
             asset_key=f"pick:{pick_b.pick_id}",
             expectation=pick_b_expectation,
+            distribution=pick_b_distribution,
             env=env,
         )
 
@@ -962,8 +1006,16 @@ class MarketPricer:
         # optionality gain must be symmetric w.r.t. A/B ordering
         gain_raw = max(v_a, v_b) - min(v_a, v_b)
 
-        exp_a = float(pick_a_expectation.expected_pick_number) if (pick_a_expectation and pick_a_expectation.expected_pick_number is not None) else 16.0
-        exp_b = float(pick_b_expectation.expected_pick_number) if (pick_b_expectation and pick_b_expectation.expected_pick_number is not None) else 16.0
+        exp_a = (
+            float(pick_a_distribution.ev_pick)
+            if pick_a_distribution is not None
+            else (float(pick_a_expectation.expected_pick_number) if (pick_a_expectation and pick_a_expectation.expected_pick_number is not None) else 16.0)
+        )
+        exp_b = (
+            float(pick_b_distribution.ev_pick)
+            if pick_b_distribution is not None
+            else (float(pick_b_expectation.expected_pick_number) if (pick_b_expectation and pick_b_expectation.expected_pick_number is not None) else 16.0)
+        )
 
         gap = abs(exp_a - exp_b)
         exercise_prob = _clamp(gap * cfg.swap_gap_to_prob_scale / 10.0, 0.15, 0.85)
@@ -1067,4 +1119,3 @@ class MarketPricer:
             steps=tuple(steps),
             meta={"label": snap.label, "owner_team": snap.owner_team, "source_pick_id": snap.source_pick_id},
         )
-

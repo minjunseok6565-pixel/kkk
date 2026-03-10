@@ -55,6 +55,7 @@ from .types import (
     SwapSnapshot,
     PickExpectation,
 )
+from .pick_distribution import PickDistributionBundle
 
 from .market_pricing import MarketPricer, MarketPricingConfig
 from .team_utility import TeamUtilityAdjuster, TeamUtilityConfig
@@ -298,13 +299,22 @@ class DealEvaluator:
         kind = snapshot_kind(snap)
 
         pick_exp = None
+        pick_dist: Optional[PickDistributionBundle] = None
         resolved_a = None
         resolved_b = None
         resolved_a_exp: Optional[PickExpectation] = None
-        resolved_b_exp: Optional[PickExpectation] = None        
+        resolved_b_exp: Optional[PickExpectation] = None
+        resolved_a_dist: Optional[PickDistributionBundle] = None
+        resolved_b_dist: Optional[PickDistributionBundle] = None
 
         if kind == AssetKind.PICK and isinstance(snap, PickSnapshot):
             pick_exp = provider.get_pick_expectation(snap.pick_id)
+            get_dist = getattr(provider, "get_pick_distribution", None)
+            if callable(get_dist):
+                try:
+                    pick_dist = get_dist(snap.pick_id)
+                except Exception:
+                    pick_dist = None
 
         if kind == AssetKind.SWAP and isinstance(snap, SwapSnapshot):
             # swap pricing needs both pick snapshots
@@ -313,16 +323,27 @@ class DealEvaluator:
             # and their expectations (for expected pick number / year discount, etc.)
             resolved_a_exp = provider.get_pick_expectation(snap.pick_id_a)
             resolved_b_exp = provider.get_pick_expectation(snap.pick_id_b)
+            get_dist = getattr(provider, "get_pick_distribution", None)
+            if callable(get_dist):
+                try:
+                    resolved_a_dist = get_dist(snap.pick_id_a)
+                    resolved_b_dist = get_dist(snap.pick_id_b)
+                except Exception:
+                    resolved_a_dist = None
+                    resolved_b_dist = None
 
         market = self._market.price_snapshot(
             snap,
             asset_key=str(akey),
             env=env,
             pick_expectation=pick_exp,
+            pick_distribution=pick_dist,
             resolved_pick_a=resolved_a,
             resolved_pick_b=resolved_b,
             resolved_pick_a_expectation=resolved_a_exp,
             resolved_pick_b_expectation=resolved_b_exp,
+            resolved_pick_a_distribution=resolved_a_dist,
+            resolved_pick_b_distribution=resolved_b_dist,
         )
 
         team_val = self._team.value_asset(market, snap, ctx, env=env)
