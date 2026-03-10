@@ -109,7 +109,15 @@ def _vc(now: float = 0.0, future: float = 0.0) -> ValueComponents:
     return ValueComponents(float(now), float(future))
 
 
-def _pick_distribution_signature(distribution: Optional[Mapping[str, Any]]) -> str:
+def _pick_distribution_get(distribution: Any, key: str, default: Any = None) -> Any:
+    if distribution is None:
+        return default
+    if isinstance(distribution, Mapping):
+        return distribution.get(key, default)
+    return getattr(distribution, key, default)
+
+
+def _pick_distribution_signature(distribution: Optional[Any]) -> str:
     if not distribution:
         return ""
     keys = (
@@ -122,7 +130,12 @@ def _pick_distribution_signature(distribution: Optional[Mapping[str, Any]]) -> s
         "p90_pick",
         "compat_expected_pick_number",
     )
-    payload = {k: distribution.get(k) for k in keys if k in distribution}
+    payload: Dict[str, Any] = {}
+    if isinstance(distribution, Mapping):
+        payload = {k: distribution.get(k) for k in keys if k in distribution}
+    else:
+        # PickDistributionBundle(dataclass) 호환: Mapping 가정 없이 필드 기반으로 서명 생성
+        payload = {k: getattr(distribution, k, None) for k in keys if hasattr(distribution, k)}
     try:
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=str)
     except Exception:
@@ -860,7 +873,7 @@ class MarketPricer:
         value = value.scale(disc)
 
         if distribution is not None:
-            variance = _safe_float(distribution.get("variance"), 0.0)
+            variance = _safe_float(_pick_distribution_get(distribution, "variance", 0.0), 0.0)
             if variance > cfg.eps:
                 var_bonus = min(0.30 * variance, 3.0)
                 steps.append(
@@ -875,8 +888,8 @@ class MarketPricer:
                 )
                 value = _vc(now=value.now, future=value.future + var_bonus)
 
-            up = _safe_float(distribution.get("tail_upside_prob"), 0.0)
-            down = _safe_float(distribution.get("tail_downside_prob"), 0.0)
+            up = _safe_float(_pick_distribution_get(distribution, "tail_upside_prob", 0.0), 0.0)
+            down = _safe_float(_pick_distribution_get(distribution, "tail_downside_prob", 0.0), 0.0)
             tail_adjust = (up - down) * 2.0
             if abs(tail_adjust) > cfg.eps:
                 steps.append(
@@ -889,9 +902,9 @@ class MarketPricer:
                         meta={
                             "tail_upside_prob": up,
                             "tail_downside_prob": down,
-                            "p10_pick": distribution.get("p10_pick"),
-                            "p50_pick": distribution.get("p50_pick"),
-                            "p90_pick": distribution.get("p90_pick"),
+                            "p10_pick": _pick_distribution_get(distribution, "p10_pick"),
+                            "p50_pick": _pick_distribution_get(distribution, "p50_pick"),
+                            "p90_pick": _pick_distribution_get(distribution, "p90_pick"),
                         },
                     )
                 )
