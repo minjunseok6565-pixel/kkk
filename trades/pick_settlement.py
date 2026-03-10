@@ -4,6 +4,7 @@ import contextlib
 from typing import Any, Dict, List
 
 from .errors import PROTECTION_INVALID, SWAP_INVALID, TradeError
+from .pick_semantics import resolve_pick_protection, resolve_swap_outcome
 from .protection import normalize_protection
 
 
@@ -85,21 +86,28 @@ def settle_draft_year_in_memory(
         protection = pick.get("protection")
         if protection is None:
             continue
-        protection = _validate_protection(pick_id, protection)
         slot = _validate_pick_order(pick_order, pick_id)
-        protected = slot <= protection["n"]
         owner_team = str(pick.get("owner_team", "")).upper()
         original_team = str(pick.get("original_team", "")).upper()
-        compensation_asset_id = None
+        # Keep validation behavior and error codes aligned with existing settlement path.
+        protection = _validate_protection(pick_id, protection)
+        resolution = resolve_pick_protection(
+            pick_id=pick_id,
+            slot=slot,
+            owner_team=owner_team,
+            original_team=original_team,
+            protection=protection,
+        )
 
-        if protected and owner_team and original_team and owner_team != original_team:
-            pick["owner_team"] = original_team
+        compensation_asset_id = None
+        if resolution.compensation_required:
+            pick["owner_team"] = resolution.owner_team_after
             compensation_asset_id = f"FIXED_COMP_{pick_id}"
             if compensation_asset_id not in fixed_assets:
                 fixed_assets[compensation_asset_id] = {
                     "asset_id": compensation_asset_id,
-                    "label": protection["compensation"]["label"],
-                    "value": protection["compensation"]["value"],
+                    "label": resolution.compensation_label,
+                    "value": resolution.compensation_value,
                     "owner_team": owner_team,
                     "source_pick_id": pick_id,
                     "draft_year": draft_year,
@@ -112,7 +120,7 @@ def settle_draft_year_in_memory(
                 "pick_id": pick_id,
                 "draft_year": draft_year,
                 "slot": slot,
-                "protected": protected,
+                "protected": resolution.protected,
                 "original_team": original_team,
                 "owner_team": owner_team,
                 "final_owner_team": final_owner_team,
@@ -192,8 +200,18 @@ def settle_draft_year_in_memory(
             )
         owner_a = str(pick_a.get("owner_team", "")).upper()
         owner_b = str(pick_b.get("owner_team", "")).upper()
-        exercisable = owner_team == owner_a or owner_team == owner_b
-        if not exercisable:
+        resolution = resolve_swap_outcome(
+            swap_id=str(swap_id),
+            pick_id_a=str(pick_id_a),
+            pick_id_b=str(pick_id_b),
+            slot_a=int(slot_a),
+            slot_b=int(slot_b),
+            owner_team=owner_team,
+            owner_a=owner_a,
+            owner_b=owner_b,
+        )
+
+        if not resolution.exercisable:
             swap["active"] = False
             events.append(
                 {
@@ -212,7 +230,7 @@ def settle_draft_year_in_memory(
             )
             continue
 
-        if slot_a == slot_b:
+        if not resolution.swap_executed:
             swap["active"] = False
             events.append(
                 {
@@ -223,29 +241,15 @@ def settle_draft_year_in_memory(
                     "pick_id_b": pick_id_b,
                     "slot_a": slot_a,
                     "slot_b": slot_b,
-                    "chosen_pick_id": pick_id_a,
+                    "chosen_pick_id": resolution.chosen_pick_id,
                     "owner_team": owner_team,
                     "swap_executed": False,
                 }
             )
             continue
 
-        if slot_a < slot_b:
-            better_pick = pick_a
-            worse_pick = pick_b
-            chosen_pick_id = pick_id_a
-        else:
-            better_pick = pick_b
-            worse_pick = pick_a
-            chosen_pick_id = pick_id_b
-
-        if owner_a == owner_b:
-            other_owner = owner_a
-        else:
-            other_owner = owner_a if owner_a != owner_team else owner_b
-
-        better_pick["owner_team"] = owner_team
-        worse_pick["owner_team"] = other_owner
+        pick_a["owner_team"] = resolution.owner_a_after
+        pick_b["owner_team"] = resolution.owner_b_after
         swap["active"] = False
 
         owner_a_after = str(pick_a.get("owner_team", "")).upper()
@@ -259,9 +263,9 @@ def settle_draft_year_in_memory(
                 "pick_id_b": pick_id_b,
                 "slot_a": slot_a,
                 "slot_b": slot_b,
-                "chosen_pick_id": chosen_pick_id,
+                "chosen_pick_id": resolution.chosen_pick_id,
                 "owner_team": owner_team,
-                "other_owner_team": other_owner,
+                "other_owner_team": resolution.other_owner_team,
                 "owner_a_before": owner_a,
                 "owner_b_before": owner_b,
                 "owner_a_after": owner_a_after,
