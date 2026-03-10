@@ -37,6 +37,7 @@ from .env import ValuationEnv
 from .fit_engine import FitEngine
 from .contract_texture import ContractTexture, build_contract_textures
 from .role_texture import RoleTexture, build_role_textures
+from .cap_ledger import build_cap_ledgers, score_cap_flex_delta
 
 from .types import (
     AssetKind,
@@ -214,11 +215,19 @@ class PackageEffectsConfig:
     hole_penalty_scale: float = 0.22
     hole_penalty_exponent: float = 1.15
     hole_penalty_cap_ratio: float = 0.18
+    hole_texture_parallel_weight: float = 0.30
 
     # --- Depth needs (structural)
     depth_need_scale: float = 1.00
     bench_low_grade: float = 1.5
     starter_cutoff_grade: float = 8.0
+    depth_texture_parallel_weight: float = 0.35
+
+    # Texture-axis demand mapping for v2 parallel deficits
+    depth_texture_creation_need_scale: float = 0.70
+    depth_texture_rim_need_scale: float = 0.70
+    depth_texture_defense_need_scale: float = 0.45
+    depth_texture_spacing_need_scale: float = 0.35
 
     # --- CAP_FLEX
     cap_flex_scale: float = 0.00000006  # scale salary*years (dollars) -> value units
@@ -234,6 +243,12 @@ class PackageEffectsConfig:
 
     # Commitment delta cap (future)
     cap_commit_abs_cap: float = 18.0
+
+    # CAP_FLEX v2 ledger path (before/after balance sheet optionality)
+    cap_flex_use_ledger_delta: bool = True
+    cap_ledger_score_scale: float = 4.0
+    cap_ledger_abs_cap: float = 18.0
+    cap_flex_enable_legacy_commitment_fallback: bool = True
 
     # --- Upgrade needs
     upgrade_scale: float = 0.75
@@ -258,6 +273,10 @@ class PackageEffectsConfig:
     contract_texture_control_weight: float = 0.20
     contract_texture_trigger_weight: float = 0.10
     contract_texture_toxic_weight: float = 0.10
+
+    # --- rotation context injection (roster waste)
+    rotation_context_weight: float = 0.55
+    rotation_min_waste_multiplier: float = 0.45
 
 
 # -----------------------------------------------------------------------------
@@ -308,7 +327,7 @@ class PackageEffects:
             steps.append(self._build_basketball_component_step(delta2, source="role_texture_matrix"))
 
         # 7) Soft roster slot / rotation waste (too many incoming players)
-        delta3 = self._roster_excess_waste(incoming, outgoing, base_out_mass, steps)
+        delta3 = self._roster_excess_waste(incoming, outgoing, base_out_mass, ctx, steps)
 
         # Depth needs (GUARD/WING/BIG/BENCH) based on deal delta *only*
         delta4 = self._depth_need_adjustment(incoming, outgoing, ctx, steps)
@@ -567,6 +586,7 @@ class PackageEffects:
         incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
         outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
         base_out_total: float,
+        ctx: DecisionContext,
         steps: List[ValuationStep],
     ) -> ValueComponents:
         cfg = self.config
@@ -584,14 +604,24 @@ class PackageEffects:
             return ValueComponents.zero()
 
         wasted = ValueComponents.zero()
+        role_textures = build_role_textures([p for _, p in in_players], fit_engine=FitEngine())
+        rot = self._rotation_context_weights(ctx)
         detail: List[Dict[str, Any]] = []
         for tv, p in targets:
-            wasted = wasted + tv.team_value.scale(cfg.roster_excess_waste_rate)
+            context_relief = self._rotation_context_relief(p, role_textures, rot)
+            mult = _clamp(
+                1.0 - cfg.rotation_context_weight * context_relief,
+                cfg.rotation_min_waste_multiplier,
+                1.0,
+            )
+            wasted = wasted + tv.team_value.scale(cfg.roster_excess_waste_rate * mult)
             detail.append(
                 {
                     "player_id": p.player_id,
                     "asset_key": tv.asset_key,
                     "team_value_total": tv.team_value.total,
+                    "rotation_context_relief": context_relief,
+                    "waste_multiplier": mult,
                 }
             )
 
@@ -617,10 +647,81 @@ class PackageEffects:
                     "excess_incoming_players": excess,
                     "waive_candidates": detail,
                     "waste_rate": cfg.roster_excess_waste_rate,
+                    "rotation_context": rot,
                 },
             )
         )
         return pen
+
+    def _rotation_context_weights(self, ctx: DecisionContext) -> Dict[str, float]:
+        need_map = dict(getattr(ctx, "need_map", {}) or {})
+        d = getattr(ctx, "debug", {}) if isinstance(getattr(ctx, "debug", None), dict) else {}
+
+        rc = d.get("rotation_context") if isinstance(d.get("rotation_context"), Mapping) else {}
+        tactic = d.get("tactics") if isinstance(d.get("tactics"), Mapping) else {}
+
+        primary_handler_need = _clamp(
+            _safe_float(rc.get("primary_handler_need"), _safe_float(tactic.get("primary_handler_need"), _safe_float(need_map.get(OFFENSE_UPGRADE), 0.0))),
+            0.0,
+            1.0,
+        )
+        big_wing_pressure = _clamp(
+            _safe_float(
+                rc.get("big_wing_balance_pressure"),
+                _safe_float(tactic.get("big_wing_balance_pressure"), max(_safe_float(need_map.get(WING_DEPTH), 0.0), _safe_float(need_map.get(BIG_DEPTH), 0.0))),
+            ),
+            0.0,
+            1.0,
+        )
+
+        return {
+            "primary_handler_need": float(primary_handler_need),
+            "big_wing_balance_pressure": float(big_wing_pressure),
+        }
+
+    def _rotation_context_relief(
+        self,
+        player: PlayerSnapshot,
+        role_textures: Mapping[str, RoleTexture],
+        rotation_context: Mapping[str, float],
+    ) -> float:
+        handler_need = _clamp(_safe_float(rotation_context.get("primary_handler_need"), 0.0), 0.0, 1.0)
+        balance_pressure = _clamp(_safe_float(rotation_context.get("big_wing_balance_pressure"), 0.0), 0.0, 1.0)
+
+        rt = role_textures.get(player.player_id)
+        handler_signal = _clamp(float(getattr(rt, "creation_proxy", 0.0) if rt is not None else 0.0), 0.0, 1.0)
+
+        buckets = classify_depth_buckets(player)
+        wing_big_signal = 0.0
+        if "WING" in buckets:
+            wing_big_signal += 0.5
+        if "BIG" in buckets:
+            wing_big_signal += 0.5
+        wing_big_signal = _clamp(wing_big_signal, 0.0, 1.0)
+
+        relief = (0.6 * handler_need * handler_signal) + (0.4 * balance_pressure * wing_big_signal)
+        return _clamp(relief, 0.0, 1.0)
+
+    def _texture_axis_supply(
+        self,
+        items: Sequence[Tuple[TeamValuation, AssetSnapshot]],
+    ) -> Dict[str, float]:
+        players = self._players(items)
+        if not players:
+            return {"creation": 0.0, "rim_pressure": 0.0, "defense": 0.0, "spacing": 0.0}
+
+        role_textures = build_role_textures([p for _, p in players], fit_engine=FitEngine())
+        out = {"creation": 0.0, "rim_pressure": 0.0, "defense": 0.0, "spacing": 0.0}
+        for tv, p in players:
+            grade = max(_market_now_grade(tv), 0.0)
+            rt = role_textures.get(p.player_id)
+            if rt is None:
+                continue
+            out["creation"] += grade * _clamp(rt.creation_proxy, 0.0, 1.0)
+            out["rim_pressure"] += grade * _clamp(rt.rim_pressure_proxy, 0.0, 1.0)
+            out["defense"] += grade * _clamp(rt.defense_proxy, 0.0, 1.0)
+            out["spacing"] += grade * _clamp(rt.spacing_proxy, 0.0, 1.0)
+        return out
 
     # ------------------------------------------------------------------
     # Depth needs (structural, need_map-driven)
@@ -675,10 +776,31 @@ class PackageEffects:
         delta_big = in_s["BIG"] - out_s["BIG"]
         delta_bench = in_s["BENCH"] - out_s["BENCH"]
 
-        bonus_total = (
+        bucket_bonus_total = (
             cfg.depth_need_scale
             * (w_guard * delta_guard + w_wing * delta_wing + w_big * delta_big + w_bench * delta_bench)
         )
+
+        # v2 parallel: RoleTexture axis deficits/surpluses in parallel with G/W/B buckets
+        in_tex = self._texture_axis_supply(incoming)
+        out_tex = self._texture_axis_supply(outgoing)
+        tex_delta = {
+            "creation": in_tex["creation"] - out_tex["creation"],
+            "rim_pressure": in_tex["rim_pressure"] - out_tex["rim_pressure"],
+            "defense": in_tex["defense"] - out_tex["defense"],
+            "spacing": in_tex["spacing"] - out_tex["spacing"],
+        }
+        texture_need_weights = {
+            "creation": _clamp(w_guard * cfg.depth_texture_creation_need_scale, 0.0, 1.0),
+            "rim_pressure": _clamp(w_big * cfg.depth_texture_rim_need_scale, 0.0, 1.0),
+            "defense": _clamp(max(w_wing, w_big) * cfg.depth_texture_defense_need_scale, 0.0, 1.0),
+            "spacing": _clamp(max(w_guard, w_wing) * cfg.depth_texture_spacing_need_scale, 0.0, 1.0),
+        }
+        texture_bonus_total = cfg.depth_need_scale * cfg.depth_texture_parallel_weight * sum(
+            texture_need_weights[k] * tex_delta[k] for k in ("creation", "rim_pressure", "defense", "spacing")
+        )
+
+        bonus_total = bucket_bonus_total + texture_bonus_total
 
         if abs(bonus_total) <= cfg.eps:
             return ValueComponents.zero()
@@ -704,8 +826,14 @@ class PackageEffects:
                         "big": delta_big,
                         "bench": delta_bench,
                     },
+                    "delta_texture": tex_delta,
+                    "texture_need_weights": texture_need_weights,
+                    "bucket_bonus_total": bucket_bonus_total,
+                    "texture_bonus_total": texture_bonus_total,
                     "incoming_supply": in_s,
                     "outgoing_supply": out_s,
+                    "incoming_texture_supply": in_tex,
+                    "outgoing_texture_supply": out_tex,
                 },
             )
         )
@@ -750,6 +878,20 @@ class PackageEffects:
                 penalties[b] = p
                 pen_total += p
 
+        in_tex = self._texture_axis_supply(incoming)
+        out_tex = self._texture_axis_supply(outgoing)
+        tex_delta = {
+            "creation": in_tex["creation"] - out_tex["creation"],
+            "rim_pressure": in_tex["rim_pressure"] - out_tex["rim_pressure"],
+            "defense": in_tex["defense"] - out_tex["defense"],
+            "spacing": in_tex["spacing"] - out_tex["spacing"],
+        }
+        texture_penalties: Dict[str, float] = {}
+        for axis, dv in tex_delta.items():
+            if dv < -cfg.eps:
+                texture_penalties[axis] = (abs(dv) ** cfg.hole_penalty_exponent) * cfg.hole_penalty_scale * cfg.hole_texture_parallel_weight
+        pen_total += float(sum(texture_penalties.values()))
+
         cap = cfg.hole_penalty_cap_ratio * max(base_out_total, cfg.eps)
         pen_total = _clamp(pen_total, 0.0, cap)
         if pen_total <= cfg.eps:
@@ -763,7 +905,15 @@ class PackageEffects:
                 code="OUTGOING_HOLE_PENALTY",
                 label="아웃바운드 구멍(포지션/롤 단절) 페널티",
                 delta=delta,
-                meta={"penalties": penalties, "incoming_supply": in_s, "outgoing_supply": out_s},
+                meta={
+                    "penalties": penalties,
+                    "texture_penalties": texture_penalties,
+                    "incoming_supply": in_s,
+                    "outgoing_supply": out_s,
+                    "incoming_texture_supply": in_tex,
+                    "outgoing_texture_supply": out_tex,
+                    "delta_texture": tex_delta,
+                },
             )
         )
         return delta
@@ -864,9 +1014,62 @@ class PackageEffects:
             )
 
         # --------------------------------------------------------------
-        # (B) Commitment delta (FUTURE): long-term flexibility preference.
+        # (B) CAP_FLEX FUTURE component
+        #   - Preferred: before/after CapLedger delta (v2)
+        #   - Fallback: legacy commitment delta (contract texture weighted)
         # --------------------------------------------------------------
         contract_textures = self._build_player_contract_textures(incoming, outgoing, current_season_year=int(cur_sy), env=env)
+        posture = str(getattr(ctx, "posture", "STAND_PAT"))
+
+        in_players = [snap for tv, snap in incoming if tv.kind == AssetKind.PLAYER and isinstance(snap, PlayerSnapshot)]
+        out_players = [snap for tv, snap in outgoing if tv.kind == AssetKind.PLAYER and isinstance(snap, PlayerSnapshot)]
+
+        in_team_textures = [contract_textures[p.player_id] for p in in_players if p.player_id in contract_textures]
+        out_team_textures = [contract_textures[p.player_id] for p in out_players if p.player_id in contract_textures]
+
+        debug = getattr(ctx, "debug", {}) if isinstance(getattr(ctx, "debug", None), dict) else {}
+        payroll_before = _safe_float(debug.get("payroll"), 0.0)
+        has_payroll = float(payroll_before) > cfg.eps
+        team_norm = str(getattr(ctx, "team_id", "")).upper() or "TEAM"
+
+        ledger_raw = 0.0
+        ledger_ok = False
+        ledger_meta: Dict[str, Any] = {
+            "enabled": bool(cfg.cap_flex_use_ledger_delta),
+            "team_id": team_norm,
+            "has_payroll": bool(has_payroll),
+        }
+        if cfg.cap_flex_use_ledger_delta and has_payroll:
+            payroll_after = float(payroll_before + net_added)
+            before_ledgers = build_cap_ledgers(
+                team_contract_textures={team_norm: tuple(out_team_textures)},
+                posture_by_team={team_norm: posture},
+                current_season_year=int(cur_sy),
+                cap_model=env.cap_model,
+                team_payroll_map={team_norm: float(payroll_before)},
+            )
+            after_ledgers = build_cap_ledgers(
+                team_contract_textures={team_norm: tuple(in_team_textures)},
+                posture_by_team={team_norm: posture},
+                current_season_year=int(cur_sy),
+                cap_model=env.cap_model,
+                team_payroll_map={team_norm: float(payroll_after)},
+            )
+            before = before_ledgers.get(team_norm)
+            after = after_ledgers.get(team_norm)
+            if before is not None and after is not None:
+                ledger_ok = True
+                ledger_raw = score_cap_flex_delta(before, after, posture=posture)
+                ledger_meta.update(
+                    {
+                        "score_delta": float(ledger_raw),
+                        "score_scale": float(cfg.cap_ledger_score_scale),
+                        "payroll_before": float(payroll_before),
+                        "payroll_after": float(payroll_after),
+                        "before_flex": float(before.posture_adjusted_flex),
+                        "after_flex": float(after.posture_adjusted_flex),
+                    }
+                )
 
         def sum_commit_texture(items: Sequence[Tuple[TeamValuation, AssetSnapshot]]) -> float:
             acc = 0.0
@@ -888,8 +1091,15 @@ class PackageEffects:
         source = "contract_texture"
         delta_commit = in_c - out_c
 
-        raw_fut = -w_need * delta_commit * cfg.cap_flex_scale
-        raw_fut = _clamp(raw_fut, -cfg.cap_commit_abs_cap, cfg.cap_commit_abs_cap)
+        raw_fut = 0.0
+        if ledger_ok:
+            source = "cap_ledger"
+            raw_fut = w_need * ledger_raw * cfg.cap_ledger_score_scale
+            raw_fut = _clamp(raw_fut, -cfg.cap_ledger_abs_cap, cfg.cap_ledger_abs_cap)
+        elif cfg.cap_flex_enable_legacy_commitment_fallback:
+            source = "contract_texture"
+            raw_fut = -w_need * delta_commit * cfg.cap_flex_scale
+            raw_fut = _clamp(raw_fut, -cfg.cap_commit_abs_cap, cfg.cap_commit_abs_cap)
 
         delta_fut = ValueComponents.zero()
         if abs(raw_fut) > cfg.eps:
@@ -910,6 +1120,7 @@ class PackageEffects:
                         "outgoing_commit": out_c,
                         "abs_cap": cfg.cap_commit_abs_cap,
                         "source": source,
+                        "ledger": ledger_meta,
                     },
                 )
             )
@@ -932,6 +1143,7 @@ class PackageEffects:
                 "outgoing_commit": float(out_c),
                 "delta_commit": float(delta_commit),
             },
+            "ledger": ledger_meta,
             "selected_source": source,
         }
         return delta_now + delta_fut, dual_meta

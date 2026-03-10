@@ -14,7 +14,7 @@ from trades.valuation.types import (
 
 
 class PackageEffectsTextureComponentTests(unittest.TestCase):
-    def _ctx(self):
+    def _ctx(self, *, debug_override: dict | None = None):
         knobs = SimpleNamespace(
             consolidation_bias=0.5,
             star_premium_exponent=1.0,
@@ -22,7 +22,10 @@ class PackageEffectsTextureComponentTests(unittest.TestCase):
             w_future=1.0,
         )
         policies = SimpleNamespace(fit=SimpleNamespace(need_map={"CAP_FLEX": 1.0}))
-        return SimpleNamespace(team_id="LAL", knobs=knobs, policies=policies, need_map={"CAP_FLEX": 1.0}, debug={"cap_space": 0.0})
+        debug = {"cap_space": 0.0}
+        if debug_override:
+            debug.update(debug_override)
+        return SimpleNamespace(team_id="LAL", posture="STAND_PAT", knobs=knobs, policies=policies, need_map={"CAP_FLEX": 1.0}, debug=debug)
 
     def _tv(self, pid: str, total: float):
         return TeamValuation(
@@ -58,17 +61,19 @@ class PackageEffectsTextureComponentTests(unittest.TestCase):
         )
 
     def _engine(self, **overrides):
-        cfg = PackageEffectsConfig(
+        base = dict(
             consolidation_scale=0.0,
             roster_excess_waste_rate=0.0,
+            roster_excess_cap_ratio=0.0,
             hole_penalty_scale=0.0,
             depth_need_scale=0.0,
             upgrade_scale=0.0,
             cap_room_weight_base=0.0,
             cap_room_value_per_cap_fraction=0.0,
             cap_room_abs_cap=0.0,
-            **overrides,
         )
+        base.update(overrides)
+        cfg = PackageEffectsConfig(**base)
         return PackageEffects(config=cfg)
 
     def test_emits_texture_components_and_dual_meta(self):
@@ -149,6 +154,108 @@ class PackageEffectsTextureComponentTests(unittest.TestCase):
         commit_po = meta_po["v2_texture_diff"]["contract_component_delta"]["texture"]["incoming_commit"]
         commit_to = meta_to["v2_texture_diff"]["contract_component_delta"]["texture"]["incoming_commit"]
         self.assertGreater(commit_po, commit_to)
+
+    def test_cap_flex_prefers_cap_ledger_when_payroll_available(self):
+        eng = self._engine(dual_read_v2_components=True)
+        player = self._player("lg", role_fit={"Engine_Primary": 0.6}, years=3, salary=20_000_000, option_type="PO")
+
+        _, _, meta = eng.apply(
+            team_id="LAL",
+            incoming=[(self._tv("lg", 7.5), player)],
+            outgoing=[],
+            ctx=self._ctx(debug_override={"payroll": 165_000_000, "cap_space": 5_000_000}),
+            env=ValuationEnv.from_trade_rules({"salary_cap": 140_000_000}, current_season_year=2026),
+        )
+
+        self.assertEqual(meta["v2_texture_diff"]["contract_component_delta"]["selected_source"], "cap_ledger")
+
+    def test_rotation_context_reduces_waste_for_handler_need(self):
+        eng = self._engine(
+            cap_flex_scale=0.0,
+            cap_flex_use_ledger_delta=False,
+            dual_read_v2_components=False,
+            roster_excess_waste_rate=0.85,
+            roster_excess_cap_ratio=1.0,
+        )
+
+        p1 = self._player("h1", role_fit={"Engine_Primary": 0.95, "SpotUp_Spacer": 0.2}, years=2, salary=8_000_000)
+        p2 = self._player("h2", role_fit={"Engine_Secondary": 0.9, "SpotUp_Spacer": 0.3}, years=2, salary=7_000_000)
+        out = self._player("out", role_fit={"Roll_Man": 0.3}, years=1, salary=3_000_000)
+
+        # excess incoming = 1 (incoming 2 / outgoing 1), compare no-rotation-context vs handler-need context
+        _, steps_base, _ = eng.apply(
+            team_id="LAL",
+            incoming=[(self._tv("h1", 6.0), p1), (self._tv("h2", 5.0), p2)],
+            outgoing=[(self._tv("out", 4.0), out)],
+            ctx=self._ctx(),
+            env=ValuationEnv.from_trade_rules({"salary_cap": 140_000_000}, current_season_year=2026),
+        )
+        _, steps_rot, _ = eng.apply(
+            team_id="LAL",
+            incoming=[(self._tv("h1", 6.0), p1), (self._tv("h2", 5.0), p2)],
+            outgoing=[(self._tv("out", 4.0), out)],
+            ctx=self._ctx(debug_override={"rotation_context": {"primary_handler_need": 1.0, "big_wing_balance_pressure": 0.0}}),
+            env=ValuationEnv.from_trade_rules({"salary_cap": 140_000_000}, current_season_year=2026),
+        )
+
+        base_waste = [s for s in steps_base if s.code == "ROSTER_EXCESS_WASTE"][0].delta.total
+        rot_waste = [s for s in steps_rot if s.code == "ROSTER_EXCESS_WASTE"][0].delta.total
+        self.assertGreater(rot_waste, base_waste)
+
+    def test_depth_need_emits_texture_parallel_metadata(self):
+        eng = self._engine(
+            depth_need_scale=1.0,
+            hole_penalty_scale=0.0,
+            roster_excess_waste_rate=0.0,
+            cap_flex_scale=0.0,
+            cap_flex_use_ledger_delta=False,
+            dual_read_v2_components=False,
+        )
+
+        p_in = self._player("din", role_fit={"Engine_Primary": 0.9, "Rim_Pressure": 0.8, "HELP_RIM": 0.6}, years=2, salary=9_000_000)
+        p_out = self._player("dout", role_fit={"Engine_Primary": 0.1, "Rim_Pressure": 0.1, "HELP_RIM": 0.2}, years=2, salary=9_000_000)
+        ctx = self._ctx()
+        ctx.need_map.update({"GUARD_DEPTH": 1.0, "BIG_DEPTH": 1.0, "WING_DEPTH": 0.6})
+
+        _, steps, _ = eng.apply(
+            team_id="LAL",
+            incoming=[(self._tv("din", 8.0), p_in)],
+            outgoing=[(self._tv("dout", 6.0), p_out)],
+            ctx=ctx,
+            env=ValuationEnv.from_trade_rules({"salary_cap": 140_000_000}, current_season_year=2026),
+        )
+
+        depth = [s for s in steps if s.code == "DEPTH_NEED_DELTA"]
+        self.assertTrue(depth)
+        self.assertIn("delta_texture", depth[0].meta)
+        self.assertIn("texture_bonus_total", depth[0].meta)
+
+    def test_outgoing_hole_includes_texture_penalties(self):
+        eng = self._engine(
+            hole_penalty_scale=0.22,
+            hole_penalty_cap_ratio=1.0,
+            depth_need_scale=0.0,
+            roster_excess_waste_rate=0.0,
+            cap_flex_scale=0.0,
+            cap_flex_use_ledger_delta=False,
+            dual_read_v2_components=False,
+        )
+
+        p_in = self._player("hin", role_fit={"Engine_Primary": 0.1, "Rim_Pressure": 0.1, "HELP_RIM": 0.2}, years=2, salary=6_000_000)
+        p_out = self._player("hout", role_fit={"Engine_Primary": 0.9, "Rim_Pressure": 0.9, "HELP_RIM": 0.9}, years=2, salary=6_000_000)
+
+        _, steps, _ = eng.apply(
+            team_id="LAL",
+            incoming=[(self._tv("hin", 4.0), p_in)],
+            outgoing=[(self._tv("hout", 9.0), p_out)],
+            ctx=self._ctx(),
+            env=ValuationEnv.from_trade_rules({"salary_cap": 140_000_000}, current_season_year=2026),
+        )
+
+        hole = [s for s in steps if s.code == "OUTGOING_HOLE_PENALTY"]
+        self.assertTrue(hole)
+        self.assertIn("texture_penalties", hole[0].meta)
+        self.assertTrue(isinstance(hole[0].meta["texture_penalties"], dict))
 
 
 if __name__ == "__main__":
