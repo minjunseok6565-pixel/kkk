@@ -248,7 +248,6 @@ class PackageEffectsConfig:
     cap_flex_use_ledger_delta: bool = True
     cap_ledger_score_scale: float = 4.0
     cap_ledger_abs_cap: float = 18.0
-    cap_flex_enable_legacy_commitment_fallback: bool = True
 
     # --- Upgrade needs
     upgrade_scale: float = 0.75
@@ -296,6 +295,7 @@ class PackageEffects:
         outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
         ctx: DecisionContext,
         env: ValuationEnv,
+        valuation_context_v2: Any | None = None,
     ) -> Tuple[ValueComponents, Tuple[ValuationStep, ...], Dict[str, Any]]:
         """Return (package_delta, steps, meta).
 
@@ -318,25 +318,36 @@ class PackageEffects:
         base_in_mass = max(_side_mass(incoming), self.config.eps)
         package_scale_total = max(base_in_mass, base_out_mass)
 
+        prefetched_role_textures = self._prefetched_role_textures(
+            incoming=incoming,
+            outgoing=outgoing,
+            valuation_context_v2=valuation_context_v2,
+        )
+        prefetched_contract_textures = self._prefetched_contract_textures(
+            incoming=incoming,
+            outgoing=outgoing,
+            valuation_context_v2=valuation_context_v2,
+        )
+
         # 5) Consolidation / dispersion structure
         delta1 = self._consolidation_effect(incoming, outgoing, ctx, package_scale_total, steps)
 
         # 6) Basketball component (RoleTexture score matrix / overlap 기반)
-        delta2 = self._diminishing_returns_texture(incoming, steps=steps)
+        delta2 = self._diminishing_returns_texture(incoming, steps=steps, prefetched_role_textures=prefetched_role_textures)
         if abs(delta2.total) > self.config.eps:
             steps.append(self._build_basketball_component_step(delta2, source="role_texture_matrix"))
 
         # 7) Soft roster slot / rotation waste (too many incoming players)
-        delta3 = self._roster_excess_waste(incoming, outgoing, base_out_mass, ctx, steps)
+        delta3 = self._roster_excess_waste(incoming, outgoing, base_out_mass, ctx, steps, prefetched_role_textures=prefetched_role_textures)
 
         # Depth needs (GUARD/WING/BIG/BENCH) based on deal delta *only*
-        delta4 = self._depth_need_adjustment(incoming, outgoing, ctx, steps)
+        delta4 = self._depth_need_adjustment(incoming, outgoing, ctx, steps, prefetched_role_textures=prefetched_role_textures)
 
         # 8) Outgoing hole penalty (position discontinuity)
-        delta5 = self._outgoing_hole_penalty(incoming, outgoing, base_out_mass, steps)
+        delta5 = self._outgoing_hole_penalty(incoming, outgoing, base_out_mass, steps, prefetched_role_textures=prefetched_role_textures)
 
         # CAP_FLEX adjustment (contract component injection)
-        delta6, contract_dual_meta = self._cap_flex_adjustment(incoming, outgoing, ctx, env, steps)
+        delta6, contract_dual_meta = self._cap_flex_adjustment(incoming, outgoing, ctx, env, steps, prefetched_contract_textures=prefetched_contract_textures)
 
         # OFF/DEF upgrade adjustments
         delta7 = self._upgrade_adjustment(incoming, outgoing, ctx, steps)
@@ -379,6 +390,57 @@ class PackageEffects:
         for tv, _ in items:
             out = out + tv.team_value
         return out
+
+    def _prefetched_role_textures(
+        self,
+        *,
+        incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
+        outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
+        valuation_context_v2: Any | None,
+    ) -> Dict[str, RoleTexture]:
+        if valuation_context_v2 is None:
+            return {}
+        src = getattr(valuation_context_v2, "role_textures", None)
+        if not isinstance(src, Mapping):
+            return {}
+
+        ids = {
+            p.player_id
+            for _, p in self._players(incoming)
+        } | {
+            p.player_id
+            for _, p in self._players(outgoing)
+        }
+        out: Dict[str, RoleTexture] = {}
+        for pid in ids:
+            tex = src.get(pid)
+            if isinstance(tex, RoleTexture):
+                out[pid] = tex
+        return out
+
+    def _prefetched_contract_textures(
+        self,
+        *,
+        incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
+        outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
+        valuation_context_v2: Any | None,
+    ) -> Dict[str, ContractTexture]:
+        if valuation_context_v2 is None:
+            return {}
+        src = getattr(valuation_context_v2, "contract_textures", None)
+        if not isinstance(src, Mapping):
+            return {}
+
+        by_player: Dict[str, ContractTexture] = {}
+        players = [p for _, p in self._players(incoming)] + [p for _, p in self._players(outgoing)]
+        for p in players:
+            c = p.contract
+            if c is None:
+                continue
+            tex = src.get(c.contract_id)
+            if isinstance(tex, ContractTexture):
+                by_player[p.player_id] = tex
+        return by_player
 
     def _players(
         self, items: Sequence[Tuple[TeamValuation, AssetSnapshot]]
@@ -476,14 +538,17 @@ class PackageEffects:
         self,
         incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
         steps: Optional[List[ValuationStep]],
+        prefetched_role_textures: Optional[Mapping[str, RoleTexture]] = None,
     ) -> ValueComponents:
         cfg = self.config
         players = self._players(incoming)
         if len(players) <= 1:
             return ValueComponents.zero()
 
-        snaps = [p for _, p in players]
-        role_textures = build_role_textures(snaps, fit_engine=FitEngine())
+        role_textures: Dict[str, RoleTexture] = dict(prefetched_role_textures or {})
+        missing = [p for _, p in players if p.player_id not in role_textures]
+        if missing:
+            role_textures.update(build_role_textures(missing, fit_engine=FitEngine()))
 
         items_sorted = sorted(
             [(tv, p) for tv, p in players if _team_total_grade(tv) >= cfg.diminishing_min_bucket_grade],
@@ -588,6 +653,7 @@ class PackageEffects:
         base_out_total: float,
         ctx: DecisionContext,
         steps: List[ValuationStep],
+        prefetched_role_textures: Optional[Mapping[str, RoleTexture]] = None,
     ) -> ValueComponents:
         cfg = self.config
         in_players = self._players(incoming)
@@ -604,7 +670,10 @@ class PackageEffects:
             return ValueComponents.zero()
 
         wasted = ValueComponents.zero()
-        role_textures = build_role_textures([p for _, p in in_players], fit_engine=FitEngine())
+        role_textures: Dict[str, RoleTexture] = dict(prefetched_role_textures or {})
+        missing = [p for _, p in in_players if p.player_id not in role_textures]
+        if missing:
+            role_textures.update(build_role_textures(missing, fit_engine=FitEngine()))
         rot = self._rotation_context_weights(ctx)
         detail: List[Dict[str, Any]] = []
         for tv, p in targets:
@@ -705,12 +774,16 @@ class PackageEffects:
     def _texture_axis_supply(
         self,
         items: Sequence[Tuple[TeamValuation, AssetSnapshot]],
+        prefetched_role_textures: Optional[Mapping[str, RoleTexture]] = None,
     ) -> Dict[str, float]:
         players = self._players(items)
         if not players:
             return {"creation": 0.0, "rim_pressure": 0.0, "defense": 0.0, "spacing": 0.0}
 
-        role_textures = build_role_textures([p for _, p in players], fit_engine=FitEngine())
+        role_textures: Dict[str, RoleTexture] = dict(prefetched_role_textures or {})
+        missing = [p for _, p in players if p.player_id not in role_textures]
+        if missing:
+            role_textures.update(build_role_textures(missing, fit_engine=FitEngine()))
         out = {"creation": 0.0, "rim_pressure": 0.0, "defense": 0.0, "spacing": 0.0}
         for tv, p in players:
             grade = max(_market_now_grade(tv), 0.0)
@@ -732,6 +805,7 @@ class PackageEffects:
         outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
         ctx: DecisionContext,
         steps: List[ValuationStep],
+        prefetched_role_textures: Optional[Mapping[str, RoleTexture]] = None,
     ) -> ValueComponents:
         cfg = self.config
         need_map = dict(ctx.need_map or {})
@@ -782,8 +856,8 @@ class PackageEffects:
         )
 
         # v2 parallel: RoleTexture axis deficits/surpluses in parallel with G/W/B buckets
-        in_tex = self._texture_axis_supply(incoming)
-        out_tex = self._texture_axis_supply(outgoing)
+        in_tex = self._texture_axis_supply(incoming, prefetched_role_textures=prefetched_role_textures)
+        out_tex = self._texture_axis_supply(outgoing, prefetched_role_textures=prefetched_role_textures)
         tex_delta = {
             "creation": in_tex["creation"] - out_tex["creation"],
             "rim_pressure": in_tex["rim_pressure"] - out_tex["rim_pressure"],
@@ -848,6 +922,7 @@ class PackageEffects:
         outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
         base_out_total: float,
         steps: List[ValuationStep],
+        prefetched_role_textures: Optional[Mapping[str, RoleTexture]] = None,
     ) -> ValueComponents:
         cfg = self.config
 
@@ -878,8 +953,8 @@ class PackageEffects:
                 penalties[b] = p
                 pen_total += p
 
-        in_tex = self._texture_axis_supply(incoming)
-        out_tex = self._texture_axis_supply(outgoing)
+        in_tex = self._texture_axis_supply(incoming, prefetched_role_textures=prefetched_role_textures)
+        out_tex = self._texture_axis_supply(outgoing, prefetched_role_textures=prefetched_role_textures)
         tex_delta = {
             "creation": in_tex["creation"] - out_tex["creation"],
             "rim_pressure": in_tex["rim_pressure"] - out_tex["rim_pressure"],
@@ -928,6 +1003,7 @@ class PackageEffects:
         ctx: DecisionContext,
         env: ValuationEnv,
         steps: List[ValuationStep],
+        prefetched_contract_textures: Optional[Mapping[str, ContractTexture]] = None,
     ) -> tuple[ValueComponents, Dict[str, Any]]:
         cfg = self.config
 
@@ -1018,7 +1094,13 @@ class PackageEffects:
         #   - Preferred: before/after CapLedger delta (v2)
         #   - Fallback: legacy commitment delta (contract texture weighted)
         # --------------------------------------------------------------
-        contract_textures = self._build_player_contract_textures(incoming, outgoing, current_season_year=int(cur_sy), env=env)
+        contract_textures = self._build_player_contract_textures(
+            incoming,
+            outgoing,
+            current_season_year=int(cur_sy),
+            env=env,
+            prefetched_contract_textures=prefetched_contract_textures,
+        )
         posture = str(getattr(ctx, "posture", "STAND_PAT"))
 
         in_players = [snap for tv, snap in incoming if tv.kind == AssetKind.PLAYER and isinstance(snap, PlayerSnapshot)]
@@ -1096,10 +1178,9 @@ class PackageEffects:
             source = "cap_ledger"
             raw_fut = w_need * ledger_raw * cfg.cap_ledger_score_scale
             raw_fut = _clamp(raw_fut, -cfg.cap_ledger_abs_cap, cfg.cap_ledger_abs_cap)
-        elif cfg.cap_flex_enable_legacy_commitment_fallback:
-            source = "contract_texture"
-            raw_fut = -w_need * delta_commit * cfg.cap_flex_scale
-            raw_fut = _clamp(raw_fut, -cfg.cap_commit_abs_cap, cfg.cap_commit_abs_cap)
+        else:
+            source = "cap_ledger"
+            raw_fut = 0.0
 
         delta_fut = ValueComponents.zero()
         if abs(raw_fut) > cfg.eps:
@@ -1155,22 +1236,32 @@ class PackageEffects:
         *,
         current_season_year: int,
         env: ValuationEnv,
+        prefetched_contract_textures: Optional[Mapping[str, ContractTexture]] = None,
     ) -> Dict[str, ContractTexture]:
         players: list[PlayerSnapshot] = []
         for tv, snap in list(incoming) + list(outgoing):
             if tv.kind == AssetKind.PLAYER and isinstance(snap, PlayerSnapshot):
                 players.append(snap)
 
+        out: Dict[str, ContractTexture] = {}
+        prefetched = dict(prefetched_contract_textures or {})
+        for p in players:
+            tex = prefetched.get(p.player_id)
+            if tex is not None:
+                out[p.player_id] = tex
+
         contracts: list[ContractSnapshot] = []
         seen_contract_ids: set[str] = set()
         for p in players:
+            if p.player_id in out:
+                continue
             c = p.contract
             if c is None or c.contract_id in seen_contract_ids:
                 continue
             seen_contract_ids.add(c.contract_id)
             contracts.append(c)
         if not contracts:
-            return {}
+            return out
 
         salary_cap = float(env.cap_model.salary_cap_for_season(int(current_season_year)))
         textures = build_contract_textures(
@@ -1178,8 +1269,9 @@ class PackageEffects:
             current_season_year=int(current_season_year),
             salary_cap=salary_cap,
         )
-        out: Dict[str, ContractTexture] = {}
         for p in players:
+            if p.player_id in out:
+                continue
             if p.contract is None:
                 continue
             tex = textures.get(p.contract.contract_id)
@@ -1327,6 +1419,7 @@ def apply_package_effects(
     ctx: DecisionContext,
     env: ValuationEnv,
     config: Optional[PackageEffectsConfig] = None,
+    valuation_context_v2: Any | None = None,
 ) -> Tuple[ValueComponents, Tuple[ValuationStep, ...], Dict[str, Any]]:
     """Stateless wrapper."""
     eng = PackageEffects(config=config or PackageEffectsConfig())
@@ -1336,4 +1429,5 @@ def apply_package_effects(
         outgoing=outgoing,
         ctx=ctx,
         env=env,
+        valuation_context_v2=valuation_context_v2,
     )

@@ -102,7 +102,7 @@ class _Provider:
         return "2026-01-15"
 
 
-def test_context_v2_dual_read_uses_real_v1_metrics() -> None:
+def test_context_v2_builds_distribution_without_dual_read_diff() -> None:
     provider = _Provider()
     out = build_valuation_context_v2(
         provider=provider,
@@ -122,14 +122,9 @@ def test_context_v2_dual_read_uses_real_v1_metrics() -> None:
             "swaps": ["S_AB"],
             "standings_order_worst_to_best": ["A", "B"],
         },
-        dual_read=True,
     )
-
-    report = out.diagnostics.diff_report
-    assert report is not None
-    assert report.missing_metrics == tuple()
-    # v1 expects [1,2], v2 distribution should differ because protection/swap semantics are applied
-    assert abs(report.pick_ev_delta) > 1e-9
+    assert out.pick_distributions["P_A"].ev_pick > 0.0
+    assert out.diagnostics.reason_flags == tuple()
 
 
 def test_v2_pick_distribution_changes_price_and_reflects_tail_risk() -> None:

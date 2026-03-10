@@ -222,6 +222,7 @@ class DealEvaluator:
         package_meta: Dict[str, Any] = {}
 
         if include_package_effects and apply_package_effects is not None:
+            v2_ctx = getattr(provider, "valuation_context_v2", None)
             package_delta, package_steps, package_meta = apply_package_effects(
                 team_id=str(team_id),
                 incoming=incoming_pairs,
@@ -229,6 +230,7 @@ class DealEvaluator:
                 ctx=ctx,
                 env=env,
                 config=self.package_config,  # can be None -> default inside module
+                valuation_context_v2=v2_ctx,
             )
 
         # 5) Build side valuation
