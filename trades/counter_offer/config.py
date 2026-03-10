@@ -140,10 +140,10 @@ class CounterOfferConfig:
     # ------------------------------------------------------------------
     # Dealgen config base tweaks
     # ------------------------------------------------------------------
-    # Keep counter deals simple.
-    max_assets_per_side: int = 6
-    max_players_per_side: int = 2
-    max_players_moved_total: int = 4
+    # Match generator skeleton shape caps.
+    max_assets_per_side: int = 9
+    max_players_per_side: int = 4
+    max_players_moved_total: int = 7
     max_picks_per_side: int = 3
 
     def to_dealgen_config(self):
