@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
+from defense_role_groups import normalized_defense_role_groups
+
 from .fit_engine import FitEngine
 from .types import PlayerSnapshot
 
@@ -16,6 +18,26 @@ class RoleTexture:
     connector_index: float
     source_coverage: Mapping[str, bool]
     notes: tuple[str, ...] = tuple()
+
+
+
+ROLE_FIT_KEYS_BY_AXIS: Mapping[str, tuple[str, ...]] = {
+    "creation": (
+        "Engine_Primary",
+        "Engine_Secondary",
+        "Transition_Engine",
+        "Shot_Creator",
+    ),
+    "spacing": (
+        "SpotUp_Spacer",
+        "Movement_Shooter",
+    ),
+    "rim_pressure": (
+        "Rim_Pressure",
+        "Cutter_Finisher",
+        "Roll_Man",
+    ),
+}
 
 
 def _clamp01(x: float) -> float:
@@ -57,13 +79,34 @@ def _score_from_role_fit(role_fit: Mapping[str, float], keys: tuple[str, ...]) -
     return float(sum(vals) / len(vals))
 
 
+def _score_from_role_fit_groups(
+    role_fit: Mapping[str, float],
+    groups: Mapping[str, Sequence[str]],
+) -> float:
+    if not role_fit:
+        return 0.0
+
+    group_scores: list[float] = []
+    for roles in groups.values():
+        vals = [_clamp01(_sf(role_fit.get(role), 0.0)) for role in roles if role in role_fit]
+        if not vals:
+            continue
+        group_scores.append(max(vals))
+
+    if not group_scores:
+        return 0.0
+    return float(sum(group_scores) / len(group_scores))
+
+
 def build_role_textures(
     players: Sequence[PlayerSnapshot],
     *,
     fit_engine: FitEngine,
     injected_supply: Mapping[str, Mapping[str, float]] | None = None,
+    defense_role_groups: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, RoleTexture]:
     out: dict[str, RoleTexture] = {}
+    normalized_groups = normalized_defense_role_groups(defense_role_groups)
 
     for p in players:
         notes: list[str] = []
@@ -80,38 +123,10 @@ def build_role_textures(
         if source is not None:
             notes.append(f"ROLE_FIT_SOURCE:{source}")
 
-        creation = _score_from_role_fit(
-            role_fit,
-            (
-                "Engine_Primary",
-                "Engine_Secondary",
-                "Transition_Engine",
-                "Connector"
-            ),
-        )
-        spacing = _score_from_role_fit(
-            role_fit,
-            (
-                "SpotUp_Spacer",
-                "Movement_Shooter",
-                "Pop_Threat"
-                "Shot_Creator"
-            ),
-        )
-        rim_pressure = _score_from_role_fit(
-            role_fit,
-            (
-                "Rim_Pressure",
-                "Cutter_Finisher",
-                "Roll_Man",
-                "ShortRoll_Hub"
-                "Post_Anchor"
-            ),
-        )
-        defense = _score_from_role_fit(
-            role_fit,
-            tuple(),
-        )
+        creation = _score_from_role_fit(role_fit, ROLE_FIT_KEYS_BY_AXIS["creation"])
+        spacing = _score_from_role_fit(role_fit, ROLE_FIT_KEYS_BY_AXIS["spacing"])
+        rim_pressure = _score_from_role_fit(role_fit, ROLE_FIT_KEYS_BY_AXIS["rim_pressure"])
+        defense = _score_from_role_fit_groups(role_fit, normalized_groups)
 
         supply: Mapping[str, float] | None = None
         if injected_supply is not None:
