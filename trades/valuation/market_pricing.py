@@ -805,7 +805,7 @@ class MarketPricer:
         # 2) expected pick number curve (if known)
         exp_num = None
         if distribution is not None:
-            exp_num = distribution.compat_expected_pick_number
+            exp_num = _pick_distribution_get(distribution, "compat_expected_pick_number")
         if exp_num is None and expectation is not None:
             exp_num = expectation.expected_pick_number
 
@@ -829,9 +829,9 @@ class MarketPricer:
         value = _vc(now=0.0, future=base + curve_bonus)
 
         if distribution is not None:
-            var = max(0.0, float(distribution.variance))
-            tail_up = max(0.0, float(distribution.tail_upside_prob or 0.0))
-            tail_dn = max(0.0, float(distribution.tail_downside_prob or 0.0))
+            var = max(0.0, _safe_float(_pick_distribution_get(distribution, "variance", 0.0), 0.0))
+            tail_up = max(0.0, _safe_float(_pick_distribution_get(distribution, "tail_upside_prob", 0.0), 0.0))
+            tail_dn = max(0.0, _safe_float(_pick_distribution_get(distribution, "tail_downside_prob", 0.0), 0.0))
             # variance/tail-aware bonus: upside > downside면 소폭 가산, 반대면 감산
             dist_adj = (tail_up - tail_dn) * (0.08 + min(var / 60.0, 0.22)) * (8.0 if rnd == 1 else 2.5)
             if abs(dist_adj) > cfg.eps:
@@ -846,7 +846,7 @@ class MarketPricer:
                             "variance": var,
                             "tail_upside_prob": tail_up,
                             "tail_downside_prob": tail_dn,
-                            "ev_pick": float(distribution.ev_pick),
+                            "ev_pick": _safe_float(_pick_distribution_get(distribution, "ev_pick", 0.0), 0.0),
                         },
                     )
                 )
@@ -925,6 +925,7 @@ class MarketPricer:
                 "owner_team": snap.owner_team,
                 "expected_pick_number": float(exp_num) if exp_num is not None else None,
                 "pricing_input": ("pick_distribution" if distribution is not None else "pick_expectation"),
+                "uses_distribution": bool(distribution is not None),
             },
         )
 
@@ -1080,12 +1081,12 @@ class MarketPricer:
         gain_raw = max(v_a, v_b) - min(v_a, v_b)
 
         exp_a = (
-            float(pick_a_distribution.ev_pick)
+            _safe_float(_pick_distribution_get(pick_a_distribution, "ev_pick", 16.0), 16.0)
             if pick_a_distribution is not None
             else (float(pick_a_expectation.expected_pick_number) if (pick_a_expectation and pick_a_expectation.expected_pick_number is not None) else 16.0)
         )
         exp_b = (
-            float(pick_b_distribution.ev_pick)
+            _safe_float(_pick_distribution_get(pick_b_distribution, "ev_pick", 16.0), 16.0)
             if pick_b_distribution is not None
             else (float(pick_b_expectation.expected_pick_number) if (pick_b_expectation and pick_b_expectation.expected_pick_number is not None) else 16.0)
         )

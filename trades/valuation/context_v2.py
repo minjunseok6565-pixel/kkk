@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
-from contracts.terms import remaining_years, salary_for_season
-
 from cap_model import CapModel
 from decision_context import DecisionContext
 
@@ -28,22 +26,11 @@ from .types import (
 
 
 @dataclass(frozen=True, slots=True)
-class ContextDiffReport:
-    """Dual-read(v1/v2) 최소 diff telemetry 리포트."""
-
-    pick_ev_delta: float
-    contract_burden_delta: float
-    cap_flex_delta: float
-    missing_metrics: tuple[str, ...] = tuple()
-
-
-@dataclass(frozen=True, slots=True)
 class ContextDiagnostics:
     """v2 context build 중 coverage/reason 상태를 기록한다."""
 
     source_coverage: Mapping[str, bool]
     reason_flags: tuple[str, ...] = tuple()
-    diff_report: ContextDiffReport | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,13 +54,6 @@ def _get_ids(asset_ids_by_kind: Mapping[str, Sequence[str]], *keys: str) -> tupl
             if sv and sv not in out:
                 out.append(sv)
     return tuple(out)
-
-
-def _safe_delta(v1_metrics: Mapping[str, float], v2_metrics: Mapping[str, float], key: str) -> float:
-    try:
-        return float(v2_metrics.get(key, 0.0)) - float(v1_metrics.get(key, 0.0))
-    except Exception:
-        return 0.0
 
 
 def _extract_standings_order(asset_ids_by_kind: Mapping[str, Sequence[str]]) -> tuple[str, ...]:
@@ -114,92 +94,6 @@ def _build_team_payroll_map(players: Mapping[str, PlayerSnapshot]) -> dict[str, 
 
 
 
-def _safe_float(x: object, default: float = 0.0) -> float:
-    try:
-        return float(x)
-    except Exception:
-        return float(default)
-
-
-def _legacy_contract_commitment(contract: ContractSnapshot, *, current_season_year: int) -> float:
-    sal_now = max(0.0, _safe_float(salary_for_season(contract, int(current_season_year)), 0.0))
-    years = max(0, int(remaining_years(contract, current_season_year=int(current_season_year))))
-    return float(sal_now * years)
-
-
-def _build_v1_metrics(
-    *,
-    provider: ValuationDataProvider,
-    picks: Mapping[str, PickSnapshot],
-    contracts: Mapping[str, ContractSnapshot],
-    team_payroll_map: Mapping[str, float],
-    salary_cap: float,
-    current_season_year: int,
-    reason_flags: list[str],
-) -> dict[str, float]:
-    v1_pick_ev = 0.0
-    for pick_id in picks.keys():
-        exp = provider.get_pick_expectation(pick_id)
-        if exp is None or exp.expected_pick_number is None:
-            reason_flags.append(f"MISSING_INPUT_V1_PICK_EXPECTATION:{pick_id}")
-            v1_pick_ev += 16.0
-            continue
-        v1_pick_ev += _safe_float(exp.expected_pick_number, 16.0)
-
-    team_commitment: dict[str, float] = {}
-    total_commitment = 0.0
-    for contract in contracts.values():
-        commitment = _legacy_contract_commitment(contract, current_season_year=int(current_season_year))
-        total_commitment += commitment
-        tid = str(contract.team_id or "").upper().strip()
-        if tid:
-            team_commitment[tid] = team_commitment.get(tid, 0.0) + commitment
-
-    cap_base = max(float(salary_cap), 1.0)
-    cap_flex = 0.0
-    for team_id, payroll in team_payroll_map.items():
-        room_ratio = (cap_base - _safe_float(payroll, 0.0)) / cap_base
-        burden_ratio = team_commitment.get(str(team_id).upper(), 0.0) / cap_base
-        cap_flex += room_ratio - burden_ratio
-
-    return {
-        "pick_ev_delta": float(v1_pick_ev),
-        "contract_burden_delta": float(total_commitment),
-        "cap_flex_delta": float(cap_flex),
-    }
-
-
-def _build_v2_metrics(
-    *,
-    pick_distributions: Mapping[str, PickDistributionBundle],
-    contract_textures: Mapping[str, ContractTexture],
-    cap_ledgers: Mapping[str, CapLedgerView],
-) -> dict[str, float]:
-    return {
-        "pick_ev_delta": float(sum(b.ev_pick for b in pick_distributions.values())),
-        "contract_burden_delta": float(sum(t.guaranteed_commitment for t in contract_textures.values())),
-        "cap_flex_delta": float(sum(v.posture_adjusted_flex for v in cap_ledgers.values())),
-    }
-def collect_v1_v2_diff(
-    v1_metrics: Mapping[str, float],
-    v2_metrics: Mapping[str, float],
-) -> ContextDiffReport:
-    """전역 설계 고정 3지표만 계산한다."""
-
-    required = ("pick_ev_delta", "contract_burden_delta", "cap_flex_delta")
-    missing: list[str] = []
-    for key in required:
-        if key not in v1_metrics or key not in v2_metrics:
-            missing.append(f"MISSING_INPUT_{key.upper()}")
-
-    return ContextDiffReport(
-        pick_ev_delta=_safe_delta(v1_metrics, v2_metrics, "pick_ev_delta"),
-        contract_burden_delta=_safe_delta(v1_metrics, v2_metrics, "contract_burden_delta"),
-        cap_flex_delta=_safe_delta(v1_metrics, v2_metrics, "cap_flex_delta"),
-        missing_metrics=tuple(missing),
-    )
-
-
 def build_valuation_context_v2(
     provider: ValuationDataProvider,
     decision_context_by_team: Mapping[str, DecisionContext],
@@ -211,7 +105,6 @@ def build_valuation_context_v2(
     package_effects_config: PackageEffectsConfig,
     decision_policy_config: DecisionPolicyConfig,
     asset_ids_by_kind: Mapping[str, Sequence[str]],
-    dual_read: bool = False,
 ) -> ValuationContextV2:
     """ValuationDataProvider 기반 v2 오케스트레이터."""
 
@@ -318,35 +211,12 @@ def build_valuation_context_v2(
         team_payroll_map=team_payroll_map,
     )
 
-    diff_report = None
-    if dual_read:
-        season_cap = float(market_pricing_config.salary_cap or 0.0)
-        if season_cap <= 0.0:
-            season_cap = float(CapModel.defaults().numbers_for_season(int(current_season_year)).salary_cap)
-
-        v1_metrics = _build_v1_metrics(
-            provider=provider,
-            picks=picks,
-            contracts=contracts,
-            team_payroll_map=team_payroll_map,
-            salary_cap=season_cap,
-            current_season_year=int(current_season_year),
-            reason_flags=reason_flags,
-        )
-        v2_metrics = _build_v2_metrics(
-            pick_distributions=pick_distributions,
-            contract_textures=contract_textures,
-            cap_ledgers=cap_ledgers,
-        )
-        diff_report = collect_v1_v2_diff(v1_metrics=v1_metrics, v2_metrics=v2_metrics)
-
     if not decision_context_by_team:
         reason_flags.append("MISSING_INPUT_DECISION_CONTEXT")
 
     diagnostics = ContextDiagnostics(
         source_coverage=coverage,
         reason_flags=tuple(reason_flags),
-        diff_report=diff_report,
     )
 
     return ValuationContextV2(

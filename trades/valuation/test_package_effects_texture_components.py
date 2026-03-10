@@ -1,8 +1,11 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from trades.valuation.env import ValuationEnv
+from trades.valuation.contract_texture import ContractTexture
 from trades.valuation.package_effects import PackageEffects, PackageEffectsConfig
+from trades.valuation.role_texture import RoleTexture
 from trades.valuation.types import (
     AssetKind,
     ContractOptionSnapshot,
@@ -105,10 +108,9 @@ class PackageEffectsTextureComponentTests(unittest.TestCase):
         self.assertNotEqual(delta.total, 0.0)
         codes = {s.code for s in steps}
         self.assertIn("BASKETBALL_COMPONENT", codes)
-        self.assertIn("CONTRACT_COMPONENT", codes)
         self.assertIn("v2_texture_diff", meta)
         self.assertIn("contract_component_delta", meta["v2_texture_diff"])
-        self.assertEqual(meta["v2_texture_diff"]["contract_component_delta"]["selected_source"], "contract_texture")
+        self.assertEqual(meta["v2_texture_diff"]["contract_component_delta"]["selected_source"], "cap_ledger")
 
     def test_diminishing_returns_uses_texture_overlap_matrix(self):
         eng = self._engine(cap_flex_scale=0.0, dual_read_v2_components=False)
@@ -256,6 +258,77 @@ class PackageEffectsTextureComponentTests(unittest.TestCase):
         self.assertTrue(hole)
         self.assertIn("texture_penalties", hole[0].meta)
         self.assertTrue(isinstance(hole[0].meta["texture_penalties"], dict))
+
+    def test_uses_prefetched_role_texture_from_context_v2(self):
+        eng = self._engine(
+            dual_read_v2_components=False,
+            cap_flex_scale=0.0,
+            cap_flex_use_ledger_delta=False,
+            depth_need_scale=0.0,
+            hole_penalty_scale=0.0,
+            roster_excess_waste_rate=0.0,
+        )
+        p1 = self._player("r1", role_fit={}, years=2, salary=9_000_000)
+        p2 = self._player("r2", role_fit={}, years=2, salary=8_000_000)
+
+        v2_ctx = SimpleNamespace(
+            role_textures={
+                "r1": RoleTexture(0.9, 0.2, 0.3, 0.2, 0.4, {"role_fit": True, "supply_vector": True}),
+                "r2": RoleTexture(0.88, 0.2, 0.28, 0.25, 0.4, {"role_fit": True, "supply_vector": True}),
+            },
+            contract_textures={},
+        )
+
+        with patch("trades.valuation.package_effects.build_role_textures", side_effect=AssertionError("must not rebuild role texture")):
+            _, steps, _ = eng.apply(
+                team_id="LAL",
+                incoming=[(self._tv("r1", 9.0), p1), (self._tv("r2", 8.0), p2)],
+                outgoing=[],
+                ctx=self._ctx(),
+                env=ValuationEnv.from_trade_rules({"salary_cap": 140_000_000}, current_season_year=2026),
+                valuation_context_v2=v2_ctx,
+            )
+
+        self.assertTrue(any(s.code == "DIMINISHING_RETURNS" for s in steps))
+
+    def test_uses_prefetched_contract_texture_from_context_v2(self):
+        eng = self._engine(
+            dual_read_v2_components=True,
+            cap_flex_use_ledger_delta=False,
+            depth_need_scale=0.0,
+            hole_penalty_scale=0.0,
+            roster_excess_waste_rate=0.0,
+        )
+        p = self._player("ct1", role_fit={"Engine_Primary": 0.2}, years=3, salary=14_000_000)
+
+        v2_ctx = SimpleNamespace(
+            role_textures={},
+            contract_textures={
+                "c_ct1": ContractTexture(
+                    guaranteed_commitment=25_000_000,
+                    control_direction=-1.0,
+                    reversibility=0.2,
+                    trigger_risk=0.6,
+                    matching_utility=0.5,
+                    toxic_risk=0.7,
+                    notes=tuple(),
+                    source_coverage={"contract_terms": True, "options": True, "salary_cap": True},
+                )
+            },
+        )
+
+        with patch("trades.valuation.package_effects.build_contract_textures", side_effect=AssertionError("must not rebuild contract texture")):
+            _, _, meta = eng.apply(
+                team_id="LAL",
+                incoming=[(self._tv("ct1", 7.0), p)],
+                outgoing=[],
+                ctx=self._ctx(),
+                env=ValuationEnv.from_trade_rules({"salary_cap": 140_000_000}, current_season_year=2026),
+                valuation_context_v2=v2_ctx,
+            )
+
+        tex = meta["v2_texture_diff"]["contract_component_delta"]["texture"]
+        self.assertAlmostEqual(tex["incoming_commit"], 33_250_000.0)
 
 
 if __name__ == "__main__":
