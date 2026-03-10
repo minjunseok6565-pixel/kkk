@@ -86,7 +86,7 @@ def build_role_textures(
                 "Engine_Primary",
                 "Engine_Secondary",
                 "Transition_Engine",
-                "Shot_Creator",
+                "Connector"
             ),
         )
         spacing = _score_from_role_fit(
@@ -94,6 +94,8 @@ def build_role_textures(
             (
                 "SpotUp_Spacer",
                 "Movement_Shooter",
+                "Pop_Threat"
+                "Shot_Creator"
             ),
         )
         rim_pressure = _score_from_role_fit(
@@ -102,6 +104,8 @@ def build_role_textures(
                 "Rim_Pressure",
                 "Cutter_Finisher",
                 "Roll_Man",
+                "ShortRoll_Hub"
+                "Post_Anchor"
             ),
         )
         defense = _score_from_role_fit(
