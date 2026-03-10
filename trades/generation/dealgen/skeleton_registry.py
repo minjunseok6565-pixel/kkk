@@ -45,6 +45,25 @@ class SkeletonSpec:
 class SkeletonRegistry:
     specs: Tuple[SkeletonSpec, ...]
 
+    @staticmethod
+    def _resolve_route_ids(mode_upper: str, tier_upper: str, config: DealGeneratorConfig) -> Tuple[str, ...]:
+        tier_attr_map = {
+            "ROLE": "skeleton_route_role",
+            "STARTER": "skeleton_route_starter",
+            "HIGH_STARTER": "skeleton_route_high_starter",
+            "STAR": "skeleton_route_high_starter",
+            "PICK_ONLY": "skeleton_route_pick_only",
+        }
+        base_attr = tier_attr_map.get(tier_upper, "skeleton_route_starter")
+
+        if mode_upper == "SELL":
+            sell_attr = f"{base_attr}_sell"
+            sell_route_ids = tuple(getattr(config, sell_attr, tuple()) or tuple())
+            if sell_route_ids:
+                return sell_route_ids
+
+        return tuple(getattr(config, base_attr, tuple()) or tuple())
+
     def get_specs_for_mode(self, mode: str) -> List[SkeletonSpec]:
         mu = str(mode).upper()
         out = [s for s in self.specs if mu in s.mode_allow]
@@ -61,24 +80,15 @@ class SkeletonRegistry:
         mode_upper = str(mode).upper()
         tier_upper = str(tier).upper()
 
-        route_attr_map = {
-            "ROLE": "skeleton_route_role",
-            "STARTER": "skeleton_route_starter",
-            "HIGH_STARTER": "skeleton_route_high_starter",
-            "STAR": "skeleton_route_high_starter",
-            "PICK_ONLY": "skeleton_route_pick_only",
-        }
-        route_attr = route_attr_map.get(tier_upper, "skeleton_route_starter")
-        route_ids = tuple(getattr(config, route_attr, tuple()) or tuple())
+        route_ids = self._resolve_route_ids(mode_upper, tier_upper, config)
         route_id_set = set(route_ids)
+        route_index = {sid: idx for idx, sid in enumerate(route_ids)}
 
         out: List[SkeletonSpec] = []
         for spec in self.specs:
             if mode_upper not in spec.mode_allow:
                 continue
             if tier_upper not in spec.target_tiers:
-                continue
-            if route_id_set and spec.skeleton_id not in route_id_set:
                 continue
             if ctx is not None and spec.gate_fn is not None and not bool(spec.gate_fn(ctx)):
                 continue
@@ -88,6 +98,7 @@ class SkeletonRegistry:
             key=lambda s: (
                 int(s.priority),
                 0 if s.skeleton_id in route_id_set else 1,
+                route_index.get(s.skeleton_id, len(route_index)),
                 s.skeleton_id,
             )
         )
