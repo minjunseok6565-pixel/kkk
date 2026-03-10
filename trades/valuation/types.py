@@ -441,6 +441,7 @@ class ValuationDataProvider(Protocol):
     def get_fixed_asset_snapshot(self, asset_id: FixedAssetId) -> FixedAssetSnapshot: ...
 
     def get_pick_expectation(self, pick_id: PickId) -> Optional[PickExpectation]: ...
+    def get_pick_distribution(self, pick_id: PickId) -> Optional[Mapping[str, Any]]: ...
 
     # 시뮬레이션 날짜/시즌 정보(계약 잔여/픽 할인 등에 사용)
     @property
@@ -503,4 +504,3 @@ def pick_protection_signature(protection: Optional[Dict[str, Any]]) -> str:
         blob = str(protection)
 
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
-

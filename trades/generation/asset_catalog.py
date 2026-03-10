@@ -744,10 +744,10 @@ def _market_summary_for_pick(
     snap: PickSnapshot,
     *,
     env: Optional[ValuationEnv] = None,
-    pick_expectation: Optional[Any],
+    pick_distribution: Optional[Mapping[str, Any]],
 ) -> MarketValueSummary:
     a = PickAsset(kind="pick", pick_id=snap.pick_id, to_team=None, protection=snap.protection)
-    mv = pricer.price_snapshot(snap, asset_key=_asset_key(a), env=env, pick_expectation=pick_expectation)
+    mv = pricer.price_snapshot(snap, asset_key=_asset_key(a), env=env, pick_distribution=pick_distribution)
     return MarketValueSummary.from_components(mv.value)
 
 
@@ -1353,7 +1353,7 @@ def build_trade_asset_catalog(
                 pricer,
                 snap_pick,
                 env=env,
-                pick_expectation=getattr(provider, "pick_expectations", {}).get(pid),
+                pick_distribution=provider.get_pick_distribution(pid),
             )
 
             if int(snap_pick.round) != 1:
