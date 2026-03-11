@@ -104,6 +104,56 @@ def _safe_int(x: Any, default: int = 0) -> int:
         return int(default)
 
 
+def _active_public_trade_block_listings_by_team(tick_ctx: Any) -> Dict[str, List[Tuple[float, str]]]:
+    """Return active PUBLIC trade-block listings grouped by team.
+
+    Listing intent should be treated as a hard market signal for candidate discovery.
+    If a team explicitly lists a player, that player must be reachable by BUY-mode
+    target discovery even when internal expendable heuristics are conservative.
+    """
+    out: Dict[str, List[Tuple[float, str]]] = {}
+    market = getattr(getattr(tick_ctx, "team_situation_ctx", None), "trade_market", None)
+    if not isinstance(market, dict):
+        return out
+
+    listings = market.get("listings") if isinstance(market.get("listings"), dict) else {}
+    today = getattr(tick_ctx, "current_date", None)
+
+    for raw in listings.values():
+        if not isinstance(raw, dict):
+            continue
+        if str(raw.get("status") or "").upper() != "ACTIVE":
+            continue
+        if str(raw.get("visibility") or "PUBLIC").upper() != "PUBLIC":
+            continue
+
+        exp_raw = raw.get("expires_on")
+        if isinstance(exp_raw, str) and len(exp_raw) >= 10 and isinstance(today, date):
+            try:
+                if today >= date.fromisoformat(exp_raw[:10]):
+                    continue
+            except Exception:
+                # Fail-open on malformed expiry: listing is still an explicit user signal.
+                pass
+
+        tid = _canon_team_id(raw.get("team_id"))
+        pid = _canon_player_id(raw.get("player_id"))
+        if not tid or not pid:
+            continue
+
+        pr = _safe_float(raw.get("priority"), 0.5)
+        if pr < 0.0:
+            pr = 0.0
+        elif pr > 1.0:
+            pr = 1.0
+        out.setdefault(tid, []).append((float(pr), pid))
+
+    for tid, rows in out.items():
+        rows.sort(key=lambda x: (-float(x[0]), x[1]))
+        out[tid] = rows
+    return out
+
+
 def _safe_float(x: Any, default: Optional[float] = 0.0) -> Optional[float]:
     try:
         if x is None:
@@ -935,6 +985,8 @@ def build_trade_asset_catalog(
         ids_raw = list(ALL_TEAM_IDS)
     team_ids = sorted({_canon_team_id(t) for t in ids_raw if _canon_team_id(t)})
 
+    public_listed_by_team = _active_public_trade_block_listings_by_team(tick_ctx)
+
     # --- Build outgoing catalogs per team
     outgoing_by_team: Dict[str, TeamOutgoingCatalog] = {}
 
@@ -1272,6 +1324,23 @@ def build_trade_asset_catalog(
             "VETERAN_SALE": list(veteran_ids),
             "CONSOLIDATE": list(consolidate_ids),
         }
+
+        # Explicit PUBLIC trade-block listing is a stronger market signal than
+        # internal expendable scoring. Promote listed players into outgoing pools
+        # by injecting them into SURPLUS_EXPENDABLE (while respecting lock/ban filters
+        # already applied when building `players`).
+        listed_rows = list(public_listed_by_team.get(tid, []) or [])
+        if listed_rows:
+            listed_ids = [pid for _prio, pid in listed_rows if pid in players]
+            if listed_ids:
+                merged: List[str] = []
+                seen_ids: Set[str] = set()
+                for pid in listed_ids + list(bucket_members.get("SURPLUS_EXPENDABLE", [])):
+                    if pid in seen_ids:
+                        continue
+                    seen_ids.add(pid)
+                    merged.append(pid)
+                bucket_members["SURPLUS_EXPENDABLE"] = merged
         # buckets per player (all satisfied buckets, even if excluded later by priority selection)
         buckets_by_player: Dict[str, List[BucketId]] = {}
         for b, ids in bucket_members.items():
