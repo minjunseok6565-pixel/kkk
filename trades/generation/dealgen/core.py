@@ -167,9 +167,6 @@ class DealGenerator:
             return []
 
         posture = str(getattr(ts, "trade_posture", "STAND_PAT") or "STAND_PAT").upper()
-        if posture == "STAND_PAT" and float(getattr(ts, "urgency", 0.0) or 0.0) < 0.35:
-            self.last_stats = DealGeneratorStats(mode="SKIP")
-            return []
 
         budget = _scale_budget(self.config, ts)
         rng = random.Random(_compute_seed(self.config, tick_ctx, tid))

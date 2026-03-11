@@ -547,9 +547,6 @@ def promote_and_commit(
 
             if user_tid not in active_sessions_cache:
                 active_sessions_cache[user_tid] = _count_active_user_sessions(negotiations_snapshot, user_tid, today=today)
-            if active_sessions_cache[user_tid] >= int(config.max_active_user_sessions):
-                result.skipped += 1
-                continue
 
             try:
                 uv = _user_side_verdict(prop, user_tid)
@@ -585,11 +582,6 @@ def promote_and_commit(
             exceed_overpay = 0.0
 
             if uv == DealVerdict.REJECT:
-                if not bool(getattr(config, "enable_user_reject_offers", False)):
-                    result.skipped += 1
-                    record_market_event(trade_market, today=today, event_type="USER_OFFER_SUPPRESSED_USER_REJECT", payload={"deal_id": deal_key, "user_team_id": user_tid, "other_team_id": other, "buyer_id": buyer, "seller_id": seller, "score": score})
-                    continue
-
                 if bool(getattr(config, "disable_reject_offers_if_any_serious_sent", True)) and int(user_serious_sent_by_user.get(user_tid, 0)) > 0:
                     result.skipped += 1
                     record_market_event(trade_market, today=today, event_type="USER_OFFER_SUPPRESSED_REJECT_SERIOUS_ALREADY_SENT", payload={"deal_id": deal_key, "user_team_id": user_tid, "other_team_id": other})
@@ -598,7 +590,6 @@ def promote_and_commit(
                 try:
                     scale = max(outgoing_total, float(getattr(config, "user_offer_min_outgoing_scale", 6.0)))
                     probe_max = min(float(getattr(config, "probe_exceed_abs_cap", 1.2)), max(float(getattr(config, "probe_exceed_abs_min", 0.12)), float(getattr(config, "probe_exceed_scale_ratio", 0.02)) * scale))
-                    lowball_max = min(float(getattr(config, "lowball_exceed_abs_cap", 3.0)), max(float(getattr(config, "lowball_exceed_abs_min", 0.30)), float(getattr(config, "lowball_exceed_scale_ratio", 0.06)) * scale))
                 except Exception:
                     result.skipped += 1
                     continue
@@ -611,25 +602,15 @@ def promote_and_commit(
 
                 if exceed_overpay <= probe_max:
                     tone = "PROBE"
-                elif exceed_overpay <= lowball_max:
-                    tone = "LOWBALL"
                 else:
-                    result.skipped += 1
-                    record_market_event(trade_market, today=today, event_type="USER_OFFER_SUPPRESSED_USER_REJECT_TOO_FAR", payload={"deal_id": deal_key, "user_team_id": user_tid, "other_team_id": other, "score": score, "exceed_overpay": exceed_overpay, "probe_exceed_max": probe_max, "lowball_exceed_max": lowball_max})
-                    continue
+                    # 기존에는 lowball_max 초과 시 즉시 억제했으나,
+                    # 실험 목적상 REJECT 제안은 상한 없이 LOWBALL로 취급한다.
+                    tone = "LOWBALL"
 
                 if tone == "PROBE":
-                    if int(user_probe_sent_by_user.get(user_tid, 0)) >= int(getattr(config, "max_user_probe_offers_per_tick", 1)):
-                        result.skipped += 1
-                        record_market_event(trade_market, today=today, event_type="USER_OFFER_SUPPRESSED_REJECT_TONE_CAP", payload={"deal_id": deal_key, "user_team_id": user_tid, "other_team_id": other, "tone": tone})
-                        continue
                     meta_key = "last_user_offer_probe_at"
                     cooldown_days = int(getattr(config, "user_pair_probe_cooldown_days", 4))
                 else:
-                    if int(user_lowball_sent_by_user.get(user_tid, 0)) >= int(getattr(config, "max_user_lowball_offers_per_tick", 1)):
-                        result.skipped += 1
-                        record_market_event(trade_market, today=today, event_type="USER_OFFER_SUPPRESSED_REJECT_TONE_CAP", payload={"deal_id": deal_key, "user_team_id": user_tid, "other_team_id": other, "tone": tone})
-                        continue
                     meta_key = "last_user_offer_lowball_at"
                     cooldown_days = int(getattr(config, "user_pair_lowball_cooldown_days", 10))
 
@@ -641,19 +622,7 @@ def promote_and_commit(
                         record_market_event(trade_market, today=today, event_type="USER_OFFER_SUPPRESSED_REJECT_PAIR_COOLDOWN", payload={"deal_id": deal_key, "user_team_id": user_tid, "other_team_id": other, "tone": tone, "last_at": last_iso, "cooldown_days": cooldown_days})
                         continue
 
-                try:
-                    p_send = float(policy.user_reject_offer_probability(tone=tone, pressure=deadline_pressure, config=config))
-                except Exception:
-                    p_send = 0.0
-                seed = f"{getattr(config, 'seed_salt', 'trade_orchestration_v2')}|{today.isoformat()}|{user_tid}|{other}|{deal_key}|{tone}"
-                if not _stable_roll(seed=seed, p=p_send):
-                    result.skipped += 1
-                    record_market_event(trade_market, today=today, event_type="USER_OFFER_SUPPRESSED_REJECT_PROBABILITY_ROLL", payload={"deal_id": deal_key, "user_team_id": user_tid, "other_team_id": other, "tone": tone, "p_send": p_send})
-                    continue
             other_set = user_offered_other_teams_by_user.setdefault(user_tid, set())
-            if other in other_set:
-                result.skipped += 1
-                continue
 
             if allow_state_mutation and not dry_run:
                 try:
