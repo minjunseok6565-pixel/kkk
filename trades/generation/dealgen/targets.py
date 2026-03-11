@@ -52,6 +52,18 @@ def _parse_iso_ymd(value: Any) -> Optional[date]:
         return None
 
 
+def _canon_player_id(raw: Any) -> str:
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    try:
+        from schema import normalize_player_id  # type: ignore
+
+        return str(normalize_player_id(s, strict=False, allow_legacy_numeric=True)).strip()
+    except Exception:
+        return s
+
+
 def _active_public_listing_meta_by_player(
     tick_ctx: TradeGenerationTickContext,
 ) -> Dict[str, Dict[str, Any]]:
@@ -77,7 +89,7 @@ def _active_public_listing_meta_by_player(
         exp = _parse_iso_ymd(raw.get("expires_on"))
         if isinstance(today, date) and exp is not None and today >= exp:
             continue
-        player_id = str(raw.get("player_id") or pid or "")
+        player_id = _canon_player_id(raw.get("player_id") or pid)
         if not player_id:
             continue
         out[player_id] = {
@@ -397,7 +409,7 @@ def select_targets_buy(
         if seller_out is None:
             continue
 
-        listed = listing_meta_by_player.get(str(r.player_id), {}) if listing_meta_by_player else {}
+        listed = listing_meta_by_player.get(_canon_player_id(r.player_id), {}) if listing_meta_by_player else {}
         is_public_listing = bool(listed) and str(listed.get("team_id") or "").upper() == from_team
 
         cd = seller_cooldown_cache.get(from_team)

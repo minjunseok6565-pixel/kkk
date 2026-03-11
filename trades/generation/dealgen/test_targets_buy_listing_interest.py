@@ -209,6 +209,34 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         self.assertEqual(out[0].player_id, "core1")
 
 
+
+    def test_listing_player_id_whitespace_is_canonicalized(self):
+        refs = [
+            IncomingPlayerRef("p2", "LAL", "WING", 0.9, 10.0, 8.0, 2.0, 26.0),
+        ]
+        trade_market = {
+            "listings": {
+                "  p2  ": {
+                    "team_id": "LAL",
+                    "status": "ACTIVE",
+                    "visibility": "PUBLIC",
+                    "priority": 1.0,
+                    "updated_at": "2026-02-10",
+                }
+            }
+        }
+        out = select_targets_buy(
+            "BOS",
+            _TickCtxStub(trade_market=trade_market),
+            self._catalog(refs),
+            DealGeneratorConfig(),
+            budget=self._budget(),
+            rng=random.Random(7),
+            banned_players=set(),
+        )
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].player_id, "p2")
+
     def test_non_listed_target_can_be_selected_without_seller_outgoing_bucket_gate(self):
         refs = [IncomingPlayerRef("core2", "LAL", "WING", 0.8, 10.0, 8.0, 2.0, 26.0)]
         out_lal = TeamOutgoingCatalog(
