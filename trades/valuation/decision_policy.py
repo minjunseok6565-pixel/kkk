@@ -156,7 +156,7 @@ class DecisionPolicy:
         scale = max(outgoing, cfg.min_outgoing_scale)
 
         # Required surplus and overpay allowance are both proportional to outgoing scale
-        min_surplus_ratio = max(0.0, _safe_float(getattr(knobs, "min_surplus_required", 0.0), 0.0))
+        min_surplus_ratio = _safe_float(getattr(knobs, "min_surplus_required", 0.0), 0.0)
         overpay_ratio = max(0.0, _safe_float(getattr(knobs, "overpay_budget", 0.0), 0.0))
         counter_rate = _clamp(_safe_float(getattr(knobs, "counter_rate", 0.0), 0.0), 0.0, 1.0)
 
