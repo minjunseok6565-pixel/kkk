@@ -286,6 +286,25 @@ def _finalize_observability_stats(stats: DealGeneratorStats) -> None:
 
 
 
+def _tier_prev_key(*, mode: str, focal_player_id: str, buyer_id: str, seller_id: str) -> Tuple[str, str, str, str]:
+    """Key shape for in-tick previous-tier stabilization map."""
+    return (str(mode).upper(), str(focal_player_id), str(buyer_id).upper(), str(seller_id).upper())
+
+
+def _update_prev_tier_map(
+    prev_map: Dict[Tuple[str, str, str, str], str],
+    key: Tuple[str, str, str, str],
+    candidates: Sequence[DealCandidate],
+) -> None:
+    """Persist first non-empty target_tier from freshly built candidates."""
+
+    for cand in candidates or []:
+        tier = str(getattr(cand, "target_tier", "") or "")
+        if tier:
+            prev_map[key] = tier
+            return
+
+
 # =============================================================================
 # Mode orchestrators
 # =============================================================================
@@ -333,6 +352,7 @@ def _generate_buy_mode(
     partner_counts: Dict[str, int] = {}
 
     target_counts: Dict[str, int] = {}
+    tier_prev_by_route: Dict[Tuple[str, str, str, str], str] = {}
     # partner diversity
     # - soft penalty는 scoring.score_deal()에서 opponent_repeat_penalty로 이미 처리한다.
     # - hard cap(max_partner_repeats)을 적용하려면, cap 적용 전까지 후보 풀을 넉넉히 유지해야
@@ -413,6 +433,9 @@ def _generate_buy_mode(
         if bool(getattr(ts_seller, "constraints", None) and ts_seller.constraints.cooldown_active):
             continue
 
+        tier_prev_key = _tier_prev_key(mode="BUY", focal_player_id=target_pid, buyer_id=buyer_id, seller_id=seller_id)
+        prev_tier = str(tier_prev_by_route.get(tier_prev_key, "") or "")
+
         candidates = build_offer_skeletons_buy(
             buyer_id,
             seller_id,
@@ -425,10 +448,13 @@ def _generate_buy_mode(
             banned_asset_keys=banned_asset_keys,
             banned_players=banned_players,
             banned_receivers_by_player=banned_receivers_by_player,
+            prev_tier=prev_tier,
         )
 
         if not candidates:
             continue
+
+        _update_prev_tier_map(tier_prev_by_route, tier_prev_key, candidates)
 
         stats.skeletons_built += len(candidates)
         for c in candidates:
@@ -759,6 +785,7 @@ def _generate_sell_mode(
     partner_counts: Dict[str, int] = {}
 
     target_counts: Dict[str, int] = {}
+    tier_prev_by_route: Dict[Tuple[str, str, str, str], str] = {}
     # partner diversity (SELL 모드에서는 'buyer'가 파트너)
     partner_cap = int(getattr(config, "max_partner_repeats", 0) or 0)
     pool_cap = int(max_results)
@@ -816,6 +843,9 @@ def _generate_sell_mode(
             if bool(getattr(ts_buyer, "constraints", None) and ts_buyer.constraints.cooldown_active):
                 continue
 
+            tier_prev_key = _tier_prev_key(mode="SELL", focal_player_id=target_pid, buyer_id=buyer_id, seller_id=seller_id)
+            prev_tier = str(tier_prev_by_route.get(tier_prev_key, "") or "")
+
             candidates = build_offer_skeletons_sell(
                 seller_id=seller_id,
                 buyer_id=buyer_id,
@@ -829,10 +859,13 @@ def _generate_sell_mode(
                 banned_asset_keys=banned_asset_keys,
                 banned_players=banned_players,
                 banned_receivers_by_player=banned_receivers_by_player,
+                prev_tier=prev_tier,
             )
 
             if not candidates:
                 continue
+
+            _update_prev_tier_map(tier_prev_by_route, tier_prev_key, candidates)
 
             stats.skeletons_built += len(candidates)
             for c in candidates:

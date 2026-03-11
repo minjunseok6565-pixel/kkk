@@ -23,7 +23,7 @@ from ..asset_catalog import (
     BucketId,
 )
 
-from .types import DealGeneratorConfig, TierContext
+from .types import DealGeneratorConfig, TierContext, PickOnlyContext
 
 SURPLUS_BUCKETS_EFFECTIVE: Tuple[BucketId, ...] = (
     "SURPLUS_EXPENDABLE",
@@ -285,20 +285,140 @@ def _tier_contract_offset(tier_ctx: TierContext, cfg: Optional[DealGeneratorConf
 
 
 def _tier_market_anchor(market: float, tier_ctx: TierContext, cfg: Optional[DealGeneratorConfig]) -> float:
-    """Blend raw market with percentile-anchored market to reduce absolute-threshold brittleness."""
+    """Blend raw market percentile with league percentile anchor (0..1)."""
 
     w = float(getattr(cfg, "tier_market_percentile_weight", 0.35) if cfg is not None else 0.35)
     w = max(0.0, min(1.0, w))
 
     try:
-        p = float(getattr(tier_ctx, "market_percentile_league", 0.5) or 0.5)
+        p_league = float(getattr(tier_ctx, "market_percentile_league", 0.5) or 0.5)
     except Exception:
-        p = 0.5
-    p = max(0.0, min(1.0, p))
+        p_league = 0.5
+    p_league = max(0.0, min(1.0, p_league))
 
-    # Legacy bands roughly span 52..86. Percentile anchor maps 0..1 -> 46..92.
-    anchor = 46.0 + 46.0 * p
-    return float((1.0 - w) * float(market) + w * float(anchor))
+    # raw market -> legacy-ish percentile proxy (46..92 band)
+    p_raw = max(0.0, min(1.0, (float(market) - 46.0) / 46.0))
+    return float((1.0 - w) * p_raw + w * p_league)
+
+
+def _resolve_tier_knobs(config: Optional[DealGeneratorConfig]) -> Dict[str, float]:
+    """Resolve normalized knobs from config with runtime-safe fallback."""
+
+    if config is None:
+        return {
+            "tier_strictness": 0.0,
+            "tier_strategy_weight": 0.20,
+            "tier_contract_weight": 0.15,
+            "tier_market_percentile_weight": 0.35,
+            "tier_hysteresis_band": 0.05,
+            "tier_star_pct_cut_shifted": 0.90,
+            "tier_high_starter_pct_cut_shifted": 0.72,
+            "tier_starter_pct_cut_shifted": 0.48,
+            "tier_pick_only_keyword_weight": 0.45,
+            "tier_pick_only_top_tags_weight": 0.20,
+            "tier_pick_only_inventory_weight": 0.35,
+            "tier_pick_only_stepien_penalty": 0.20,
+            "tier_pick_only_threshold": 0.75,
+        }
+
+    try:
+        from .config import resolve_tier_dynamic_knobs
+
+        out = resolve_tier_dynamic_knobs(config)
+        if isinstance(out, dict) and out:
+            return {str(k): float(v) for k, v in out.items()}
+    except Exception:
+        pass
+
+    return {
+        "tier_strictness": max(-1.0, min(1.0, float(getattr(config, "tier_strictness", 0.0) or 0.0))),
+        "tier_strategy_weight": max(0.0, min(1.0, float(getattr(config, "tier_strategy_weight", 0.20) or 0.20))),
+        "tier_contract_weight": max(0.0, min(1.0, float(getattr(config, "tier_contract_weight", 0.15) or 0.15))),
+        "tier_market_percentile_weight": max(0.0, min(1.0, float(getattr(config, "tier_market_percentile_weight", 0.35) or 0.35))),
+        "tier_hysteresis_band": max(0.0, min(0.25, float(getattr(config, "tier_hysteresis_band", 0.05) or 0.05))),
+        "tier_star_pct_cut_shifted": max(0.0, min(1.0, float(getattr(config, "tier_star_pct_cut", 0.90) or 0.90))),
+        "tier_high_starter_pct_cut_shifted": max(0.0, min(1.0, float(getattr(config, "tier_high_starter_pct_cut", 0.72) or 0.72))),
+        "tier_starter_pct_cut_shifted": max(0.0, min(1.0, float(getattr(config, "tier_starter_pct_cut", 0.48) or 0.48))),
+        "tier_pick_only_keyword_weight": max(0.0, min(1.0, float(getattr(config, "tier_pick_only_keyword_weight", 0.45) or 0.45))),
+        "tier_pick_only_top_tags_weight": max(0.0, min(1.0, float(getattr(config, "tier_pick_only_top_tags_weight", 0.20) or 0.20))),
+        "tier_pick_only_inventory_weight": max(0.0, min(1.0, float(getattr(config, "tier_pick_only_inventory_weight", 0.35) or 0.35))),
+        "tier_pick_only_stepien_penalty": max(0.0, min(1.0, float(getattr(config, "tier_pick_only_stepien_penalty", 0.20) or 0.20))),
+        "tier_pick_only_threshold": max(0.0, min(1.0, float(getattr(config, "tier_pick_only_threshold", 0.75) or 0.75))),
+    }
+
+
+def _pick_only_entry_score(
+    *,
+    need_tag: str,
+    match_tag: str,
+    top_tags: Sequence[str],
+    pick_ctx: Optional[PickOnlyContext],
+    knobs: Mapping[str, float],
+) -> Tuple[float, bool]:
+    """Compute PICK_ONLY entry score and inventory gate."""
+
+    need_u = str(need_tag or "").upper()
+    match_u = str(match_tag or "").upper()
+    tags = tuple(str(t or "").upper() for t in (top_tags or tuple()))
+
+    kw_signal = 0.0
+    if "PICK" in need_u:
+        kw_signal += 0.5
+    if "PICK" in match_u:
+        kw_signal += 0.5
+    kw_signal = max(0.0, min(1.0, kw_signal))
+
+    if tags:
+        pick_tag_cnt = sum(1 for t in tags if "PICK" in t)
+        top_signal = max(0.0, min(1.0, float(pick_tag_cnt) / float(len(tags))))
+    else:
+        top_signal = 0.0
+
+    inv_signal = 0.0
+    stepien_ratio = 0.0
+    has_inventory = False
+    if pick_ctx is not None:
+        s = max(0, int(getattr(pick_ctx, "pick_supply_safe", 0) or 0))
+        x = max(0, int(getattr(pick_ctx, "pick_supply_sensitive", 0) or 0))
+        d = max(0, int(getattr(pick_ctx, "pick_supply_second", 0) or 0))
+        total = s + x + d
+        has_inventory = bool(getattr(pick_ctx, "has_pick_inventory", False)) or (total > 0)
+        inv_signal = max(0.0, min(1.0, float(total) / 6.0))
+        try:
+            stepien_ratio = float(getattr(pick_ctx, "stepien_sensitive_ratio", 0.0) or 0.0)
+        except Exception:
+            stepien_ratio = 0.0
+        stepien_ratio = max(0.0, min(1.0, stepien_ratio))
+
+    w_kw = float(knobs.get("tier_pick_only_keyword_weight", 0.45))
+    w_top = float(knobs.get("tier_pick_only_top_tags_weight", 0.20))
+    w_inv = float(knobs.get("tier_pick_only_inventory_weight", 0.35))
+    pen = float(knobs.get("tier_pick_only_stepien_penalty", 0.20))
+
+    score = w_kw * kw_signal + w_top * top_signal + w_inv * inv_signal - pen * stepien_ratio
+    return max(0.0, min(1.0, score)), bool(has_inventory)
+
+
+def _tier_soft_scores(p: float, starter_cut: float, high_cut: float, star_cut: float) -> Dict[str, float]:
+    """Return soft scores by tier over normalized percentile axis."""
+
+    p = max(0.0, min(1.0, float(p)))
+
+    c_role = starter_cut * 0.5
+    c_starter = 0.5 * (starter_cut + high_cut)
+    c_high = 0.5 * (high_cut + star_cut)
+    c_star = 0.5 * (star_cut + 1.0)
+
+    def _score(center: float, width: float) -> float:
+        w = max(0.05, float(width))
+        return max(0.0, 1.0 - abs(p - center) / w)
+
+    return {
+        "ROLE": _score(c_role, starter_cut),
+        "STARTER": _score(c_starter, max(0.08, high_cut - starter_cut)),
+        "HIGH_STARTER": _score(c_high, max(0.08, star_cut - high_cut)),
+        "STAR": _score(c_star, max(0.08, 1.0 - star_cut)),
+    }
 
 
 def classify_target_tier(
@@ -308,12 +428,15 @@ def classify_target_tier(
     match_tag: str = "",
     config: Optional[DealGeneratorConfig] = None,
     tier_ctx: Optional[TierContext] = None,
+    pick_ctx: Optional[PickOnlyContext] = None,
 ) -> str:
-    """거래 focal asset을 tier로 분류한다.
+    """Classify focal asset into ROLE/STARTER/HIGH_STARTER/STAR/PICK_ONLY.
 
-    반환값: ROLE | STARTER | HIGH_STARTER | STAR | PICK_ONLY
-    - target(BUY) 또는 sale_asset(SELL) 중 하나를 입력한다.
-    - threshold는 문서 기준의 단순 초기값이며, strictness 파라미터로 완화/강화 가능.
+    New classifier path:
+    - PICK_ONLY score+inventory gate
+    - Normalization (relative percentile anchor)
+    - Policy offsets (strategy/contract + strictness-derived cuts)
+    - Decision stabilization (soft score + hysteresis + tie-break)
     """
 
     focus = target if target is not None else sale_asset
@@ -321,43 +444,61 @@ def classify_target_tier(
         return "STARTER"
 
     market = float(getattr(focus, "market_total", 0.0) or 0.0)
-    salary_m = float(getattr(focus, "salary_m", 0.0) or 0.0)
-    remaining_years = float(getattr(focus, "remaining_years", 0.0) or 0.0)
-    need_tag = str(getattr(focus, "need_tag", "") or "").upper()
-    tag = str(match_tag or "").upper()
-    is_expiring = bool(getattr(focus, "is_expiring", False)) or (remaining_years <= 1.1)
+    need_tag = str(getattr(focus, "need_tag", "") or "")
+    top_tags = tuple(getattr(focus, "top_tags", tuple()) or tuple())
 
-    if "PICK" in need_tag or "PICK" in tag:
+    tc = tier_ctx if tier_ctx is not None else TierContext()
+    knobs = _resolve_tier_knobs(config)
+
+    # (1) PICK_ONLY entry gate (no immediate string short-circuit)
+    pick_score, has_inventory = _pick_only_entry_score(
+        need_tag=need_tag,
+        match_tag=match_tag,
+        top_tags=top_tags,
+        pick_ctx=pick_ctx,
+        knobs=knobs,
+    )
+    if has_inventory and pick_score >= float(knobs.get("tier_pick_only_threshold", 0.75)):
         return "PICK_ONLY"
 
-    # Backward-compatible path: keep legacy behavior 100% identical when tier_ctx is absent.
-    if tier_ctx is None:
-        if is_expiring and market <= 58.0 and salary_m <= 30.0:
-            return "ROLE"
+    # (2) Normalization layer (market percentile anchor)
+    p = _tier_market_anchor(market, tc, config)
 
-        if market >= 86.0:
-            return "STAR"
-        if market >= 72.0:
-            return "HIGH_STARTER"
-        if market >= 52.0:
-            return "STARTER"
-        return "ROLE"
+    # (3) Policy layer (strategy/contract offsets + strictness cut shift)
+    p += _tier_strategy_offset(tc, config) / 46.0
+    p += _tier_contract_offset(tc, config) / 46.0
+    p = max(0.0, min(1.0, p))
 
-    # Context-aware path
-    market_ctx = _tier_market_anchor(market, tier_ctx, config)
-    market_ctx += _tier_strategy_offset(tier_ctx, config)
-    market_ctx += _tier_contract_offset(tier_ctx, config)
+    starter_cut = float(knobs.get("tier_starter_pct_cut_shifted", 0.48))
+    high_cut = float(knobs.get("tier_high_starter_pct_cut_shifted", 0.72))
+    star_cut = float(knobs.get("tier_star_pct_cut_shifted", 0.90))
 
-    if is_expiring and market <= 58.0 and salary_m <= 30.0:
-        return "ROLE"
+    # (4) Decision layer (soft score + hysteresis + tie-break)
+    scores = _tier_soft_scores(p, starter_cut, high_cut, star_cut)
+    order = ("ROLE", "STARTER", "HIGH_STARTER", "STAR")
+    best = max(order, key=lambda k: (scores.get(k, 0.0), order.index(k)))
 
-    if market_ctx >= 86.0:
-        return "STAR"
-    if market_ctx >= 72.0:
-        return "HIGH_STARTER"
-    if market_ctx >= 52.0:
-        return "STARTER"
-    return "ROLE"
+    prev = str(getattr(tc, "prev_tier", "") or "").upper()
+    hysteresis_band = max(0.0, min(0.25, float(knobs.get("tier_hysteresis_band", 0.05))))
+    if prev in scores and prev in order:
+        prev_idx = order.index(prev)
+        best_idx = order.index(best)
+        if abs(prev_idx - best_idx) <= 1:
+            prev_s = float(scores.get(prev, 0.0))
+            best_s = float(scores.get(best, 0.0))
+            if (best_s - prev_s) <= hysteresis_band:
+                best = prev
+
+    # stochastic tie-break with deterministic seed
+    sorted_scores = sorted(((k, float(v)) for k, v in scores.items()), key=lambda kv: kv[1], reverse=True)
+    if len(sorted_scores) >= 2 and abs(sorted_scores[0][1] - sorted_scores[1][1]) <= 1e-9:
+        seed = str(getattr(tc, "tie_break_seed", "") or "")
+        rr = random.Random(seed)
+        ties = [k for k, v in sorted_scores if abs(v - sorted_scores[0][1]) <= 1e-9]
+        if ties:
+            best = ties[int(rr.random() * len(ties)) % len(ties)]
+
+    return best
 
 
 

@@ -8,7 +8,7 @@ from ...models import Deal, PlayerAsset
 from ..generation_tick import TradeGenerationTickContext
 from ..asset_catalog import TradeAssetCatalog, TeamOutgoingCatalog, BucketId
 
-from .types import DealGeneratorConfig, DealGeneratorBudget, TargetCandidate, DealCandidate, SellAssetCandidate, TierContext
+from .types import DealGeneratorConfig, DealGeneratorBudget, TargetCandidate, DealCandidate, SellAssetCandidate, TierContext, PickOnlyContext
 from .skeleton_registry import BuildContext, build_default_registry
 from .skeleton_modifiers import apply_modifiers
 from .utils import (
@@ -83,6 +83,7 @@ def _build_tier_context_for_buy(
     target: TargetCandidate,
     tick_ctx: TradeGenerationTickContext,
     catalog: TradeAssetCatalog,
+    prev_tier: str = "",
 ) -> TierContext:
     ts_buyer = tick_ctx.get_team_situation(buyer_id)
     ts_seller = tick_ctx.get_team_situation(seller_id)
@@ -108,6 +109,8 @@ def _build_tier_context_for_buy(
         contract_trigger_risk=trigger,
         contract_toxic_risk=toxic,
         contract_matching_utility=matching,
+        prev_tier=str(prev_tier or ""),
+        tie_break_seed=f"{str(buyer_id).upper()}:{str(seller_id).upper()}:{str(target.player_id)}:BUY",
     )
 
 
@@ -118,6 +121,7 @@ def _build_tier_context_for_sell(
     sale_asset: SellAssetCandidate,
     tick_ctx: TradeGenerationTickContext,
     catalog: TradeAssetCatalog,
+    prev_tier: str = "",
 ) -> TierContext:
     ts_buyer = tick_ctx.get_team_situation(buyer_id)
     ts_seller = tick_ctx.get_team_situation(seller_id)
@@ -142,6 +146,36 @@ def _build_tier_context_for_sell(
         contract_trigger_risk=trigger,
         contract_toxic_risk=toxic,
         contract_matching_utility=matching,
+        prev_tier=str(prev_tier or ""),
+        tie_break_seed=f"{str(buyer_id).upper()}:{str(seller_id).upper()}:{str(sale_asset.player_id)}:SELL",
+    )
+
+
+def _build_pick_only_context(*, buyer_id: str, catalog: TradeAssetCatalog) -> PickOnlyContext:
+    """Build PICK_ONLY gating context from buyer pick inventory."""
+
+    out = catalog.outgoing_by_team.get(str(buyer_id).upper())
+    if out is None:
+        return PickOnlyContext()
+
+    safe_ids = tuple(out.pick_ids_by_bucket.get("FIRST_SAFE", tuple()) or tuple())
+    sensitive_ids = tuple(out.pick_ids_by_bucket.get("FIRST_SENSITIVE", tuple()) or tuple())
+    second_ids = tuple(out.pick_ids_by_bucket.get("SECOND", tuple()) or tuple())
+
+    n_safe = len(safe_ids)
+    n_sensitive = len(sensitive_ids)
+    n_second = len(second_ids)
+    total = n_safe + n_sensitive + n_second
+    if total <= 0:
+        return PickOnlyContext()
+
+    ratio = float(n_sensitive) / float(total)
+    return PickOnlyContext(
+        pick_supply_safe=n_safe,
+        pick_supply_sensitive=n_sensitive,
+        pick_supply_second=n_second,
+        stepien_sensitive_ratio=max(0.0, min(1.0, ratio)),
+        has_pick_inventory=True,
     )
 
 
@@ -195,6 +229,7 @@ def build_offer_skeletons_buy(
     banned_asset_keys: Set[str],
     banned_players: Set[str],
     banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
+    prev_tier: str = "",
 ) -> List[DealCandidate]:
     """BUY 모드: target 1명 기준 2~4개 archetype 스켈레톤."""
 
@@ -206,8 +241,10 @@ def build_offer_skeletons_buy(
             target=target,
             tick_ctx=tick_ctx,
             catalog=catalog,
+            prev_tier=prev_tier,
         )
-        target_tier = classify_target_tier(target=target, config=config, tier_ctx=tier_ctx)
+        pick_ctx = _build_pick_only_context(buyer_id=buyer_id, catalog=catalog)
+        target_tier = classify_target_tier(target=target, config=config, tier_ctx=tier_ctx, pick_ctx=pick_ctx)
         ctx = BuildContext(
             mode="BUY",
             buyer_id=buyer_id,
@@ -504,6 +541,7 @@ def build_offer_skeletons_sell(
     banned_asset_keys: Set[str],
     banned_players: Set[str],
     banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
+    prev_tier: str = "",
 ) -> List[DealCandidate]:
     """SELL 모드: (seller sends sale_asset.player_id) 기준 BUYER 패키지를 생성."""
 
@@ -515,8 +553,10 @@ def build_offer_skeletons_sell(
             sale_asset=sale_asset,
             tick_ctx=tick_ctx,
             catalog=catalog,
+            prev_tier=prev_tier,
         )
-        target_tier = classify_target_tier(sale_asset=sale_asset, match_tag=match_tag, config=config, tier_ctx=tier_ctx)
+        pick_ctx = _build_pick_only_context(buyer_id=buyer_id, catalog=catalog)
+        target_tier = classify_target_tier(sale_asset=sale_asset, match_tag=match_tag, config=config, tier_ctx=tier_ctx, pick_ctx=pick_ctx)
         ctx = BuildContext(
             mode="SELL",
             buyer_id=buyer_id,
@@ -816,6 +856,7 @@ def expand_variants(
     banned_asset_keys: Set[str],
     banned_players: Set[str],
     banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
+    prev_tier: str = "",
 ) -> List[DealCandidate]:
     """스켈레톤을 '얕게' 확장한다.
 

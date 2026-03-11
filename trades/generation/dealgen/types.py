@@ -234,13 +234,25 @@ class DealGeneratorConfig:
         "salary_cleanup.pure_absorb_for_asset",
     )
 
-    # --- target tier dynamic adjustment (phase-1)
-    # Context-aware tier 분류에 쓰이는 보정 파라미터(가중치/안정화).
-    # 기본값은 보수적으로 유지하여 기존 하드컷 동작과의 괴리를 최소화한다.
+    # --- target tier policy knobs (SSOT)
+    # 상대 구간 컷 + 오프셋 + 안정화 + PICK_ONLY score gate 조정을 위한 정책 레버.
+    tier_strictness: float = 0.0
     tier_strategy_weight: float = 0.20
     tier_contract_weight: float = 0.15
     tier_market_percentile_weight: float = 0.35
+    # percentile cut baselines (STAR/HIGH_STARTER/STARTER 하한)
+    tier_star_pct_cut: float = 0.90
+    tier_high_starter_pct_cut: float = 0.72
+    tier_starter_pct_cut: float = 0.48
+    # hysteresis 완충구간 폭
     tier_hysteresis_band: float = 0.05
+
+    # PICK_ONLY entry policy (score + inventory gate)
+    tier_pick_only_keyword_weight: float = 0.45
+    tier_pick_only_top_tags_weight: float = 0.20
+    tier_pick_only_inventory_weight: float = 0.35
+    tier_pick_only_stepien_penalty: float = 0.20
+    tier_pick_only_threshold: float = 0.75
 
     # --- sweetener loop
     sweetener_enabled: bool = True
@@ -573,6 +585,7 @@ class TargetCandidate:
 class TierContext:
     """Dynamic context payload for `classify_target_tier()`.
 
+    상대 구간 컷 + 오프셋 + 안정화(히스테리시스/동률해소)에 필요한 최소 컨텍스트.
     Note: injury/availability signals are intentionally excluded in current phase.
     """
 
@@ -594,6 +607,21 @@ class TierContext:
     contract_trigger_risk: float = 0.0
     contract_toxic_risk: float = 0.0
     contract_matching_utility: float = 0.0
+
+    # Decision stabilization
+    prev_tier: str = ""
+    tie_break_seed: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class PickOnlyContext:
+    """Minimal context payload for PICK_ONLY entry scoring/gating."""
+
+    pick_supply_safe: int = 0
+    pick_supply_sensitive: int = 0
+    pick_supply_second: int = 0
+    stepien_sensitive_ratio: float = 0.0
+    has_pick_inventory: bool = False
 
 
 @dataclass(frozen=True, slots=True)
