@@ -46,6 +46,28 @@ class SkeletonRegistry:
     specs: Tuple[SkeletonSpec, ...]
 
     @staticmethod
+    def _is_pick_only_spec(spec: SkeletonSpec) -> bool:
+        """True when the skeleton is compatible with PICK_ONLY routing contract.
+
+        PICK_ONLY는 pick 기반 스켈레톤 우선이며, player_swap 계열은 제외한다.
+        """
+
+        sid = str(getattr(spec, "skeleton_id", "") or "")
+        if not sid:
+            return False
+        if sid.startswith("player_swap."):
+            return False
+        if sid.startswith("pick_engineering."):
+            return True
+        if sid in {
+            "compat.picks_only",
+            "compat.buyer_picks",
+            "salary_cleanup.pure_absorb_for_asset",
+        }:
+            return True
+        return False
+
+    @staticmethod
     def _resolve_route_ids(mode_upper: str, tier_upper: str, config: DealGeneratorConfig) -> Tuple[str, ...]:
         tier_attr_map = {
             "ROLE": "skeleton_route_role",
@@ -89,6 +111,8 @@ class SkeletonRegistry:
             if mode_upper not in spec.mode_allow:
                 continue
             if tier_upper not in spec.target_tiers:
+                continue
+            if tier_upper == "PICK_ONLY" and not self._is_pick_only_spec(spec):
                 continue
             if ctx is not None and spec.gate_fn is not None and not bool(spec.gate_fn(ctx)):
                 continue

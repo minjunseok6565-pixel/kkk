@@ -47,6 +47,8 @@ class SkeletonRegistryRoutingTests(unittest.TestCase):
         self.assertIn("compat.picks_only", ids)
         self.assertIn("pick_engineering.first_split", ids)
         self.assertIn("salary_cleanup.pure_absorb_for_asset", ids)
+        self.assertNotIn("player_swap.role_swap_small_delta", ids)
+        self.assertTrue(all(not sid.startswith("player_swap.") for sid in ids))
 
     def test_tier_filter_respects_target_tiers(self):
         reg = build_default_registry()
