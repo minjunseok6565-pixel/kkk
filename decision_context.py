@@ -595,8 +595,8 @@ def build_decision_context(
 
     # Overpay budget / counter rate (from C, adapted to dc2)
     buy_factor = float(POSTURE_BUY_FACTOR.get(posture, 0.25))
-    overpay_budget = 0.18 * eff_win_now * urgency * buy_factor * (1.0 - 0.45 * eff_neg_tough)
-    overpay_budget = clamp(overpay_budget, 0.0, 0.22)
+    overpay_budget = 0.35 * eff_win_now * urgency * buy_factor * (1.0 - 0.15 * eff_neg_tough)
+    overpay_budget = clamp(overpay_budget, 0.0, 0.40)
 
     counter_rate = lerp(0.35, 0.80, eff_neg_tough) * lerp(1.0, 0.70, urgency)
     counter_rate = clamp(counter_rate, 0.10, 0.95)
