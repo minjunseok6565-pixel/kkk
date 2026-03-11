@@ -7,7 +7,6 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Set, Tuple
 
 from ...models import Deal, PlayerAsset
 from ...valuation.types import DealVerdict
-from ...valuation.lineup_ecosystem import compute_ecosystem_fit_score
 
 from ..generation_tick import TradeGenerationTickContext
 from ..asset_catalog import TradeAssetCatalog, TeamOutgoingCatalog, PlayerTradeCandidate, BucketId
@@ -80,6 +79,46 @@ def _extract_fit_failed_incoming_player_ids(dec: Any) -> Set[str]:
                 out.add(rid)
 
     return out
+
+
+def _team_need_map(tick_ctx: TradeGenerationTickContext, team_id: str) -> Dict[str, float]:
+    tid = str(team_id).upper()
+    # prefer decision_context.need_map
+    try:
+        dc = tick_ctx.get_decision_context(tid)
+        nm = getattr(dc, "need_map", None)
+        if isinstance(nm, dict):
+            return {str(k).upper(): float(v) for k, v in nm.items()}
+    except Exception:
+        pass
+
+    # fallback: team_situation.needs (best-effort)
+    try:
+        ts = tick_ctx.get_team_situation(tid)
+        needs = getattr(ts, "needs", None)
+        if isinstance(needs, dict):
+            return {str(k).upper(): float(v) for k, v in needs.items()}
+    except Exception:
+        pass
+
+    return {}
+
+
+def _need_fit_score(supply: Mapping[str, float], need_map: Mapping[str, float]) -> float:
+    # simple weighted overlap; normalized to ~0..1-ish
+    if not supply or not need_map:
+        return 0.0
+    num = 0.0
+    den = 0.0
+    for tag, w in need_map.items():
+        ww = float(w)
+        if ww <= 0:
+            continue
+        den += ww
+        num += ww * float(supply.get(tag, 0.0) or 0.0)
+    if den <= 0:
+        return 0.0
+    return float(num / den)
 
 
 def _outgoing_players_to_receiver(
@@ -168,29 +207,76 @@ def _fit_swap_mode_for_receiver(ts: Any) -> str:
     return "NEUTRAL"
 
 
-def _ecosystem_fit_for_receiver_package(
-    *,
-    tick_ctx: TradeGenerationTickContext,
-    receiver_id: str,
-    incoming_candidates: Sequence[PlayerTradeCandidate],
-    receiver_outgoing_player_ids: Sequence[str],
-    cfg: DealGeneratorConfig,
-) -> Tuple[float, Tuple[str, ...], Tuple[str, ...]]:
+def _fit_swap_youth_score(c: PlayerTradeCandidate, cfg: DealGeneratorConfig) -> float:
+    """
+    youth = max(0, age_anchor - age) / age_span  +  min(years_cap, remaining_years) / years_span
+    (v2 absorption; parameters configurable in DealGeneratorConfig)
+    """
+    age = None
     try:
-        res = compute_ecosystem_fit_score(
-            receiver_team_id=str(receiver_id).upper(),
-            incoming_candidates=tuple(incoming_candidates),
-            outgoing_player_ids=tuple(str(x) for x in receiver_outgoing_player_ids if str(x)),
-            tick_ctx=tick_ctx,
-            cfg=cfg,
-        )
-        return (
-            float(getattr(res, "total_score", 0.0) or 0.0),
-            tuple(getattr(res, "reason_codes_plus", tuple()) or tuple()),
-            tuple(getattr(res, "reason_codes_minus", tuple()) or tuple()),
-        )
+        snap = getattr(c, "snap", None)
+        if snap is not None and getattr(snap, "age", None) is not None:
+            age = float(getattr(snap, "age"))
     except Exception:
-        return (0.0, tuple(), tuple())
+        age = None
+
+    try:
+        ry = float(getattr(c, "remaining_years", 0.0) or 0.0)
+    except Exception:
+        ry = 0.0
+
+    age_anchor = float(getattr(cfg, "fit_swap_youth_age_anchor", 30.0) or 30.0)
+    age_span = float(getattr(cfg, "fit_swap_youth_age_span", 10.0) or 10.0)
+    years_cap = float(getattr(cfg, "fit_swap_youth_years_cap", 4.0) or 4.0)
+    years_span = float(getattr(cfg, "fit_swap_youth_years_span", 4.0) or 4.0)
+
+    youth = 0.0
+    if age is not None and age_span > 0:
+        youth += max(0.0, age_anchor - float(age)) / age_span
+    if years_span > 0:
+        youth += min(years_cap, max(0.0, float(ry))) / years_span
+    return float(youth)
+
+
+def _fit_swap_primary_score(
+    c: PlayerTradeCandidate,
+    *,
+    fit: float,
+    mode: str,
+    cfg: DealGeneratorConfig,
+) -> float:
+    """
+    primary_score = w_youth*youth + w_fit*fit + w_market*market_norm
+    - if fit_swap_use_horizon_weights is False, fall back to fit-only ranking (v1 behavior)
+    """
+    if not bool(getattr(cfg, "fit_swap_use_horizon_weights", True)):
+        return float(fit)
+
+    market_total = 0.0
+    try:
+        market_total = float(getattr(getattr(c, "market", None), "total", 0.0) or 0.0)
+    except Exception:
+        market_total = 0.0
+
+    div = float(getattr(cfg, "fit_swap_market_norm_divisor", 50.0) or 50.0)
+    market_norm = (market_total / div) if div > 0 else market_total
+
+    youth = _fit_swap_youth_score(c, cfg)
+
+    mm = str(mode).upper()
+    if mm == "REBUILD":
+        w = getattr(cfg, "fit_swap_weights_rebuild", (0.55, 0.40, -0.05))
+    elif mm == "WIN_NOW":
+        w = getattr(cfg, "fit_swap_weights_win_now", (0.05, 0.70, 0.25))
+    else:
+        w = getattr(cfg, "fit_swap_weights_neutral", (0.20, 0.60, 0.20))
+
+    try:
+        wy, wf, wm = float(w[0]), float(w[1]), float(w[2])
+    except Exception:
+        wy, wf, wm = 0.20, 0.60, 0.20
+
+    return float(wy * youth + wf * float(fit) + wm * float(market_norm))
 
 
 def maybe_apply_fit_swap(
@@ -240,6 +326,10 @@ def maybe_apply_fit_swap(
     if receiver_id is None or giver_id is None or receiver_dec is None:
         return None
 
+    receiver_need_map = _team_need_map(tick_ctx, receiver_id)
+    if not receiver_need_map:
+        return None
+
     # receiver(=FIT_FAILS 낸 팀)의 타임라인/포스처 기반 선호 모드 (v2 absorption)
     receiver_ts = None
     try:
@@ -255,8 +345,6 @@ def maybe_apply_fit_swap(
     outgoing_players = list(_outgoing_players_to_receiver(base_prop.deal, giver_id=giver_id, receiver_id=receiver_id))
     if not outgoing_players:
         return None
-    receiver_outgoing_players = list(_outgoing_players_to_receiver(base_prop.deal, giver_id=receiver_id, receiver_id=giver_id))
-    receiver_outgoing_pids = [str(a.player_id) for a in receiver_outgoing_players]
 
     protected: Set[str] = set()
     if protected_player_id:
@@ -265,28 +353,14 @@ def maybe_apply_fit_swap(
 
     failed_pids = _extract_fit_failed_incoming_player_ids(receiver_dec)
 
+    # swap-out 대상: failed_pids에 걸린 애 우선, 없으면 전체 중 fit 가장 낮은 애
+    def _fit_pid(pid: str) -> float:
+        c = giver_out.players.get(pid)
+        if c is None:
+            return 0.0
+        return _need_fit_score(getattr(c, "supply", None) or {}, receiver_need_map)
+
     outgoing_pids = [str(a.player_id) for a in outgoing_players]
-    current_incoming: list[PlayerTradeCandidate] = [c for c in (giver_out.players.get(pid) for pid in outgoing_pids) if c is not None]
-    base_fit, _, _ = _ecosystem_fit_for_receiver_package(
-        tick_ctx=tick_ctx,
-        receiver_id=receiver_id,
-        incoming_candidates=current_incoming,
-        receiver_outgoing_player_ids=receiver_outgoing_pids,
-        cfg=config,
-    )
-
-    # swap-out 대상: failed_pids 우선. 각 pid 제거 시 package fit이 얼마나 개선되는지로 worst 식별.
-    def _remove_gain(pid: str) -> float:
-        remain = [c for c in current_incoming if str(getattr(c, "player_id", "")) != str(pid)]
-        score_wo, _, _ = _ecosystem_fit_for_receiver_package(
-            tick_ctx=tick_ctx,
-            receiver_id=receiver_id,
-            incoming_candidates=remain,
-            receiver_outgoing_player_ids=receiver_outgoing_pids,
-            cfg=config,
-        )
-        return float(score_wo - base_fit)
-
     swap_out_pool = [pid for pid in outgoing_pids if pid in failed_pids and pid not in protected]
     if not swap_out_pool:
         swap_out_pool = [pid for pid in outgoing_pids if pid not in protected]
@@ -295,14 +369,14 @@ def maybe_apply_fit_swap(
         return None
 
     worst_pid = None
-    worst_gain = -1e9
+    worst_fit = 1e9
     worst_salary = 0.0
     worst_market = 0.0
 
     for pid in swap_out_pool:
-        g = _remove_gain(pid)
-        if g > worst_gain:
-            worst_gain = g
+        f = _fit_pid(pid)
+        if f < worst_fit:
+            worst_fit = f
             worst_pid = pid
             c = giver_out.players.get(pid)
             if c is not None:
@@ -345,27 +419,28 @@ def maybe_apply_fit_swap(
     max_salary_diff = float(getattr(config, "fit_swap_max_salary_diff_m", 3.5) or 3.5)
     min_improve = float(getattr(config, "fit_swap_min_fit_improvement", 0.03) or 0.03)
 
-    # 후보 랭킹: ecosystem total_score 우선 (설계안), 그 다음 salary/market 급변 억제
-    ranked: list[Tuple[float, float, float, str, float, Tuple[str, ...], Tuple[str, ...]]] = []
-    current_wo_worst = [c for c in current_incoming if str(getattr(c, "player_id", "")) != str(worst_pid)]
+    # 후보 랭킹:
+    # - (유지) 최소 fit 개선 + salary diff 제한 + market 급변 억제
+    # - (추가) receiver 타임라인/포스처에 따라 youth/fit/market 가중치로 primary_score를 계산 (v2 absorption)
+    ranked: list[Tuple[float, float, float, str, float]] = []
     for c in pool:
-        trial_incoming = list(current_wo_worst) + [c]
-        new_fit, plus_codes, minus_codes = _ecosystem_fit_for_receiver_package(
-            tick_ctx=tick_ctx,
-            receiver_id=receiver_id,
-            incoming_candidates=trial_incoming,
-            receiver_outgoing_player_ids=receiver_outgoing_pids,
-            cfg=config,
-        )
-        if float(new_fit) <= float(base_fit) + float(min_improve):
+        new_fit = _need_fit_score(getattr(c, "supply", None) or {}, receiver_need_map)
+        if float(new_fit) <= float(worst_fit) + float(min_improve):
             continue
         sal = float(getattr(c, "salary_m", 0.0) or 0.0)
         if abs(sal - float(worst_salary)) > max_salary_diff:
             continue
         mkt = float(getattr(getattr(c, "market", None), "total", 0.0) or 0.0)
 
-        # total_score desc, salary diff asc, market diff asc, pid asc
-        ranked.append((float(new_fit), abs(sal - float(worst_salary)), abs(mkt - float(worst_market)), str(c.player_id), float(new_fit), plus_codes, minus_codes))
+        primary = _fit_swap_primary_score(
+            c,
+            fit=float(new_fit),
+            mode=str(fit_swap_mode).upper(),
+            cfg=config,
+        )
+
+        # primary desc, salary diff asc, market diff asc, pid asc
+        ranked.append((float(primary), abs(sal - float(worst_salary)), abs(mkt - float(worst_market)), str(c.player_id), float(new_fit)))
 
     if not ranked:
         return None
@@ -380,7 +455,7 @@ def maybe_apply_fit_swap(
     evaluations_used = 0
     candidates_tried = 0
 
-    for _, __, ___, new_pid, new_fit, plus_codes, minus_codes in ranked[:max_tries]:
+    for _, __, ___, new_pid, new_fit in ranked[:max_tries]:
         candidates_tried += 1
         if validations_used >= validations_remaining or evaluations_used >= evaluations_remaining:
             break
@@ -391,16 +466,6 @@ def maybe_apply_fit_swap(
             legs={k: list(v) for k, v in base_prop.deal.legs.items()},
             meta=dict(base_prop.deal.meta or {}),
         )
-        new_deal.meta["fit_swap_ecosystem"] = {
-            "score": float(new_fit),
-            "base_score": float(base_fit),
-            "delta": float(new_fit - base_fit),
-            "plus": list(plus_codes or tuple()),
-            "minus": list(minus_codes or tuple()),
-            "receiver_team_id": str(receiver_id).upper(),
-            "swap_out_player_id": str(worst_pid),
-            "swap_in_player_id": str(new_pid),
-        }
         leg = list(new_deal.legs.get(giver_id, []) or [])
         replaced = False
         for i in range(len(leg)):

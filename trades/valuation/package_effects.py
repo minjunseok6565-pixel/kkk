@@ -34,15 +34,15 @@ from decision_context import DecisionContext
 from contracts.terms import player_contract_terms
 
 from .env import ValuationEnv
-from .fit_engine import FitEngine
-from .contract_texture import ContractTexture, build_contract_textures
-from .role_texture import RoleTexture, build_role_textures
-from .cap_ledger import build_cap_ledgers, score_cap_flex_delta
+
+try:  # path safety (project integration will likely use relative import)
+    from role_need_tags import role_to_need_tag_only
+except Exception:  # pragma: no cover
+    from .role_need_tags import role_to_need_tag_only
 
 from .types import (
     AssetKind,
     AssetSnapshot,
-    ContractSnapshot,
     PlayerSnapshot,
     TeamValuation,
     ValueComponents,
@@ -158,6 +158,39 @@ def _team_total_grade(tv: TeamValuation) -> float:
     return _safe_float(tv.team_value.total, 0.0)
 
 
+def _primary_archetype_tag(player: PlayerSnapshot) -> str:
+    """Pick a single archetype tag used for diminishing-returns bucketing.
+
+    - Prefer role_fit (if present) -> map role->need_tag.
+    - Fallback to depth bucket (GUARD/WING/BIG).
+
+    This is intentionally simple: we only need a *stable* grouping.
+    """
+    role_fit = None
+    if isinstance(player.meta, dict):
+        role_fit = player.meta.get("role_fit")
+    if role_fit is None and isinstance(player.attrs, dict):
+        role_fit = player.attrs.get("role_fit")
+
+    best_tag = None
+    best_score = 0.0
+    if isinstance(role_fit, dict):
+        for role, score in role_fit.items():
+            tag = role_to_need_tag_only(str(role))
+            if tag == "ROLE_GAP":
+                continue
+            sc = _safe_float(score, 0.0)
+            if sc > best_score:
+                best_score = sc
+                best_tag = tag
+    if best_tag:
+        return str(best_tag)
+
+    # fallback to positional bucket
+    buckets = classify_depth_buckets(player)
+    return buckets[0] if buckets else "WING"
+
+
 def _defense_signal(player: PlayerSnapshot) -> float:
     """0..1 defense signal proxy based on attrs/meta if available."""
     # 1) explicit meta/attrs override
@@ -191,6 +224,22 @@ def _defense_signal(player: PlayerSnapshot) -> float:
     return best
 
 
+def _commitment_metric(player: PlayerSnapshot, *, current_season_year: int) -> float:
+    """Contract commitment proxy (salary * remaining_years).
+
+    This is intentionally a *soft* approximation:
+    - Options/partial guarantees are ignored in v1.
+    - If remaining years cannot be derived, fallback to contract.years.
+    """
+
+    cur = int(current_season_year)
+    terms = player_contract_terms(player, current_season_year=cur)
+
+    salary_now = max(_safe_float(getattr(player, "salary_amount", None), 0.0), _safe_float(terms.salary_now, 0.0))
+    years = float(max(0, int(terms.remaining_years)))
+    return max(0.0, float(salary_now)) * years
+
+
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
@@ -215,19 +264,11 @@ class PackageEffectsConfig:
     hole_penalty_scale: float = 0.22
     hole_penalty_exponent: float = 1.15
     hole_penalty_cap_ratio: float = 0.18
-    hole_texture_parallel_weight: float = 0.30
 
     # --- Depth needs (structural)
     depth_need_scale: float = 1.00
     bench_low_grade: float = 1.5
     starter_cutoff_grade: float = 8.0
-    depth_texture_parallel_weight: float = 0.35
-
-    # Texture-axis demand mapping for v2 parallel deficits
-    depth_texture_creation_need_scale: float = 0.70
-    depth_texture_rim_need_scale: float = 0.70
-    depth_texture_defense_need_scale: float = 0.45
-    depth_texture_spacing_need_scale: float = 0.35
 
     # --- CAP_FLEX
     cap_flex_scale: float = 0.00000006  # scale salary*years (dollars) -> value units
@@ -243,11 +284,6 @@ class PackageEffectsConfig:
 
     # Commitment delta cap (future)
     cap_commit_abs_cap: float = 18.0
-
-    # CAP_FLEX v2 ledger path (before/after balance sheet optionality)
-    cap_flex_use_ledger_delta: bool = True
-    cap_ledger_score_scale: float = 4.0
-    cap_ledger_abs_cap: float = 18.0
 
     # --- Upgrade needs
     upgrade_scale: float = 0.75
@@ -265,17 +301,6 @@ class PackageEffectsConfig:
     agency_distress_cap: float = 0.22
 
     eps: float = 1e-9
-
-    # --- texture injection
-    dual_read_v2_components: bool = True
-    texture_overlap_weight: float = 1.0
-    contract_texture_control_weight: float = 0.20
-    contract_texture_trigger_weight: float = 0.10
-    contract_texture_toxic_weight: float = 0.10
-
-    # --- rotation context injection (roster waste)
-    rotation_context_weight: float = 0.55
-    rotation_min_waste_multiplier: float = 0.45
 
 
 # -----------------------------------------------------------------------------
@@ -295,7 +320,6 @@ class PackageEffects:
         outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
         ctx: DecisionContext,
         env: ValuationEnv,
-        valuation_context_v2: Any | None = None,
     ) -> Tuple[ValueComponents, Tuple[ValuationStep, ...], Dict[str, Any]]:
         """Return (package_delta, steps, meta).
 
@@ -318,36 +342,23 @@ class PackageEffects:
         base_in_mass = max(_side_mass(incoming), self.config.eps)
         package_scale_total = max(base_in_mass, base_out_mass)
 
-        prefetched_role_textures = self._prefetched_role_textures(
-            incoming=incoming,
-            outgoing=outgoing,
-            valuation_context_v2=valuation_context_v2,
-        )
-        prefetched_contract_textures = self._prefetched_contract_textures(
-            incoming=incoming,
-            outgoing=outgoing,
-            valuation_context_v2=valuation_context_v2,
-        )
-
         # 5) Consolidation / dispersion structure
         delta1 = self._consolidation_effect(incoming, outgoing, ctx, package_scale_total, steps)
 
-        # 6) Basketball component (RoleTexture score matrix / overlap 기반)
-        delta2 = self._diminishing_returns_texture(incoming, steps=steps, prefetched_role_textures=prefetched_role_textures)
-        if abs(delta2.total) > self.config.eps:
-            steps.append(self._build_basketball_component_step(delta2, source="role_texture_matrix"))
+        # 6) Diminishing returns for redundant incoming players
+        delta2 = self._diminishing_returns(incoming, steps)
 
         # 7) Soft roster slot / rotation waste (too many incoming players)
-        delta3 = self._roster_excess_waste(incoming, outgoing, base_out_mass, ctx, steps, prefetched_role_textures=prefetched_role_textures)
+        delta3 = self._roster_excess_waste(incoming, outgoing, base_out_mass, steps)
 
         # Depth needs (GUARD/WING/BIG/BENCH) based on deal delta *only*
-        delta4 = self._depth_need_adjustment(incoming, outgoing, ctx, steps, prefetched_role_textures=prefetched_role_textures)
+        delta4 = self._depth_need_adjustment(incoming, outgoing, ctx, steps)
 
         # 8) Outgoing hole penalty (position discontinuity)
-        delta5 = self._outgoing_hole_penalty(incoming, outgoing, base_out_mass, steps, prefetched_role_textures=prefetched_role_textures)
+        delta5 = self._outgoing_hole_penalty(incoming, outgoing, base_out_mass, steps)
 
-        # CAP_FLEX adjustment (contract component injection)
-        delta6, contract_dual_meta = self._cap_flex_adjustment(incoming, outgoing, ctx, env, steps, prefetched_contract_textures=prefetched_contract_textures)
+        # CAP_FLEX adjustment (contract commitment delta)
+        delta6 = self._cap_flex_adjustment(incoming, outgoing, ctx, env, steps)
 
         # OFF/DEF upgrade adjustments
         delta7 = self._upgrade_adjustment(incoming, outgoing, ctx, steps)
@@ -360,27 +371,8 @@ class PackageEffects:
         meta["base_out"] = {"now": base_out.now, "future": base_out.future, "total": base_out.total, "mass": base_out_mass}
         meta["package_delta"] = {"now": total.now, "future": total.future, "total": total.total}
         meta["team_id"] = str(team_id)
-        if self.config.dual_read_v2_components:
-            meta["v2_texture_diff"] = {
-                "basketball_component_delta": {
-                    "now": 0.0,
-                    "future": 0.0,
-                    "total": 0.0,
-                },
-                "contract_component_delta": contract_dual_meta,
-            }
 
         return total, tuple(steps), meta
-
-    def _build_basketball_component_step(self, delta: ValueComponents, *, source: str) -> ValuationStep:
-        return ValuationStep(
-            stage=ValuationStage.PACKAGE,
-            mode=StepMode.ADD,
-            code="BASKETBALL_COMPONENT",
-            label="농구 컴포넌트(역할 질감/중복) 보정",
-            delta=delta,
-            meta={"source": source},
-        )
 
     # ------------------------------------------------------------------
     # Utilities
@@ -390,57 +382,6 @@ class PackageEffects:
         for tv, _ in items:
             out = out + tv.team_value
         return out
-
-    def _prefetched_role_textures(
-        self,
-        *,
-        incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        valuation_context_v2: Any | None,
-    ) -> Dict[str, RoleTexture]:
-        if valuation_context_v2 is None:
-            return {}
-        src = getattr(valuation_context_v2, "role_textures", None)
-        if not isinstance(src, Mapping):
-            return {}
-
-        ids = {
-            p.player_id
-            for _, p in self._players(incoming)
-        } | {
-            p.player_id
-            for _, p in self._players(outgoing)
-        }
-        out: Dict[str, RoleTexture] = {}
-        for pid in ids:
-            tex = src.get(pid)
-            if isinstance(tex, RoleTexture):
-                out[pid] = tex
-        return out
-
-    def _prefetched_contract_textures(
-        self,
-        *,
-        incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        valuation_context_v2: Any | None,
-    ) -> Dict[str, ContractTexture]:
-        if valuation_context_v2 is None:
-            return {}
-        src = getattr(valuation_context_v2, "contract_textures", None)
-        if not isinstance(src, Mapping):
-            return {}
-
-        by_player: Dict[str, ContractTexture] = {}
-        players = [p for _, p in self._players(incoming)] + [p for _, p in self._players(outgoing)]
-        for p in players:
-            c = p.contract
-            if c is None:
-                continue
-            tex = src.get(c.contract_id)
-            if isinstance(tex, ContractTexture):
-                by_player[p.player_id] = tex
-        return by_player
 
     def _players(
         self, items: Sequence[Tuple[TeamValuation, AssetSnapshot]]
@@ -534,114 +475,82 @@ class PackageEffects:
     # ------------------------------------------------------------------
     # 6) Diminishing returns
     # ------------------------------------------------------------------
-    def _diminishing_returns_texture(
+    def _diminishing_returns(
         self,
         incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        steps: Optional[List[ValuationStep]],
-        prefetched_role_textures: Optional[Mapping[str, RoleTexture]] = None,
+        steps: List[ValuationStep],
     ) -> ValueComponents:
         cfg = self.config
         players = self._players(incoming)
         if len(players) <= 1:
             return ValueComponents.zero()
 
-        role_textures: Dict[str, RoleTexture] = dict(prefetched_role_textures or {})
-        missing = [p for _, p in players if p.player_id not in role_textures]
-        if missing:
-            role_textures.update(build_role_textures(missing, fit_engine=FitEngine()))
-
-        items_sorted = sorted(
-            [(tv, p) for tv, p in players if _team_total_grade(tv) >= cfg.diminishing_min_bucket_grade],
-            key=lambda x: _team_total_grade(x[0]),
-            reverse=True,
-        )
-        if len(items_sorted) <= 1:
-            return ValueComponents.zero()
-
-        factors = list(cfg.diminishing_factors)
-        if len(items_sorted) > len(factors):
-            factors.extend([factors[-1]] * (len(items_sorted) - len(factors)))
-
-        pairwise_overlap: dict[str, dict[str, float]] = {}
-        for _, p in items_sorted:
-            pairwise_overlap[p.player_id] = {}
-        for i, (_, p1) in enumerate(items_sorted):
-            for j in range(i + 1, len(items_sorted)):
-                _, p2 = items_sorted[j]
-                ov = self._texture_overlap(p1.player_id, p2.player_id, role_textures)
-                pairwise_overlap[p1.player_id][p2.player_id] = ov
-                pairwise_overlap[p2.player_id][p1.player_id] = ov
+        # bucket incoming players by a single archetype tag
+        buckets: Dict[str, List[Tuple[TeamValuation, PlayerSnapshot]]] = {}
+        for tv, p in players:
+            if _team_total_grade(tv) < cfg.diminishing_min_bucket_grade:
+                continue
+            tag = _primary_archetype_tag(p)
+            buckets.setdefault(tag, []).append((tv, p))
 
         penalty = ValueComponents.zero()
-        details: list[dict[str, Any]] = []
-        for i, (tv, p) in enumerate(items_sorted):
-            if i == 0:
+        per_bucket: Dict[str, Any] = {}
+
+        for tag, items in buckets.items():
+            if len(items) <= 1:
                 continue
-            f = _clamp(factors[i], 0.0, 1.0)
-            if f >= 0.999:
-                continue
-            prev_ids = [pp.player_id for _, pp in items_sorted[:i]]
-            overlap = max((pairwise_overlap[p.player_id].get(pid, 0.0) for pid in prev_ids), default=0.0)
-            overlap = _clamp(overlap * cfg.texture_overlap_weight, 0.0, 1.0)
-            w = (1.0 - f) * overlap
-            if w <= cfg.eps:
-                continue
-            pen = _vc(
-                now=tv.team_value.now * w * cfg.diminishing_now_weight,
-                future=tv.team_value.future * w * cfg.diminishing_future_weight,
-            )
-            penalty = penalty - pen
-            details.append(
-                {
-                    "player_id": p.player_id,
-                    "rank": i + 1,
-                    "factor": f,
-                    "texture_overlap": overlap,
-                    "weighted_waste_ratio": w,
-                    "team_value_total": tv.team_value.total,
+            # most valuable first
+            items_sorted = sorted(items, key=lambda x: _team_total_grade(x[0]), reverse=True)
+
+            # factors: 1.0 for first, then diminishing
+            factors = list(cfg.diminishing_factors)
+            if len(items_sorted) > len(factors):
+                factors.extend([factors[-1]] * (len(items_sorted) - len(factors)))
+
+            bucket_pen = ValueComponents.zero()
+            details: List[Dict[str, Any]] = []
+            for i, (tv, p) in enumerate(items_sorted):
+                f = _clamp(factors[i], 0.0, 1.0)
+                if f >= 0.999:
+                    continue
+                # we already counted full tv.team_value; subtract wasted portion
+                w = 1.0 - f
+                bucket_pen = bucket_pen + _vc(
+                    now=tv.team_value.now * w * cfg.diminishing_now_weight,
+                    future=tv.team_value.future * w * cfg.diminishing_future_weight,
+                )
+                details.append(
+                    {
+                        "player_id": p.player_id,
+                        "asset_key": tv.asset_key,
+                        "rank": i + 1,
+                        "factor": f,
+                        "waste_ratio": w,
+                        "team_value_total": tv.team_value.total,
+                    }
+                )
+
+            if bucket_pen.total > cfg.eps:
+                penalty = penalty - bucket_pen  # negative adjustment
+                per_bucket[tag] = {
+                    "penalty": {"now": bucket_pen.now, "future": bucket_pen.future, "total": bucket_pen.total},
+                    "players": details,
                 }
-            )
 
         if abs(penalty.total) <= cfg.eps:
             return ValueComponents.zero()
 
-        if steps is not None:
-            steps.append(
-                ValuationStep(
-                    stage=ValuationStage.PACKAGE,
-                    mode=StepMode.ADD,
-                    code="DIMINISHING_RETURNS",
-                    label="중복/체감 감소(RoleTexture matrix/overlap)",
-                    delta=penalty,
-                    meta={"details": details, "pairwise_overlap": pairwise_overlap},
-                )
+        steps.append(
+            ValuationStep(
+                stage=ValuationStage.PACKAGE,
+                mode=StepMode.ADD,
+                code="DIMINISHING_RETURNS",
+                label="중복/체감 감소(비슷한 역할/포지션 다수 인바운드)",
+                delta=penalty,
+                meta={"buckets": per_bucket},
             )
+        )
         return penalty
-
-    def _texture_overlap(
-        self,
-        left_player_id: str,
-        right_player_id: str,
-        role_textures: Mapping[str, RoleTexture],
-    ) -> float:
-        left = role_textures.get(left_player_id)
-        right = role_textures.get(right_player_id)
-        if left is None or right is None:
-            return 0.0
-
-        def vec(rt: RoleTexture) -> tuple[float, float, float, float, float]:
-            return (
-                _clamp(rt.creation_proxy, 0.0, 1.0),
-                _clamp(rt.spacing_proxy, 0.0, 1.0),
-                _clamp(rt.rim_pressure_proxy, 0.0, 1.0),
-                _clamp(rt.defense_proxy, 0.0, 1.0),
-                _clamp(rt.connector_index, 0.0, 1.0),
-            )
-
-        left_vec = vec(left)
-        right_vec = vec(right)
-        sim = 1.0 - (sum(abs(a - b) for a, b in zip(left_vec, right_vec)) / float(len(left_vec)))
-        return _clamp(sim, 0.0, 1.0)
 
     # ------------------------------------------------------------------
     # 7) Soft roster slot / rotation waste
@@ -651,9 +560,7 @@ class PackageEffects:
         incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
         outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
         base_out_total: float,
-        ctx: DecisionContext,
         steps: List[ValuationStep],
-        prefetched_role_textures: Optional[Mapping[str, RoleTexture]] = None,
     ) -> ValueComponents:
         cfg = self.config
         in_players = self._players(incoming)
@@ -670,27 +577,14 @@ class PackageEffects:
             return ValueComponents.zero()
 
         wasted = ValueComponents.zero()
-        role_textures: Dict[str, RoleTexture] = dict(prefetched_role_textures or {})
-        missing = [p for _, p in in_players if p.player_id not in role_textures]
-        if missing:
-            role_textures.update(build_role_textures(missing, fit_engine=FitEngine()))
-        rot = self._rotation_context_weights(ctx)
         detail: List[Dict[str, Any]] = []
         for tv, p in targets:
-            context_relief = self._rotation_context_relief(p, role_textures, rot)
-            mult = _clamp(
-                1.0 - cfg.rotation_context_weight * context_relief,
-                cfg.rotation_min_waste_multiplier,
-                1.0,
-            )
-            wasted = wasted + tv.team_value.scale(cfg.roster_excess_waste_rate * mult)
+            wasted = wasted + tv.team_value.scale(cfg.roster_excess_waste_rate)
             detail.append(
                 {
                     "player_id": p.player_id,
                     "asset_key": tv.asset_key,
                     "team_value_total": tv.team_value.total,
-                    "rotation_context_relief": context_relief,
-                    "waste_multiplier": mult,
                 }
             )
 
@@ -716,85 +610,10 @@ class PackageEffects:
                     "excess_incoming_players": excess,
                     "waive_candidates": detail,
                     "waste_rate": cfg.roster_excess_waste_rate,
-                    "rotation_context": rot,
                 },
             )
         )
         return pen
-
-    def _rotation_context_weights(self, ctx: DecisionContext) -> Dict[str, float]:
-        need_map = dict(getattr(ctx, "need_map", {}) or {})
-        d = getattr(ctx, "debug", {}) if isinstance(getattr(ctx, "debug", None), dict) else {}
-
-        rc = d.get("rotation_context") if isinstance(d.get("rotation_context"), Mapping) else {}
-        tactic = d.get("tactics") if isinstance(d.get("tactics"), Mapping) else {}
-
-        primary_handler_need = _clamp(
-            _safe_float(rc.get("primary_handler_need"), _safe_float(tactic.get("primary_handler_need"), _safe_float(need_map.get(OFFENSE_UPGRADE), 0.0))),
-            0.0,
-            1.0,
-        )
-        big_wing_pressure = _clamp(
-            _safe_float(
-                rc.get("big_wing_balance_pressure"),
-                _safe_float(tactic.get("big_wing_balance_pressure"), max(_safe_float(need_map.get(WING_DEPTH), 0.0), _safe_float(need_map.get(BIG_DEPTH), 0.0))),
-            ),
-            0.0,
-            1.0,
-        )
-
-        return {
-            "primary_handler_need": float(primary_handler_need),
-            "big_wing_balance_pressure": float(big_wing_pressure),
-        }
-
-    def _rotation_context_relief(
-        self,
-        player: PlayerSnapshot,
-        role_textures: Mapping[str, RoleTexture],
-        rotation_context: Mapping[str, float],
-    ) -> float:
-        handler_need = _clamp(_safe_float(rotation_context.get("primary_handler_need"), 0.0), 0.0, 1.0)
-        balance_pressure = _clamp(_safe_float(rotation_context.get("big_wing_balance_pressure"), 0.0), 0.0, 1.0)
-
-        rt = role_textures.get(player.player_id)
-        handler_signal = _clamp(float(getattr(rt, "creation_proxy", 0.0) if rt is not None else 0.0), 0.0, 1.0)
-
-        buckets = classify_depth_buckets(player)
-        wing_big_signal = 0.0
-        if "WING" in buckets:
-            wing_big_signal += 0.5
-        if "BIG" in buckets:
-            wing_big_signal += 0.5
-        wing_big_signal = _clamp(wing_big_signal, 0.0, 1.0)
-
-        relief = (0.6 * handler_need * handler_signal) + (0.4 * balance_pressure * wing_big_signal)
-        return _clamp(relief, 0.0, 1.0)
-
-    def _texture_axis_supply(
-        self,
-        items: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        prefetched_role_textures: Optional[Mapping[str, RoleTexture]] = None,
-    ) -> Dict[str, float]:
-        players = self._players(items)
-        if not players:
-            return {"creation": 0.0, "rim_pressure": 0.0, "defense": 0.0, "spacing": 0.0}
-
-        role_textures: Dict[str, RoleTexture] = dict(prefetched_role_textures or {})
-        missing = [p for _, p in players if p.player_id not in role_textures]
-        if missing:
-            role_textures.update(build_role_textures(missing, fit_engine=FitEngine()))
-        out = {"creation": 0.0, "rim_pressure": 0.0, "defense": 0.0, "spacing": 0.0}
-        for tv, p in players:
-            grade = max(_market_now_grade(tv), 0.0)
-            rt = role_textures.get(p.player_id)
-            if rt is None:
-                continue
-            out["creation"] += grade * _clamp(rt.creation_proxy, 0.0, 1.0)
-            out["rim_pressure"] += grade * _clamp(rt.rim_pressure_proxy, 0.0, 1.0)
-            out["defense"] += grade * _clamp(rt.defense_proxy, 0.0, 1.0)
-            out["spacing"] += grade * _clamp(rt.spacing_proxy, 0.0, 1.0)
-        return out
 
     # ------------------------------------------------------------------
     # Depth needs (structural, need_map-driven)
@@ -805,7 +624,6 @@ class PackageEffects:
         outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
         ctx: DecisionContext,
         steps: List[ValuationStep],
-        prefetched_role_textures: Optional[Mapping[str, RoleTexture]] = None,
     ) -> ValueComponents:
         cfg = self.config
         need_map = dict(ctx.need_map or {})
@@ -850,31 +668,10 @@ class PackageEffects:
         delta_big = in_s["BIG"] - out_s["BIG"]
         delta_bench = in_s["BENCH"] - out_s["BENCH"]
 
-        bucket_bonus_total = (
+        bonus_total = (
             cfg.depth_need_scale
             * (w_guard * delta_guard + w_wing * delta_wing + w_big * delta_big + w_bench * delta_bench)
         )
-
-        # v2 parallel: RoleTexture axis deficits/surpluses in parallel with G/W/B buckets
-        in_tex = self._texture_axis_supply(incoming, prefetched_role_textures=prefetched_role_textures)
-        out_tex = self._texture_axis_supply(outgoing, prefetched_role_textures=prefetched_role_textures)
-        tex_delta = {
-            "creation": in_tex["creation"] - out_tex["creation"],
-            "rim_pressure": in_tex["rim_pressure"] - out_tex["rim_pressure"],
-            "defense": in_tex["defense"] - out_tex["defense"],
-            "spacing": in_tex["spacing"] - out_tex["spacing"],
-        }
-        texture_need_weights = {
-            "creation": _clamp(w_guard * cfg.depth_texture_creation_need_scale, 0.0, 1.0),
-            "rim_pressure": _clamp(w_big * cfg.depth_texture_rim_need_scale, 0.0, 1.0),
-            "defense": _clamp(max(w_wing, w_big) * cfg.depth_texture_defense_need_scale, 0.0, 1.0),
-            "spacing": _clamp(max(w_guard, w_wing) * cfg.depth_texture_spacing_need_scale, 0.0, 1.0),
-        }
-        texture_bonus_total = cfg.depth_need_scale * cfg.depth_texture_parallel_weight * sum(
-            texture_need_weights[k] * tex_delta[k] for k in ("creation", "rim_pressure", "defense", "spacing")
-        )
-
-        bonus_total = bucket_bonus_total + texture_bonus_total
 
         if abs(bonus_total) <= cfg.eps:
             return ValueComponents.zero()
@@ -900,14 +697,8 @@ class PackageEffects:
                         "big": delta_big,
                         "bench": delta_bench,
                     },
-                    "delta_texture": tex_delta,
-                    "texture_need_weights": texture_need_weights,
-                    "bucket_bonus_total": bucket_bonus_total,
-                    "texture_bonus_total": texture_bonus_total,
                     "incoming_supply": in_s,
                     "outgoing_supply": out_s,
-                    "incoming_texture_supply": in_tex,
-                    "outgoing_texture_supply": out_tex,
                 },
             )
         )
@@ -922,7 +713,6 @@ class PackageEffects:
         outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
         base_out_total: float,
         steps: List[ValuationStep],
-        prefetched_role_textures: Optional[Mapping[str, RoleTexture]] = None,
     ) -> ValueComponents:
         cfg = self.config
 
@@ -953,20 +743,6 @@ class PackageEffects:
                 penalties[b] = p
                 pen_total += p
 
-        in_tex = self._texture_axis_supply(incoming, prefetched_role_textures=prefetched_role_textures)
-        out_tex = self._texture_axis_supply(outgoing, prefetched_role_textures=prefetched_role_textures)
-        tex_delta = {
-            "creation": in_tex["creation"] - out_tex["creation"],
-            "rim_pressure": in_tex["rim_pressure"] - out_tex["rim_pressure"],
-            "defense": in_tex["defense"] - out_tex["defense"],
-            "spacing": in_tex["spacing"] - out_tex["spacing"],
-        }
-        texture_penalties: Dict[str, float] = {}
-        for axis, dv in tex_delta.items():
-            if dv < -cfg.eps:
-                texture_penalties[axis] = (abs(dv) ** cfg.hole_penalty_exponent) * cfg.hole_penalty_scale * cfg.hole_texture_parallel_weight
-        pen_total += float(sum(texture_penalties.values()))
-
         cap = cfg.hole_penalty_cap_ratio * max(base_out_total, cfg.eps)
         pen_total = _clamp(pen_total, 0.0, cap)
         if pen_total <= cfg.eps:
@@ -980,15 +756,7 @@ class PackageEffects:
                 code="OUTGOING_HOLE_PENALTY",
                 label="아웃바운드 구멍(포지션/롤 단절) 페널티",
                 delta=delta,
-                meta={
-                    "penalties": penalties,
-                    "texture_penalties": texture_penalties,
-                    "incoming_supply": in_s,
-                    "outgoing_supply": out_s,
-                    "incoming_texture_supply": in_tex,
-                    "outgoing_texture_supply": out_tex,
-                    "delta_texture": tex_delta,
-                },
+                meta={"penalties": penalties, "incoming_supply": in_s, "outgoing_supply": out_s},
             )
         )
         return delta
@@ -1003,8 +771,7 @@ class PackageEffects:
         ctx: DecisionContext,
         env: ValuationEnv,
         steps: List[ValuationStep],
-        prefetched_contract_textures: Optional[Mapping[str, ContractTexture]] = None,
-    ) -> tuple[ValueComponents, Dict[str, Any]]:
+    ) -> ValueComponents:
         cfg = self.config
 
         need_map = dict(ctx.need_map or {})
@@ -1090,97 +857,22 @@ class PackageEffects:
             )
 
         # --------------------------------------------------------------
-        # (B) CAP_FLEX FUTURE component
-        #   - Preferred: before/after CapLedger delta (v2)
-        #   - Fallback: legacy commitment delta (contract texture weighted)
+        # (B) Commitment delta (FUTURE): long-term flexibility preference.
         # --------------------------------------------------------------
-        contract_textures = self._build_player_contract_textures(
-            incoming,
-            outgoing,
-            current_season_year=int(cur_sy),
-            env=env,
-            prefetched_contract_textures=prefetched_contract_textures,
-        )
-        posture = str(getattr(ctx, "posture", "STAND_PAT"))
-
-        in_players = [snap for tv, snap in incoming if tv.kind == AssetKind.PLAYER and isinstance(snap, PlayerSnapshot)]
-        out_players = [snap for tv, snap in outgoing if tv.kind == AssetKind.PLAYER and isinstance(snap, PlayerSnapshot)]
-
-        in_team_textures = [contract_textures[p.player_id] for p in in_players if p.player_id in contract_textures]
-        out_team_textures = [contract_textures[p.player_id] for p in out_players if p.player_id in contract_textures]
-
-        debug = getattr(ctx, "debug", {}) if isinstance(getattr(ctx, "debug", None), dict) else {}
-        payroll_before = _safe_float(debug.get("payroll"), 0.0)
-        has_payroll = float(payroll_before) > cfg.eps
-        team_norm = str(getattr(ctx, "team_id", "")).upper() or "TEAM"
-
-        ledger_raw = 0.0
-        ledger_ok = False
-        ledger_meta: Dict[str, Any] = {
-            "enabled": bool(cfg.cap_flex_use_ledger_delta),
-            "team_id": team_norm,
-            "has_payroll": bool(has_payroll),
-        }
-        if cfg.cap_flex_use_ledger_delta and has_payroll:
-            payroll_after = float(payroll_before + net_added)
-            before_ledgers = build_cap_ledgers(
-                team_contract_textures={team_norm: tuple(out_team_textures)},
-                posture_by_team={team_norm: posture},
-                current_season_year=int(cur_sy),
-                cap_model=env.cap_model,
-                team_payroll_map={team_norm: float(payroll_before)},
-            )
-            after_ledgers = build_cap_ledgers(
-                team_contract_textures={team_norm: tuple(in_team_textures)},
-                posture_by_team={team_norm: posture},
-                current_season_year=int(cur_sy),
-                cap_model=env.cap_model,
-                team_payroll_map={team_norm: float(payroll_after)},
-            )
-            before = before_ledgers.get(team_norm)
-            after = after_ledgers.get(team_norm)
-            if before is not None and after is not None:
-                ledger_ok = True
-                ledger_raw = score_cap_flex_delta(before, after, posture=posture)
-                ledger_meta.update(
-                    {
-                        "score_delta": float(ledger_raw),
-                        "score_scale": float(cfg.cap_ledger_score_scale),
-                        "payroll_before": float(payroll_before),
-                        "payroll_after": float(payroll_after),
-                        "before_flex": float(before.posture_adjusted_flex),
-                        "after_flex": float(after.posture_adjusted_flex),
-                    }
-                )
-
-        def sum_commit_texture(items: Sequence[Tuple[TeamValuation, AssetSnapshot]]) -> float:
+        def sum_commit(items: Sequence[Tuple[TeamValuation, AssetSnapshot]]) -> float:
             acc = 0.0
             for tv, snap in items:
                 if tv.kind != AssetKind.PLAYER or not isinstance(snap, PlayerSnapshot):
                     continue
-                tex = contract_textures.get(snap.player_id)
-                if tex is None:
-                    continue
-                multiplier = 1.0
-                multiplier += cfg.contract_texture_control_weight * max(0.0, -float(tex.control_direction))
-                multiplier += cfg.contract_texture_trigger_weight * _clamp(float(tex.trigger_risk), 0.0, 1.0)
-                multiplier += cfg.contract_texture_toxic_weight * _clamp(float(tex.toxic_risk), 0.0, 1.0)
-                acc += max(0.0, float(tex.guaranteed_commitment)) * max(0.0, multiplier)
+                acc += _commitment_metric(snap, current_season_year=int(cur_sy))
             return float(acc)
 
-        in_c = sum_commit_texture(incoming)
-        out_c = sum_commit_texture(outgoing)
-        source = "contract_texture"
+        in_c = sum_commit(incoming)
+        out_c = sum_commit(outgoing)
         delta_commit = in_c - out_c
 
-        raw_fut = 0.0
-        if ledger_ok:
-            source = "cap_ledger"
-            raw_fut = w_need * ledger_raw * cfg.cap_ledger_score_scale
-            raw_fut = _clamp(raw_fut, -cfg.cap_ledger_abs_cap, cfg.cap_ledger_abs_cap)
-        else:
-            source = "cap_ledger"
-            raw_fut = 0.0
+        raw_fut = -w_need * delta_commit * cfg.cap_flex_scale
+        raw_fut = _clamp(raw_fut, -cfg.cap_commit_abs_cap, cfg.cap_commit_abs_cap)
 
         delta_fut = ValueComponents.zero()
         if abs(raw_fut) > cfg.eps:
@@ -1200,84 +892,10 @@ class PackageEffects:
                         "incoming_commit": in_c,
                         "outgoing_commit": out_c,
                         "abs_cap": cfg.cap_commit_abs_cap,
-                        "source": source,
-                        "ledger": ledger_meta,
                     },
                 )
             )
-        component_delta = delta_now + delta_fut
-        if abs(component_delta.total) > cfg.eps:
-            steps.append(
-                ValuationStep(
-                    stage=ValuationStage.PACKAGE,
-                    mode=StepMode.ADD,
-                    code="CONTRACT_COMPONENT",
-                    label="계약 컴포넌트(계약 질감/CAP_FLEX) 보정",
-                    delta=component_delta,
-                    meta={"source": source},
-                )
-            )
-
-        dual_meta = {
-            "texture": {
-                "incoming_commit": float(in_c),
-                "outgoing_commit": float(out_c),
-                "delta_commit": float(delta_commit),
-            },
-            "ledger": ledger_meta,
-            "selected_source": source,
-        }
-        return delta_now + delta_fut, dual_meta
-
-    def _build_player_contract_textures(
-        self,
-        incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        *,
-        current_season_year: int,
-        env: ValuationEnv,
-        prefetched_contract_textures: Optional[Mapping[str, ContractTexture]] = None,
-    ) -> Dict[str, ContractTexture]:
-        players: list[PlayerSnapshot] = []
-        for tv, snap in list(incoming) + list(outgoing):
-            if tv.kind == AssetKind.PLAYER and isinstance(snap, PlayerSnapshot):
-                players.append(snap)
-
-        out: Dict[str, ContractTexture] = {}
-        prefetched = dict(prefetched_contract_textures or {})
-        for p in players:
-            tex = prefetched.get(p.player_id)
-            if tex is not None:
-                out[p.player_id] = tex
-
-        contracts: list[ContractSnapshot] = []
-        seen_contract_ids: set[str] = set()
-        for p in players:
-            if p.player_id in out:
-                continue
-            c = p.contract
-            if c is None or c.contract_id in seen_contract_ids:
-                continue
-            seen_contract_ids.add(c.contract_id)
-            contracts.append(c)
-        if not contracts:
-            return out
-
-        salary_cap = float(env.cap_model.salary_cap_for_season(int(current_season_year)))
-        textures = build_contract_textures(
-            contracts,
-            current_season_year=int(current_season_year),
-            salary_cap=salary_cap,
-        )
-        for p in players:
-            if p.player_id in out:
-                continue
-            if p.contract is None:
-                continue
-            tex = textures.get(p.contract.contract_id)
-            if tex is not None:
-                out[p.player_id] = tex
-        return out
+        return delta_now + delta_fut
 
     # ------------------------------------------------------------------
     # OFF/DEF upgrade (need_map-driven)
@@ -1419,7 +1037,6 @@ def apply_package_effects(
     ctx: DecisionContext,
     env: ValuationEnv,
     config: Optional[PackageEffectsConfig] = None,
-    valuation_context_v2: Any | None = None,
 ) -> Tuple[ValueComponents, Tuple[ValuationStep, ...], Dict[str, Any]]:
     """Stateless wrapper."""
     eng = PackageEffects(config=config or PackageEffectsConfig())
@@ -1429,5 +1046,4 @@ def apply_package_effects(
         outgoing=outgoing,
         ctx=ctx,
         env=env,
-        valuation_context_v2=valuation_context_v2,
     )

@@ -1,12 +1,8 @@
 import unittest
 from types import SimpleNamespace
 
-from trades.generation.dealgen.skeleton_registry import SkeletonRegistry, SkeletonSpec, build_default_registry
+from trades.generation.dealgen.skeleton_registry import build_default_registry
 from trades.generation.dealgen.types import DealGeneratorConfig
-
-
-def _noop(_ctx):
-    return []
 
 
 class SkeletonRegistryRoutingTests(unittest.TestCase):
@@ -32,7 +28,7 @@ class SkeletonRegistryRoutingTests(unittest.TestCase):
         self.assertIn("pick_engineering.first_split", ids)
         self.assertGreaterEqual(len(specs), 20)
 
-    def test_tier_route_prioritizes_config_ids_without_excluding_others(self):
+    def test_tier_route_filters_by_config_allowlist(self):
         reg = build_default_registry()
         cfg = DealGeneratorConfig(
             skeleton_route_pick_only=(
@@ -44,11 +40,7 @@ class SkeletonRegistryRoutingTests(unittest.TestCase):
         specs = reg.get_specs_for_mode_and_tier("BUY", "PICK_ONLY", cfg)
         ids = [s.skeleton_id for s in specs]
 
-        self.assertIn("compat.picks_only", ids)
-        self.assertIn("pick_engineering.first_split", ids)
-        self.assertIn("salary_cleanup.pure_absorb_for_asset", ids)
-        self.assertNotIn("player_swap.role_swap_small_delta", ids)
-        self.assertTrue(all(not sid.startswith("player_swap.") for sid in ids))
+        self.assertEqual(ids, ["compat.picks_only", "pick_engineering.first_split"])
 
     def test_tier_filter_respects_target_tiers(self):
         reg = build_default_registry()
@@ -64,41 +56,16 @@ class SkeletonRegistryRoutingTests(unittest.TestCase):
         self.assertIn("player_swap.one_for_two_depth", starter_ids)
 
     def test_star_uses_high_starter_route_table(self):
-        reg = SkeletonRegistry(
-            specs=(
-                SkeletonSpec("a", "x", "x", ("BUY",), ("STAR",), 10, _noop),
-                SkeletonSpec("b", "x", "x", ("BUY",), ("STAR",), 10, _noop),
-            )
-        )
+        reg = build_default_registry()
         cfg = DealGeneratorConfig(
-            skeleton_route_starter=("a", "b"),
-            skeleton_route_high_starter=("b", "a"),
+            skeleton_route_high_starter=(
+                "player_swap.star_lateral_plus_delta",
+                "timeline.bluechip_plus_first_plus_swap",
+            )
         )
         specs = reg.get_specs_for_mode_and_tier("BUY", "STAR", cfg)
         ids = [s.skeleton_id for s in specs]
-        self.assertEqual(ids[:2], ["b", "a"])
-
-    def test_sell_mode_uses_sell_route_table(self):
-        reg = SkeletonRegistry(
-            specs=(
-                SkeletonSpec("buy.a", "x", "x", ("BUY",), ("ROLE",), 10, _noop),
-                SkeletonSpec("buy.b", "x", "x", ("BUY",), ("ROLE",), 10, _noop),
-                SkeletonSpec("sell.a", "x", "x", ("SELL",), ("ROLE",), 10, _noop),
-                SkeletonSpec("sell.b", "x", "x", ("SELL",), ("ROLE",), 10, _noop),
-            )
-        )
-        cfg = DealGeneratorConfig(
-            skeleton_route_role=("buy.a", "buy.b"),
-            skeleton_route_role_sell=("sell.b", "sell.a"),
-        )
-
-        sell_specs = reg.get_specs_for_mode_and_tier("SELL", "ROLE", cfg)
-        sell_ids = [s.skeleton_id for s in sell_specs]
-        self.assertEqual(sell_ids[:2], ["sell.b", "sell.a"])
-
-        buy_specs = reg.get_specs_for_mode_and_tier("BUY", "ROLE", cfg)
-        buy_ids = [s.skeleton_id for s in buy_specs]
-        self.assertEqual(buy_ids[:2], ["buy.a", "buy.b"])
+        self.assertEqual(ids, ["player_swap.star_lateral_plus_delta", "timeline.bluechip_plus_first_plus_swap"])
 
     def test_gate_fn_filters_spec_when_context_fails(self):
         reg = build_default_registry()

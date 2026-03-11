@@ -519,20 +519,10 @@ class CounterOfferBuilder:
                     validations_used += int(res.validations_used)
                     evaluations_used += int(res.evaluations_used)
 
-                    eco_meta = {}
-                    try:
-                        eco_meta = dict((res.proposal.deal.meta or {}).get("fit_swap_ecosystem") or {})
-                    except Exception:
-                        eco_meta = {}
-
                     _add_candidate(
                         res.proposal,
                         strategy="FIT_SWAP",
-                        meta={
-                            "candidates_tried": int(getattr(res, "candidates_tried", 0) or 0),
-                            "swapped": bool(getattr(res, "swapped", False)),
-                            "fit_swap_ecosystem": eco_meta,
-                        },
+                        meta={"candidates_tried": int(getattr(res, "candidates_tried", 0) or 0), "swapped": bool(getattr(res, "swapped", False))},
                     )
 
                     # If still not accepted by seller, we can try sweeteners on top of fit-swap.
@@ -698,7 +688,6 @@ class CounterOfferBuilder:
             provider=getattr(tick_ctx, "provider", None),
             relationship=relationship,
             strategy=best.strategy,
-            ecosystem_reasons=(best.meta or {}).get("fit_swap_ecosystem"),
         )
 
         # Explainability reasons (keep small)
@@ -715,27 +704,6 @@ class CounterOfferBuilder:
         )
         if _has_reason(base_prop.seller_decision, "FIT_FAILS"):
             reasons.append(DecisionReason(code="FIT_FAILS", message="Fit concerns triggered a counter"))
-
-        eco_meta = dict((best.meta or {}).get("fit_swap_ecosystem") or {})
-        eco_plus = tuple(str(x) for x in (eco_meta.get("plus") or tuple()) if str(x))
-        eco_minus = tuple(str(x) for x in (eco_meta.get("minus") or tuple()) if str(x))
-        if eco_plus or eco_minus:
-            reasons.append(
-                DecisionReason(
-                    code="FIT_ECOSYSTEM",
-                    message="Ecosystem fit signals computed for this counter",
-                    meta={
-                        "score": float(eco_meta.get("score") or 0.0),
-                        "delta": float(eco_meta.get("delta") or 0.0),
-                        "plus": list(eco_plus),
-                        "minus": list(eco_minus),
-                    },
-                )
-            )
-            for rc in eco_plus[:3]:
-                reasons.append(DecisionReason(code=rc, message="Ecosystem positive signal"))
-            for rc in eco_minus[:3]:
-                reasons.append(DecisionReason(code=rc, message="Ecosystem risk signal"))
 
         # Target surplus summary
         seller_margin = _margin(best.prop.seller_eval, best.prop.seller_decision)

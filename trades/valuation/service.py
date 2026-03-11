@@ -28,7 +28,7 @@ import random
 import game_time
 
 # --- Project-level trade types / errors ---
-from ..models import Deal, PickAsset, PlayerAsset, SwapAsset
+from ..models import Deal
 from ..errors import TradeError
 from ..validator import validate_deal
 
@@ -37,16 +37,13 @@ from .deal_evaluator import evaluate_deal_for_team as _evaluate_deal_for_team
 from .env import ValuationEnv
 from .market_pricing import MarketPricingConfig
 from .team_utility import TeamUtilityConfig
-from .package_effects import PackageEffectsConfig
 from .decision_policy import decide_deal as _decide_deal
-from .decision_policy import DecisionPolicyConfig
 from .types import DealDecision, TeamDealEvaluation, TeamSideValuation
-from .context_v2 import build_valuation_context_v2
-from .types import PickExpectation
 
 # --- Valuation data provider (Repo IO layer) ---
 from .data_context import (
     RepoValuationDataContext,
+    PickExpectationMap,
     build_repo_valuation_data_context,
 )
 
@@ -229,97 +226,6 @@ def _strip_breakdown(side: TeamSideValuation, evaluation: TeamDealEvaluation) ->
     return side2, eval2
 
 
-def _build_context_v2_asset_ids(
-    deal: Deal,
-    *,
-    standings_order_worst_to_best: Optional[Sequence[str]],
-) -> Dict[str, Sequence[str]]:
-    player_ids: list[str] = []
-    pick_ids: list[str] = []
-    swap_ids: list[str] = []
-
-    for assets in (deal.legs or {}).values():
-        if not isinstance(assets, list):
-            continue
-        for a in assets:
-            if isinstance(a, PlayerAsset):
-                pid = str(a.player_id)
-                if pid and pid not in player_ids:
-                    player_ids.append(pid)
-            elif isinstance(a, PickAsset):
-                pkid = str(a.pick_id)
-                if pkid and pkid not in pick_ids:
-                    pick_ids.append(pkid)
-            elif isinstance(a, SwapAsset):
-                sid = str(a.swap_id)
-                if sid and sid not in swap_ids:
-                    swap_ids.append(sid)
-
-    out: Dict[str, Sequence[str]] = {
-        "players": tuple(player_ids),
-        "picks": tuple(pick_ids),
-        "swaps": tuple(swap_ids),
-    }
-    if standings_order_worst_to_best:
-        out["standings_order_worst_to_best"] = tuple(str(t) for t in standings_order_worst_to_best)
-    return out
-
-
-class _ContextV2ProviderAdapter:
-    """v2 context를 SSOT로 사용하는 provider adapter.
-
-    - snapshots(player/pick/swap/fixed)은 base provider를 위임 사용
-    - pick expectation은 context_v2.pick_distributions를 기준으로 synthesize
-    - market_pricing v2 입력을 위해 get_pick_distribution()를 제공
-    """
-
-    def __init__(self, *, base_provider: RepoValuationDataContext, v2_ctx: Any):
-        self._base = base_provider
-        self._v2 = v2_ctx
-
-    def get_player_snapshot(self, player_id):
-        return self._base.get_player_snapshot(player_id)
-
-    def get_pick_snapshot(self, pick_id):
-        return self._base.get_pick_snapshot(pick_id)
-
-    def get_swap_snapshot(self, swap_id):
-        return self._base.get_swap_snapshot(swap_id)
-
-    def get_fixed_asset_snapshot(self, asset_id):
-        return self._base.get_fixed_asset_snapshot(asset_id)
-
-    def get_pick_distribution(self, pick_id):
-        return self._v2.pick_distributions.get(str(pick_id))
-
-    def get_pick_expectation(self, pick_id):
-        bundle = self.get_pick_distribution(pick_id)
-        if bundle is None:
-            return None
-        return PickExpectation(
-            pick_id=str(pick_id),
-            expected_pick_number=(float(bundle.compat_expected_pick_number) if bundle.compat_expected_pick_number is not None else None),
-            confidence=0.65,
-            meta={
-                "source": "context_v2.pick_distributions",
-                "ev_pick": float(bundle.ev_pick),
-                "variance": float(bundle.variance),
-            },
-        )
-
-    @property
-    def current_season_year(self):
-        return self._base.current_season_year
-
-    @property
-    def current_date_iso(self):
-        return self._base.current_date_iso
-
-    @property
-    def valuation_context_v2(self):
-        return self._v2
-
-
 # -----------------------------------------------------------------------------
 # Public API (service entrypoint)
 # -----------------------------------------------------------------------------
@@ -332,6 +238,7 @@ def evaluate_deal_for_team(
     db_path: Optional[str] = None,
     current_season_year: Optional[int] = None,
     standings_order_worst_to_best: Optional[Sequence[str]] = None,
+    pick_expectations: Optional[PickExpectationMap] = None,
     include_breakdown: bool = True,
     include_package_effects: bool = True,
     allow_counter: bool = True,
@@ -360,6 +267,8 @@ def evaluate_deal_for_team(
     standings_order_worst_to_best:
         Optional league-wide order used for pick expectation heuristic.
         If not provided, we attempt to derive from team_situation snapshot records_index.
+    pick_expectations:
+        If provided, overrides standings-based expectation builder.
     include_breakdown:
         If False, strips verbose step logs from the returned evaluation (lighter payload).
     include_package_effects:
@@ -372,8 +281,6 @@ def evaluate_deal_for_team(
         Pass-through to validate_deal for committed-deal lock exceptions.
     validate:
         If True, runs validate_deal first. (Recommended for server usage.)
-    Note:
-        v2 컨텍스트는 항상 활성화된다. v1 플래그/스테이지/dual-read 경로는 제거되었다.
     """
     tid = normalize_team_id(team_id, strict=False)
 
@@ -497,7 +404,7 @@ def evaluate_deal_for_team(
         provider = getattr(tick_ctx, "provider", None)
         # Optional override path (debug/experiments): if caller provides expectations/order explicitly,
         # build a one-off provider using tick snapshots (still avoids new DB reads).
-        if provider is None or standings_order_worst_to_best is not None:
+        if provider is None or pick_expectations is not None or standings_order_worst_to_best is not None:
             order = standings_order_worst_to_best or getattr(tick_ctx, "standings_order_worst_to_best", None) or _build_standings_order_worst_to_best(ts_ctx)
             repo_obj = getattr(tick_ctx, "repo", None)
             assets_snap = getattr(ts_ctx, "assets_snapshot", None)
@@ -507,6 +414,7 @@ def evaluate_deal_for_team(
                 current_season_year=season_year,
                 current_date_iso=cd.isoformat(),
                 standings_order_worst_to_best=order,
+                pick_expectations=pick_expectations,
                 repo=repo_obj,
                 assets_snapshot=(assets_snap if isinstance(assets_snap, dict) else None),
                 contract_ledger=(ledger_snap if isinstance(ledger_snap, dict) else None),
@@ -518,6 +426,7 @@ def evaluate_deal_for_team(
             current_season_year=season_year,
             current_date_iso=cd.isoformat(),
             standings_order_worst_to_best=order,
+            pick_expectations=pick_expectations,
         )
 
     # 5) Pure valuation (market -> team utility -> package effects)
@@ -539,55 +448,17 @@ def evaluate_deal_for_team(
             
     market_cfg = MarketPricingConfig(salary_cap=salary_cap) if salary_cap is not None else MarketPricingConfig()
     team_cfg = TeamUtilityConfig(salary_cap=salary_cap) if salary_cap is not None else TeamUtilityConfig()
-    package_cfg: Optional[PackageEffectsConfig] = replace(PackageEffectsConfig(), dual_read_v2_components=False)
-
-    decision_context_by_team: Dict[str, DecisionContext] = {tid: ctx}
-    if tick_ctx is not None:
-        dc_all = getattr(tick_ctx, "decision_contexts", None)
-        if isinstance(dc_all, dict):
-            for team_key, team_ctx in dc_all.items():
-                if isinstance(team_ctx, DecisionContext):
-                    decision_context_by_team[str(team_key)] = team_ctx
-
-    asset_ids_by_kind = _build_context_v2_asset_ids(
-        deal,
-        standings_order_worst_to_best=(order if isinstance(order, Sequence) else None),
-    )
-    v2_ctx = build_valuation_context_v2(
-        provider=provider,
-        decision_context_by_team=decision_context_by_team,
-        current_season_year=int(season_year),
-        current_date_iso=cd.isoformat(),
-        market_pricing_config=market_cfg,
-        team_utility_config=team_cfg,
-        package_effects_config=package_cfg,
-        decision_policy_config=DecisionPolicyConfig(),
-        asset_ids_by_kind=asset_ids_by_kind,
-    )
-    active_provider = _ContextV2ProviderAdapter(base_provider=provider, v2_ctx=v2_ctx)
-
     side, evaluation = _evaluate_deal_for_team(
         deal=deal,
         team_id=tid,
         ctx=ctx,
-        provider=active_provider,
+        provider=provider,
         env=env,
         include_package_effects=include_package_effects,
         attach_leg_metadata=True,
         market_config=market_cfg,
         team_config=team_cfg,
-        package_config=package_cfg,
     )
-
-    new_meta = dict(evaluation.meta or {})
-    new_meta["context_v2"] = {
-        "enabled": True,
-        "diagnostics": {
-            "source_coverage": dict(v2_ctx.diagnostics.source_coverage),
-            "reason_flags": list(v2_ctx.diagnostics.reason_flags),
-        },
-    }
-    evaluation = replace(evaluation, meta=new_meta)
 
     # 6) Decision
     decision = _decide_deal(

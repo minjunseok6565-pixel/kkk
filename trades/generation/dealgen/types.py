@@ -80,9 +80,6 @@ class DealGeneratorConfig:
     max_seconds_per_side: int = 4
 
     # --- target tier routing (phase-4)
-    # NOTE:
-    # - route tuples are intended as priority hints (soft preference), not a strict allowlist.
-    # - legacy fields below are BUY-oriented defaults kept for backward compatibility.
     skeleton_route_role: Tuple[str, ...] = (
         "compat.picks_only",
         "compat.young_plus_pick",
@@ -157,102 +154,6 @@ class DealGeneratorConfig:
         "pick_engineering.swap_substitute_for_first",
         "salary_cleanup.pure_absorb_for_asset",
     )
-
-    # --- target tier routing (SELL mode defaults)
-    # SELL generation uses SELL compat archetypes as baseline, then cross-mode families.
-    skeleton_route_role_sell: Tuple[str, ...] = (
-        "compat.buyer_picks",
-        "compat.buyer_young_plus_pick",
-        "compat.buyer_p4p",
-        "player_swap.role_swap_small_delta",
-        "player_swap.fit_swap_2_for_2",
-        "player_swap.one_for_two_depth",
-        "player_swap.bench_bundle_for_role",
-        "player_swap.change_of_scenery_young",
-        "timeline.veteran_for_young",
-        "salary_cleanup.rental_expiring_plus_second",
-        "salary_cleanup.pure_absorb_for_asset",
-        "salary_cleanup.partial_dump_for_expiring",
-        "salary_cleanup.bad_money_swap",
-        "pick_engineering.first_split",
-        "pick_engineering.second_ladder_to_protected_first",
-        "pick_engineering.swap_purchase",
-        "pick_engineering.swap_substitute_for_first",
-    )
-    skeleton_route_starter_sell: Tuple[str, ...] = (
-        "compat.buyer_picks",
-        "compat.buyer_young_plus_pick",
-        "compat.buyer_p4p",
-        "compat.buyer_consolidate",
-        "player_swap.role_swap_small_delta",
-        "player_swap.fit_swap_2_for_2",
-        "player_swap.one_for_two_depth",
-        "player_swap.starter_for_two_rotation",
-        "player_swap.three_for_one_upgrade",
-        "player_swap.bench_bundle_for_role",
-        "player_swap.change_of_scenery_young",
-        "timeline.veteran_for_young",
-        "timeline.veteran_for_young_plus_protected_first",
-        "salary_cleanup.rental_expiring_plus_second",
-        "salary_cleanup.pure_absorb_for_asset",
-        "salary_cleanup.partial_dump_for_expiring",
-        "salary_cleanup.bad_money_swap",
-        "pick_engineering.first_split",
-        "pick_engineering.second_ladder_to_protected_first",
-        "pick_engineering.swap_purchase",
-        "pick_engineering.swap_substitute_for_first",
-    )
-    skeleton_route_high_starter_sell: Tuple[str, ...] = (
-        "compat.buyer_picks",
-        "compat.buyer_young_plus_pick",
-        "compat.buyer_p4p",
-        "compat.buyer_consolidate",
-        "player_swap.role_swap_small_delta",
-        "player_swap.fit_swap_2_for_2",
-        "player_swap.one_for_two_depth",
-        "player_swap.starter_for_two_rotation",
-        "player_swap.three_for_one_upgrade",
-        "player_swap.star_lateral_plus_delta",
-        "timeline.veteran_for_young",
-        "timeline.veteran_for_young_plus_protected_first",
-        "timeline.bluechip_plus_first_plus_swap",
-        "salary_cleanup.rental_expiring_plus_second",
-        "salary_cleanup.pure_absorb_for_asset",
-        "salary_cleanup.partial_dump_for_expiring",
-        "salary_cleanup.bad_money_swap",
-        "pick_engineering.first_split",
-        "pick_engineering.second_ladder_to_protected_first",
-        "pick_engineering.swap_purchase",
-        "pick_engineering.swap_substitute_for_first",
-    )
-    skeleton_route_pick_only_sell: Tuple[str, ...] = (
-        "compat.buyer_picks",
-        "pick_engineering.first_split",
-        "pick_engineering.second_ladder_to_protected_first",
-        "pick_engineering.swap_purchase",
-        "pick_engineering.swap_substitute_for_first",
-        "salary_cleanup.pure_absorb_for_asset",
-    )
-
-    # --- target tier policy knobs (SSOT)
-    # 상대 구간 컷 + 오프셋 + 안정화 + PICK_ONLY score gate 조정을 위한 정책 레버.
-    tier_strictness: float = 0.0
-    tier_strategy_weight: float = 0.20
-    tier_contract_weight: float = 0.15
-    tier_market_percentile_weight: float = 0.35
-    # percentile cut baselines (STAR/HIGH_STARTER/STARTER 하한)
-    tier_star_pct_cut: float = 0.90
-    tier_high_starter_pct_cut: float = 0.72
-    tier_starter_pct_cut: float = 0.48
-    # hysteresis 완충구간 폭
-    tier_hysteresis_band: float = 0.05
-
-    # PICK_ONLY entry policy (score + inventory gate)
-    tier_pick_only_keyword_weight: float = 0.45
-    tier_pick_only_top_tags_weight: float = 0.20
-    tier_pick_only_inventory_weight: float = 0.35
-    tier_pick_only_stepien_penalty: float = 0.20
-    tier_pick_only_threshold: float = 0.75
 
     # --- sweetener loop
     sweetener_enabled: bool = True
@@ -579,49 +480,6 @@ class TargetCandidate:
     salary_m: float
     remaining_years: float
     age: Optional[float]
-
-
-@dataclass(frozen=True, slots=True)
-class TierContext:
-    """Dynamic context payload for `classify_target_tier()`.
-
-    상대 구간 컷 + 오프셋 + 안정화(히스테리시스/동률해소)에 필요한 최소 컨텍스트.
-    Note: injury/availability signals are intentionally excluded in current phase.
-    """
-
-    # Team strategy (buyer-centric)
-    buyer_competitive_tier: str = ""
-    buyer_trade_posture: str = ""
-    buyer_time_horizon: str = ""
-    buyer_urgency: float = 0.0
-    buyer_deadline_pressure: float = 0.0
-
-    # Optional seller-side hint
-    seller_time_horizon: str = ""
-
-    # Relative market scale
-    market_percentile_league: float = 0.5
-
-    # Contract texture / risk proxies
-    contract_control_direction: float = 0.0
-    contract_trigger_risk: float = 0.0
-    contract_toxic_risk: float = 0.0
-    contract_matching_utility: float = 0.0
-
-    # Decision stabilization
-    prev_tier: str = ""
-    tie_break_seed: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class PickOnlyContext:
-    """Minimal context payload for PICK_ONLY entry scoring/gating."""
-
-    pick_supply_safe: int = 0
-    pick_supply_sensitive: int = 0
-    pick_supply_second: int = 0
-    stepien_sensitive_ratio: float = 0.0
-    has_pick_inventory: bool = False
 
 
 @dataclass(frozen=True, slots=True)

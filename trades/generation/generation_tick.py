@@ -71,6 +71,7 @@ from ..models import Deal
 from ..validator import validate_deal as _validate_deal
 from ..rules.tick_context import TradeRuleTickContext, build_trade_rule_tick_context
 from ..valuation.data_context import (
+    PickExpectationMap,
     RepoValuationDataContext,
     build_repo_valuation_data_context,
 )
@@ -131,6 +132,7 @@ def _build_provider(
     season_year: int,
     current_date: date,
     standings_order_worst_to_best: Optional[Sequence[str]],
+    pick_expectations: Optional[PickExpectationMap],
     repo: LeagueRepo,
     ts_ctx: TeamSituationContext,
 ) -> RepoValuationDataContext:
@@ -145,6 +147,7 @@ def _build_provider(
         "current_season_year": int(season_year),
         "current_date_iso": str(current_date.isoformat()),
         "standings_order_worst_to_best": list(standings_order_worst_to_best) if standings_order_worst_to_best else None,
+        "pick_expectations": dict(pick_expectations) if pick_expectations is not None else None,
     }
 
     sig = inspect.signature(build_repo_valuation_data_context)
@@ -261,6 +264,7 @@ def build_trade_generation_tick_context(
     db_path: Optional[str] = None,
     validate_integrity: bool = True,
     team_ids: Optional[Sequence[str]] = None,
+    pick_expectations: Optional[PickExpectationMap] = None,
     standings_order_worst_to_best: Optional[Sequence[str]] = None,
 ) -> TradeGenerationTickContext:
     """Build a tick-scoped generation context.
@@ -275,8 +279,8 @@ def build_trade_generation_tick_context(
         If True, validates repo integrity once during build.
     team_ids:
         Subset of teams to cache. Defaults to ALL_TEAM_IDS.
-    standings_order_worst_to_best:
-        Optional override for valuation provider standings order.
+    pick_expectations / standings_order_worst_to_best:
+        Optional overrides for valuation provider expectations.
     """
 
     import state
@@ -375,6 +379,7 @@ def build_trade_generation_tick_context(
             season_year=int(getattr(rule_tick_ctx, "season_year", 0) or 0),
             current_date=resolved_current_date,
             standings_order_worst_to_best=standings,
+            pick_expectations=pick_expectations,
             repo=repo,
             ts_ctx=team_situation_ctx,
         )

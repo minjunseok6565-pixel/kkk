@@ -14,17 +14,14 @@ Design goals
 2) This module MAY depend on LeagueRepo (sqlite) and performs reads/caching.
 3) No team_situation re-evaluation here; this module only provides raw data.
 
-Pick distribution
+Pick expectations
 -----------------
-market_pricing can use PickDistributionBundle via provider.get_pick_distribution().
-PickExpectation은 distribution EV를 통한 호환 뷰로만 제공된다.
+market_pricing can use PickExpectation (expected pick number) if available.
+This module provides simple helpers to build expectations from standings order.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
-
-from .draft_lottery_rules import get_draft_lottery_rules
-from .pick_distribution import build_pick_distributions_from_standings
 
 from .types import (
     PlayerId,
@@ -39,6 +36,7 @@ from .types import (
     ContractSnapshot,
     ContractOptionSnapshot,
     PickExpectation,
+    PickExpectationMap,
     ValuationDataProvider,
 )
 
@@ -149,6 +147,46 @@ def contract_snapshot_from_dict(d: Mapping[str, Any], *, current_season_year: Op
 
 
 # -----------------------------------------------------------------------------
+# Pick expectation helpers
+# -----------------------------------------------------------------------------
+
+def build_pick_expectations_from_standings(
+    draft_picks_map: Mapping[str, Mapping[str, Any]],
+    *,
+    standings_order_worst_to_best: Sequence[TeamId],
+    confidence: float = 0.65,
+    year_filter: Optional[int] = None,
+) -> PickExpectationMap:
+    """Simple expectation builder.
+
+    - standings_order_worst_to_best: [WAS, DET, ... , BOS] length should be ~30.
+    - For each pick, expected_pick_number is rank within round: 1..30 (worst->best).
+    - Ignores lottery variance; that's for later.
+    """
+    index: Dict[str, int] = {str(t).upper(): i for i, t in enumerate(standings_order_worst_to_best)}
+    out: PickExpectationMap = {}
+    for pick_id, p in draft_picks_map.items():
+        try:
+            year = int(p.get("year"))
+        except Exception:
+            year = None
+        if year_filter is not None and year is not None and int(year) != int(year_filter):
+            continue
+
+        org = str(p.get("original_team") or "").upper()
+        if org not in index:
+            continue
+        expected = float(index[org] + 1)  # 1..30
+        out[str(pick_id)] = PickExpectation(
+            pick_id=str(pick_id),
+            expected_pick_number=expected,
+            confidence=float(confidence),
+            meta={"method": "standings_order", "original_team": org},
+        )
+    return out
+
+
+# -----------------------------------------------------------------------------
 # Data context (Provider)
 # -----------------------------------------------------------------------------
 
@@ -181,7 +219,8 @@ class RepoValuationDataContext(ValuationDataProvider):
     active_contract_id_by_player: Dict[str, str] = field(default_factory=dict)
     agency_state_by_player: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
-    pick_distributions: Dict[str, Any] = field(default_factory=dict)
+    # optional pick expectations
+    pick_expectations: PickExpectationMap = field(default_factory=dict)
 
     # caches
     _player_cache: Dict[str, PlayerSnapshot] = field(default_factory=dict)
@@ -326,37 +365,7 @@ class RepoValuationDataContext(ValuationDataProvider):
         return snap
 
     def get_pick_expectation(self, pick_id: PickId) -> Optional[PickExpectation]:
-        dist = self.get_pick_distribution(pick_id)
-        if not dist:
-            return None
-        compat = dist.get("compat_expected_pick_number") if isinstance(dist, Mapping) else None
-        if compat is None:
-            return None
-        return PickExpectation(
-            pick_id=str(pick_id),
-            expected_pick_number=float(compat),
-            confidence=0.65,
-            meta={"method": "distribution_ev", "source": "pick_distribution"},
-        )
-
-    def get_pick_distribution(self, pick_id: PickId) -> Optional[Mapping[str, Any]]:
-        dist = self.pick_distributions.get(str(pick_id))
-        if dist is None:
-            return None
-        if isinstance(dist, Mapping):
-            return dist
-        # dataclass-like fallback (PickDistributionBundle)
-        return {
-            "ev_pick": getattr(dist, "ev_pick", None),
-            "variance": getattr(dist, "variance", None),
-            "p10_pick": getattr(dist, "p10_pick", None),
-            "p50_pick": getattr(dist, "p50_pick", None),
-            "p90_pick": getattr(dist, "p90_pick", None),
-            "tail_upside_prob": getattr(dist, "tail_upside_prob", None),
-            "tail_downside_prob": getattr(dist, "tail_downside_prob", None),
-            "compat_expected_pick_number": getattr(dist, "compat_expected_pick_number", None),
-            "source_coverage": getattr(dist, "source_coverage", None),
-        }
+        return self.pick_expectations.get(str(pick_id))
 
     # ------------------------------------------------------------------
     # Optional utilities
@@ -512,6 +521,9 @@ def build_repo_valuation_data_context(
     current_season_year: int,
     current_date_iso: str,
     standings_order_worst_to_best: Optional[Sequence[TeamId]] = None,
+    pick_expectations: Optional[PickExpectationMap] = None,
+    expectation_confidence: float = 0.65,
+    expectation_year_filter: Optional[int] = None,
     repo: Optional["LeagueRepo"] = None,
     assets_snapshot: Optional[Dict[str, Any]] = None,
     contract_ledger: Optional[Dict[str, Any]] = None,
@@ -521,7 +533,11 @@ def build_repo_valuation_data_context(
     Parameters
     ----------
     standings_order_worst_to_best:
-        If provided, builds pick distribution bundles from standings snapshots.
+        If provided and pick_expectations is None, builds PickExpectationMap automatically.
+    pick_expectations:
+        If provided, used as-is.
+    expectation_year_filter:
+        If provided, only generates expectations for picks in that year.
     """
     if LeagueRepo is None:  # pragma: no cover
         raise ImportError("LeagueRepo import failed; cannot build valuation data context")
@@ -569,57 +585,34 @@ def build_repo_valuation_data_context(
     contracts_map = dict((ledger.get("contracts") or {}))
     active_contract_id_by_player = dict((ledger.get("active_contract_id_by_player") or {}))
 
-    pd: Dict[str, Any] = {}
+    pe: PickExpectationMap = {}
+    if pick_expectations is not None:
+        pe = dict(pick_expectations)
+    elif standings_order_worst_to_best is not None:
+        pe = build_pick_expectations_from_standings(
+            draft_picks_map,
+            standings_order_worst_to_best=standings_order_worst_to_best,
+            confidence=float(expectation_confidence),
+            year_filter=expectation_year_filter,
+        )
 
-    if standings_order_worst_to_best is not None:
-        season_rules = get_draft_lottery_rules(int(current_season_year))
-        if season_rules is not None:
-            pick_snaps = []
-            for pid in draft_picks_map.keys():
-                try:
-                    pick_snaps.append(
-                        PickSnapshot(
-                            kind="pick",
-                            pick_id=str(pid),
-                            year=_safe_int(draft_picks_map[pid].get("year"), 0),
-                            round=_safe_int(draft_picks_map[pid].get("round"), 0),
-                            original_team=str(draft_picks_map[pid].get("original_team") or "").upper(),
-                            owner_team=str(draft_picks_map[pid].get("owner_team") or "").upper(),
-                            protection=(draft_picks_map[pid].get("protection") if isinstance(draft_picks_map[pid].get("protection"), (dict, type(None))) else None),
-                            meta={},
-                        )
-                    )
-                except Exception:
-                    continue
+    # Normalize PickExpectations: ensure meta carries current_season_year so
+    # market_pricing can apply pick year discount consistently.
+    if pe:
+        pe_norm: PickExpectationMap = {}
+        for pick_id, exp in pe.items():
+            # Do not mutate exp.meta in-place; it might be shared/reused across contexts.
+            try:
+                meta = dict(exp.meta) if isinstance(exp.meta, dict) else {}
+            except Exception:
+                meta = {}
 
-            swap_snaps = []
-            for sid in swap_rights_map.keys():
-                try:
-                    s = swap_rights_map[sid]
-                    swap_snaps.append(
-                        SwapSnapshot(
-                            kind="swap",
-                            swap_id=str(sid),
-                            pick_id_a=str(s.get("pick_id_a") or ""),
-                            pick_id_b=str(s.get("pick_id_b") or ""),
-                            year=(_safe_int(s.get("year"), 0) if s.get("year") is not None else None),
-                            round=(_safe_int(s.get("round"), 0) if s.get("round") is not None else None),
-                            owner_team=str(s.get("owner_team") or "").upper(),
-                            active=bool(s.get("active", True)),
-                            created_by_deal_id=(str(s.get("created_by_deal_id")) if s.get("created_by_deal_id") else None),
-                            created_at=(str(s.get("created_at")) if s.get("created_at") else None),
-                            meta={},
-                        )
-                    )
-                except Exception:
-                    continue
+            # market_pricing expects this key to exist (not just be truthy).
+            if meta.get("current_season_year") is None or meta.get("current_season_year") == "":
+                meta["current_season_year"] = int(current_season_year)
 
-            pd = build_pick_distributions_from_standings(
-                picks=tuple(pick_snaps),
-                swaps=tuple(swap_snaps),
-                standings_order_worst_to_best=tuple(standings_order_worst_to_best),
-                season_rules=season_rules,
-            )
+            pe_norm[pick_id] = replace(exp, meta=meta)
+        pe = pe_norm
 
     return RepoValuationDataContext(
         db_path=str(db_path),
@@ -632,5 +625,5 @@ def build_repo_valuation_data_context(
         contracts_map=contracts_map,
         active_contract_id_by_player=active_contract_id_by_player,
         agency_state_by_player=agency_state_by_player,
-        pick_distributions=pd,
+        pick_expectations=pe,
     )
