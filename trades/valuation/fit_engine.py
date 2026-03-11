@@ -71,10 +71,10 @@ class FitEngineConfig:
 
     # --- Fit scoring
     fit_neutral_score: float = 0.50
-    fit_factor_floor: float = 0.70
+    fit_factor_floor: float = 0.90
     fit_factor_cap: float = 1.35
-    fit_below_threshold_floor: float = 0.35
-    fit_below_threshold_strength: float = 2.0  # threshold 아래면 더 빠르게 할인
+    fit_below_threshold_floor: float = 0.6
+    fit_below_threshold_strength: float = 1.1  # threshold 아래면 더 빠르게 할인
 
     # --- Supply extraction hooks (heuristic fallback when role_fit is absent)
     # These keys MUST match the SSOT key names stored in `players.attrs_json`.
