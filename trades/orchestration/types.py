@@ -237,6 +237,9 @@ class OrchestrationConfig:
     # True면 AI 측 verdict가 COUNTER여도 유저에게 제안을 보낸다.
     # (기존 ACCEPT-only보다 제안 발생량을 늘려 "무응답" 체감을 줄임)
     allow_user_offers_on_ai_counter: bool = True
+    # True면 AI 측 verdict가 REJECT여도(가격차가 큰 경우 포함) 유저에게 탐색성 제안을 보낸다.
+    # 상업용 기본값을 True로 두어 "제안이 아예 오지 않는" 체감을 우선 완화한다.
+    allow_user_offers_on_ai_reject: bool = True
     skip_reject_offer_if_active_session_exists: bool = True
 
     # SERIOUS(uv!=REJECT) 오퍼를 이미 보냈으면, 같은 tick에서 PROBE/LOWBALL은 기본적으로 금지

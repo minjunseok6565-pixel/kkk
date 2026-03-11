@@ -18,6 +18,11 @@ def test_ai_counter_blocks_user_offer_when_disabled() -> None:
     assert _ai_verdict_allows_user_offer(DealVerdict.COUNTER, cfg) is False
 
 
-def test_ai_reject_never_allows_user_offer() -> None:
-    cfg = OrchestrationConfig(allow_user_offers_on_ai_counter=True)
+def test_ai_reject_allows_user_offer_when_enabled() -> None:
+    cfg = OrchestrationConfig(allow_user_offers_on_ai_counter=True, allow_user_offers_on_ai_reject=True)
+    assert _ai_verdict_allows_user_offer(DealVerdict.REJECT, cfg) is True
+
+
+def test_ai_reject_blocks_user_offer_when_disabled() -> None:
+    cfg = OrchestrationConfig(allow_user_offers_on_ai_counter=True, allow_user_offers_on_ai_reject=False)
     assert _ai_verdict_allows_user_offer(DealVerdict.REJECT, cfg) is False
