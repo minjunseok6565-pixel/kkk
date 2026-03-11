@@ -427,7 +427,9 @@ def _generate_buy_mode(
             continue
 
         ts_seller = tick_ctx.get_team_situation(seller_id)
-        if bool(getattr(ts_seller, "constraints", None) and ts_seller.constraints.cooldown_active):
+        listed = listed_meta.get(target_pid) if listed_meta else None
+        is_public_listed_target = bool(listed) and str(listed.get("team_id") or "").upper() == seller_id
+        if bool(getattr(ts_seller, "constraints", None) and ts_seller.constraints.cooldown_active) and not is_public_listed_target:
             continue
 
         tier_prev_key = _tier_prev_key(mode="BUY", focal_player_id=target_pid, buyer_id=buyer_id, seller_id=seller_id)

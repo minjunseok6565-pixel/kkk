@@ -18,10 +18,11 @@ class _TickCtxStub:
         return SimpleNamespace(need_map={"WING": 1.0})
 
     def get_team_situation(self, team_id: str):
+        cooldown_map = getattr(self, "_cooldown_map", {})
         return SimpleNamespace(
             trade_posture="BUY",
             constraints=SimpleNamespace(
-                cooldown_active=False,
+                cooldown_active=bool(cooldown_map.get(str(team_id).upper(), False)),
                 cap_space=30_000_000,
                 apron_status="OVER_CAP",
                 deadline_pressure=0.0,
@@ -170,6 +171,35 @@ class BuyTargetListingInterestTests(unittest.TestCase):
             "BOS",
             _TickCtxStub(trade_market=trade_market),
             catalog,
+            DealGeneratorConfig(),
+            budget=self._budget(),
+            rng=random.Random(7),
+            banned_players=set(),
+        )
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].player_id, "core1")
+
+    def test_public_listing_bypasses_seller_cooldown_gate(self):
+        refs = [IncomingPlayerRef("core1", "LAL", "WING", 0.8, 10.0, 8.0, 2.0, 26.0)]
+        trade_market = {
+            "listings": {
+                "core1": {
+                    "player_id": "core1",
+                    "team_id": "LAL",
+                    "status": "ACTIVE",
+                    "visibility": "PUBLIC",
+                    "priority": 1.0,
+                    "updated_at": "2026-02-10",
+                }
+            }
+        }
+        tick_ctx = _TickCtxStub(trade_market=trade_market)
+        tick_ctx._cooldown_map = {"LAL": True}
+
+        out = select_targets_buy(
+            "BOS",
+            tick_ctx,
+            self._catalog(refs),
             DealGeneratorConfig(),
             budget=self._budget(),
             rng=random.Random(7),
