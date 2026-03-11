@@ -509,7 +509,7 @@ class TeamUtilityAdjuster:
         risk_score = _clamp(0.65 * age_risk + 0.35 * term_risk, 0.0, 1.0)
 
         # scale이 클수록 더 할인
-        factor = 1.0 - scale * 0.35 * risk_score
+        factor = 1.0 - scale * 0.1 * risk_score
         factor = _clamp(factor, cfg.risk_factor_floor, cfg.risk_factor_cap)
 
         steps.append(
