@@ -245,7 +245,15 @@ def _final_rank(
     contract_base_w = float(getattr(config, "buy_target_contract_base_weight", 0.30) or 0.30)
     contract_term = contract_base_w * contract_score * team_sens
 
-    rank = player_core + contract_term + max(0.0, float(listing_boost or 0.0))
+    # Step-4 wiring: reuse catalog-exposed market/contract proxies when available.
+    market_pct = _clamp01(float(getattr(ref, "market_percentile_league", 0.5) or 0.5))
+    market_pct_term = 0.08 * (market_pct - 0.5)
+
+    contract_proxy_match = _clamp01(float(getattr(ref, "contract_proxy_matching", 0.0) or 0.0))
+    contract_proxy_toxic = _clamp01(float(getattr(ref, "contract_proxy_toxic", 0.0) or 0.0))
+    contract_proxy_term = 0.06 * (contract_proxy_match - contract_proxy_toxic)
+
+    rank = player_core + contract_term + market_pct_term + contract_proxy_term + max(0.0, float(listing_boost or 0.0))
     rank += rng.random() * 0.01
     return float(rank)
 
@@ -620,7 +628,10 @@ def select_buyers_for_sale_asset(
 ) -> List[Tuple[str, str]]:
     """SELL 모드: 특정 매물에 대해 관심 가질 가능성이 큰 buyer 팀을 고른다.
 
-    Returns: list[(buyer_id, match_tag)]
+    Returns: list[(buyer_id, match_tag_hint)]
+
+    Note:
+    - `match_tag`는 SELL 스켈레톤 탐색 우선순위 힌트이며, tier 분류에서 `PICK_ONLY`를 즉시 확정하지 않는다.
     """
 
     tags = list(sale_asset.top_tags or ())
@@ -654,13 +665,14 @@ def select_buyers_for_sale_asset(
         dc = tick_ctx.get_decision_context(buyer_id)
         need_map = dict(getattr(dc, "need_map", {}) or {})
 
-        best_tag = tags[0]
+        best_tag_hint = tags[0]
         best = 0.0
+        # Keep best-tag selection simple; this tag is a routing hint, not a hard tier decision signal.
         for tag in tags[:4]:
             v = float(need_map.get(tag, 0.0) or 0.0)
             if v > best:
                 best = v
-                best_tag = tag
+                best_tag_hint = tag
 
         urgency = float(getattr(ts, "urgency", 0.0) or 0.0)
         score = best + 0.35 * urgency + posture_bonus
@@ -669,7 +681,7 @@ def select_buyers_for_sale_asset(
         if score <= 0.10:
             continue
 
-        rows.append((score, buyer_id, str(best_tag)))
+        rows.append((score, buyer_id, str(best_tag_hint)))
 
         # hard cap to avoid worst-case O(teams*targets) blow-up
         if len(rows) >= 24:
