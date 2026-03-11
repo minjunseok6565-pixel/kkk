@@ -22,6 +22,7 @@ from .market_state import (
     get_human_controlled_team_ids,
     set_human_controlled_team_ids,
     get_active_thread_team_ids,
+    list_team_trade_listings,
 )
 from .actor_selection import select_trade_actors
 from .promotion import promote_and_commit, compute_deal_key
@@ -68,6 +69,47 @@ def _stable_seed_int(*parts: str) -> int:
     raw = "|".join([str(p) for p in parts]).encode("utf-8")
     digest = hashlib.sha1(raw).digest()
     return int.from_bytes(digest[:8], "big", signed=False)
+
+
+def _compute_backfill_scan_limit(
+    *,
+    base_limit: int,
+    backfill_candidates_count: int,
+    human_ids: Set[str],
+    trade_market: Dict[str, Any],
+    today: date,
+) -> int:
+    """
+    Compute scan width for human-offer backfill.
+
+    If the human team currently has ACTIVE trade-block listings, widen the backfill
+    scan to cover all AI candidates so listed players are not starved by a small,
+    fixed team sample.
+    """
+    limit = max(0, int(base_limit or 0))
+    cand_n = max(0, int(backfill_candidates_count or 0))
+    if cand_n <= 0:
+        return 0
+
+    if human_ids and cand_n > limit:
+        has_active_human_listing = False
+        for tid in human_ids:
+            try:
+                rows = list_team_trade_listings(
+                    trade_market,
+                    team_id=str(tid).upper(),
+                    active_only=True,
+                    today=today,
+                )
+                if rows:
+                    has_active_human_listing = True
+                    break
+            except Exception:
+                continue
+        if has_active_human_listing:
+            return cand_n
+
+    return min(limit, cand_n)
 
 def run_trade_orchestration_tick(
     *,
@@ -502,11 +544,19 @@ def _run_trade_orchestration_tick_impl(
                         if not cand or cand in human_ids or cand in actor_team_ids:
                             continue
                         backfill_candidates.append(cand)
+                    rng.shuffle(backfill_candidates)
 
                     try:
-                        backfill_limit = max(0, int(getattr(cfg, "human_offer_backfill_team_scan_limit", 10) or 0))
+                        base_backfill_limit = max(0, int(getattr(cfg, "human_offer_backfill_team_scan_limit", 10) or 0))
                     except Exception:
-                        backfill_limit = 10
+                        base_backfill_limit = 10
+                    backfill_limit = _compute_backfill_scan_limit(
+                        base_limit=base_backfill_limit,
+                        backfill_candidates_count=len(backfill_candidates),
+                        human_ids=human_ids,
+                        trade_market=trade_market,
+                        today=today,
+                    )
                     try:
                         backfill_max_results = max(1, int(getattr(cfg, "human_offer_backfill_max_results_per_team", 4) or 1))
                     except Exception:
