@@ -234,6 +234,9 @@ class OrchestrationConfig:
     # - LOWBALL: probe_exceed_max < exceed_overpay <= lowball_exceed_max
     # - 그 외: suppress(모욕/스팸 방지)
     enable_user_reject_offers: bool = True
+    # True면 AI 측 verdict가 COUNTER여도 유저에게 제안을 보낸다.
+    # (기존 ACCEPT-only보다 제안 발생량을 늘려 "무응답" 체감을 줄임)
+    allow_user_offers_on_ai_counter: bool = True
     skip_reject_offer_if_active_session_exists: bool = True
 
     # SERIOUS(uv!=REJECT) 오퍼를 이미 보냈으면, 같은 tick에서 PROBE/LOWBALL은 기본적으로 금지

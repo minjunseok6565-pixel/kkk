@@ -202,6 +202,14 @@ def _user_side_verdict(prop: Any, user_team_id: str) -> DealVerdict:
     return prop.seller_decision.verdict
 
 
+
+def _ai_verdict_allows_user_offer(av: DealVerdict, config: OrchestrationConfig) -> bool:
+    if av == DealVerdict.ACCEPT:
+        return True
+    if av == DealVerdict.COUNTER and bool(getattr(config, "allow_user_offers_on_ai_counter", True)):
+        return True
+    return False
+
 def _count_active_user_sessions(negotiations_snapshot: Dict[str, Any], user_team_id: str, *, today: date) -> int:
     u = str(user_team_id).upper()
     n = 0
@@ -555,7 +563,7 @@ def promote_and_commit(
                 result.skipped += 1
                 continue
 
-            if av != DealVerdict.ACCEPT:
+            if not _ai_verdict_allows_user_offer(av, config):
                 result.skipped += 1
                 continue
 
