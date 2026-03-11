@@ -54,6 +54,16 @@ def _get_last_gm_tick_date() -> Optional[str]:
     return None
 
 
+def _involves_human_proposal(prop: Any, human_ids: Set[str]) -> bool:
+    if not human_ids:
+        return False
+    try:
+        b = str(getattr(prop, "buyer_id", "") or "").upper()
+        s = str(getattr(prop, "seller_id", "") or "").upper()
+    except Exception:
+        return False
+    return (b in human_ids) or (s in human_ids)
+
 def _stable_seed_int(*parts: str) -> int:
     raw = "|".join([str(p) for p in parts]).encode("utf-8")
     digest = hashlib.sha1(raw).digest()
@@ -442,8 +452,11 @@ def _run_trade_orchestration_tick_impl(
             all_props = []
             batches = []
             initiator_by_deal_id: Dict[str, str] = {}
+            actor_team_ids: Set[str] = set()
 
             for a in actors:
+                actor_tid = str(a.team_id).upper()
+                actor_team_ids.add(actor_tid)
                 props = gen.generate_for_team(
                     a.team_id,
                     tick_ctx,
@@ -457,14 +470,14 @@ def _run_trade_orchestration_tick_impl(
                 for p in (props or []):
                     try:
                         did = compute_deal_key(p)
-                        initiator_by_deal_id[did] = str(a.team_id).upper()
+                        initiator_by_deal_id[did] = actor_tid
                     except Exception:
                         continue
 
-                if bool(getattr(cfg, "enable_trade_block", True)) and str(a.team_id).upper() not in human_ids:
+                if bool(getattr(cfg, "enable_trade_block", True)) and actor_tid not in human_ids:
                     try:
                         apply_ai_proactive_listings(
-                            team_id=str(a.team_id).upper(),
+                            team_id=actor_tid,
                             tick_ctx=tick_ctx,
                             trade_market=trade_market,
                             today=today,
@@ -472,6 +485,81 @@ def _run_trade_orchestration_tick_impl(
                         )
                     except Exception:
                         pass
+
+            # Optional resiliency scan: if sampled actors produced no user-involving proposals,
+            # scan a few more AI teams to reduce long "no incoming offers" streaks.
+            try:
+                enable_backfill = bool(getattr(cfg, "enable_human_offer_backfill_scan", True))
+            except Exception:
+                enable_backfill = True
+            if enable_backfill and human_ids:
+                has_human_prop = any(_involves_human_proposal(p, human_ids) for p in (all_props or []))
+                if not has_human_prop:
+                    team_situations = getattr(tick_ctx, "team_situations", {}) or {}
+                    backfill_candidates: List[str] = []
+                    for tid in team_situations.keys():
+                        cand = str(tid).upper()
+                        if not cand or cand in human_ids or cand in actor_team_ids:
+                            continue
+                        backfill_candidates.append(cand)
+
+                    try:
+                        backfill_limit = max(0, int(getattr(cfg, "human_offer_backfill_team_scan_limit", 10) or 0))
+                    except Exception:
+                        backfill_limit = 10
+                    try:
+                        backfill_max_results = max(1, int(getattr(cfg, "human_offer_backfill_max_results_per_team", 4) or 1))
+                    except Exception:
+                        backfill_max_results = 4
+
+                    scanned = 0
+                    from_backfill = 0
+                    for cand in backfill_candidates:
+                        if scanned >= backfill_limit:
+                            break
+                        scanned += 1
+
+                        props = gen.generate_for_team(
+                            cand,
+                            tick_ctx,
+                            max_results=int(backfill_max_results),
+                            allow_locked_by_deal_id=None,
+                        )
+                        stats = getattr(gen, "last_stats", None)
+                        batch = GeneratedBatch(
+                            initiator_team_id=cand,
+                            proposals=list(props or []),
+                            stats=stats,
+                        )
+                        batches.append(batch)
+
+                        human_props = [p for p in (props or []) if _involves_human_proposal(p, human_ids)]
+                        if not human_props:
+                            continue
+
+                        from_backfill += len(human_props)
+                        all_props.extend(human_props)
+                        for p in human_props:
+                            try:
+                                did = compute_deal_key(p)
+                                initiator_by_deal_id[did] = cand
+                            except Exception:
+                                continue
+
+                    if scanned > 0:
+                        report.meta["human_offer_backfill"] = {
+                            "enabled": True,
+                            "scanned_teams": int(scanned),
+                            "added_human_involving_proposals": int(from_backfill),
+                            "triggered": True,
+                        }
+                else:
+                    report.meta["human_offer_backfill"] = {
+                        "enabled": True,
+                        "scanned_teams": 0,
+                        "added_human_involving_proposals": 0,
+                        "triggered": False,
+                    }
 
             report.batches = batches
 

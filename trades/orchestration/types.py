@@ -214,6 +214,12 @@ class OrchestrationConfig:
     fail_closed_if_human_ids_missing: bool = True
     exclude_human_teams_from_initiators: bool = True
 
+    # --- Human-offer resiliency: if sampled actors produced zero human-involving proposals,
+    # perform an extra scan on additional AI teams to avoid long no-offer streaks.
+    enable_human_offer_backfill_scan: bool = True
+    human_offer_backfill_team_scan_limit: int = 10
+    human_offer_backfill_max_results_per_team: int = 4
+
     # --- 유저 REJECT 기반 "탐색(PROBE)/로우볼(LOWBALL)" 오퍼
     # 목적: NBA 시장의 "떠보기/로우볼" 현실감을 주되, 스팸/불쾌감은 구조적으로 차단한다.
     #
