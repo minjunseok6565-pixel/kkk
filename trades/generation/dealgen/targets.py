@@ -678,7 +678,7 @@ def select_buyers_for_sale_asset(
         score = best + 0.35 * urgency + posture_bonus
 
         # 매우 낮으면 제외
-        if score <= 0.10:
+        if score <= 0.01:
             continue
 
         rows.append((score, buyer_id, str(best_tag_hint)))
