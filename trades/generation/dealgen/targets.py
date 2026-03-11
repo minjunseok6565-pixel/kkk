@@ -397,16 +397,19 @@ def select_targets_buy(
         if seller_out is None:
             continue
 
+        listed = listing_meta_by_player.get(str(r.player_id), {}) if listing_meta_by_player else {}
+        is_public_listing = bool(listed) and str(listed.get("team_id") or "").upper() == from_team
+
         cd = seller_cooldown_cache.get(from_team)
         if cd is None:
             ts_seller = tick_ctx.get_team_situation(from_team)
             cd = bool(getattr(ts_seller, "constraints", None) and ts_seller.constraints.cooldown_active)
             seller_cooldown_cache[from_team] = cd
-        if cd:
+        # Public trade-block listings must remain discoverable even while the seller
+        # has a temporary cooldown, otherwise listed players can be completely
+        # starved from incoming offer generation.
+        if cd and not is_public_listing:
             continue
-
-        listed = listing_meta_by_player.get(str(r.player_id), {}) if listing_meta_by_player else {}
-        is_public_listing = bool(listed) and str(listed.get("team_id") or "").upper() == from_team
 
         need_similarity = _need_similarity_for_ref(r, need_map)
         listing_boost = _listing_interest_boost(
