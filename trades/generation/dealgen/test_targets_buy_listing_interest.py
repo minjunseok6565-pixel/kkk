@@ -178,6 +178,62 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0].player_id, "core1")
 
+    def test_public_listing_survives_seller_cooldown_gate(self):
+        refs = [IncomingPlayerRef("core1", "LAL", "WING", 0.8, 10.0, 8.0, 2.0, 26.0)]
+        out_lal = TeamOutgoingCatalog(
+            team_id="LAL",
+            player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple()},
+            pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
+            swap_ids=tuple(),
+            players={"core1": SimpleNamespace(buckets=tuple())},
+            picks={},
+            swaps={},
+        )
+        catalog = SimpleNamespace(
+            incoming_all_players=tuple(refs),
+            outgoing_by_team={"LAL": out_lal, "BOS": self._catalog(refs).outgoing_by_team["BOS"]},
+        )
+        trade_market = {
+            "listings": {
+                "core1": {
+                    "player_id": "core1",
+                    "team_id": "LAL",
+                    "status": "ACTIVE",
+                    "visibility": "PUBLIC",
+                    "priority": 1.0,
+                    "updated_at": "2026-02-10",
+                }
+            }
+        }
+
+        class _CooldownTickCtx(_TickCtxStub):
+            def get_team_situation(self, team_id: str):
+                if str(team_id).upper() == "LAL":
+                    return SimpleNamespace(
+                        trade_posture="SELL",
+                        constraints=SimpleNamespace(
+                            cooldown_active=True,
+                            cap_space=30_000_000,
+                            apron_status="OVER_CAP",
+                            deadline_pressure=0.0,
+                        ),
+                        needs=[],
+                        time_horizon="RE_TOOL",
+                    )
+                return super().get_team_situation(team_id)
+
+        out = select_targets_buy(
+            "BOS",
+            _CooldownTickCtx(trade_market=trade_market),
+            catalog,
+            DealGeneratorConfig(),
+            budget=self._budget(),
+            rng=random.Random(7),
+            banned_players=set(),
+        )
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].player_id, "core1")
+
 
     def test_non_listed_target_can_be_selected_without_seller_outgoing_bucket_gate(self):
         refs = [IncomingPlayerRef("core2", "LAL", "WING", 0.8, 10.0, 8.0, 2.0, 26.0)]
