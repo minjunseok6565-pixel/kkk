@@ -103,7 +103,7 @@ class DecisionPolicyConfig:
     eps: float = 1e-9
 
     # If outgoing_total is ~0 (e.g., receive something for free), use this as scale
-    min_outgoing_scale: float = 6.0
+    min_outgoing_scale: float = 2.0
 
     # How wide is the "counter corridor" around the acceptance boundary
     # corridor = required_surplus ± corridor_ratio*outgoing_total
