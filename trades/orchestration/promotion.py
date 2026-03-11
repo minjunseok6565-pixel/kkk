@@ -208,6 +208,8 @@ def _ai_verdict_allows_user_offer(av: DealVerdict, config: OrchestrationConfig) 
         return True
     if av == DealVerdict.COUNTER and bool(getattr(config, "allow_user_offers_on_ai_counter", True)):
         return True
+    if av == DealVerdict.REJECT and bool(getattr(config, "allow_user_offers_on_ai_reject", True)):
+        return True
     return False
 
 def _count_active_user_sessions(negotiations_snapshot: Dict[str, Any], user_team_id: str, *, today: date) -> int:
