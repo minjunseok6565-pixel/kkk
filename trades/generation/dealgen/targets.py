@@ -52,6 +52,30 @@ def _parse_iso_ymd(value: Any) -> Optional[date]:
         return None
 
 
+def _canon_team_id(team_id: Any) -> str:
+    raw = str(team_id or "").strip()
+    if not raw:
+        return ""
+    try:
+        from schema import normalize_team_id  # type: ignore
+
+        return str(normalize_team_id(raw, strict=False)).strip().upper()
+    except Exception:
+        return raw.upper()
+
+
+def _canon_player_id(player_id: Any) -> str:
+    raw = str(player_id or "").strip()
+    if not raw:
+        return ""
+    try:
+        from schema import normalize_player_id  # type: ignore
+
+        return str(normalize_player_id(raw, strict=False, allow_legacy_numeric=True)).strip()
+    except Exception:
+        return raw
+
+
 def _active_public_listing_meta_by_player(
     tick_ctx: TradeGenerationTickContext,
 ) -> Dict[str, Dict[str, Any]]:
@@ -77,12 +101,12 @@ def _active_public_listing_meta_by_player(
         exp = _parse_iso_ymd(raw.get("expires_on"))
         if isinstance(today, date) and exp is not None and today >= exp:
             continue
-        player_id = str(raw.get("player_id") or pid or "")
+        player_id = _canon_player_id(raw.get("player_id") or pid)
         if not player_id:
             continue
         out[player_id] = {
             "priority": _clamp01(raw.get("priority")),
-            "team_id": str(raw.get("team_id") or "").upper(),
+            "team_id": _canon_team_id(raw.get("team_id")),
             "updated_at": str(raw.get("updated_at") or raw.get("created_at") or ""),
         }
     return out
