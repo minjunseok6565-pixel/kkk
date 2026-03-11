@@ -577,29 +577,29 @@ def build_decision_context(
 
     fit_scale = lerp(0.60, 1.80, eff_fit_strict)
     # Fit gate threshold: stricter fit => higher minimum threshold
-    min_fit_threshold = lerp(0.45, 0.70, eff_fit_strict)
+    min_fit_threshold = lerp(0.20, 0.45, eff_fit_strict)
 
     # Higher risk tolerance -> smaller discount
-    risk_discount_scale = lerp(0.35, 0.08, eff_risk_tol)
+    risk_discount_scale = lerp(0.12, 0.02, eff_risk_tol)
 
     # Higher financial conservatism -> larger penalty
-    finance_penalty_scale = lerp(0.40, 1.60, eff_fin_cons)
+    finance_penalty_scale = lerp(0.05, 0.60, eff_fin_cons)
 
     # Min surplus: tougher negotiation means require more surplus.
-    min_surplus_required = lerp(-0.05, 0.05, eff_neg_tough)
+    min_surplus_required = lerp(-0.20, 0.00, eff_neg_tough)
     if posture in ("SELL", "SOFT_SELL"):
-        min_surplus_required += 0.03
+        min_surplus_required += 0.00
     elif posture == "AGGRESSIVE_BUY":
-        min_surplus_required -= 0.02
+        min_surplus_required -= 0.08
     min_surplus_required = float(min_surplus_required)
 
     # Overpay budget / counter rate (from C, adapted to dc2)
     buy_factor = float(POSTURE_BUY_FACTOR.get(posture, 0.25))
-    overpay_budget = 0.35 * eff_win_now * urgency * buy_factor * (1.0 - 0.15 * eff_neg_tough)
-    overpay_budget = clamp(overpay_budget, 0.0, 0.40)
+    overpay_budget = 0.90 * eff_win_now * urgency * buy_factor * (1.0 - 0.05 * eff_neg_tough)
+    overpay_budget = clamp(overpay_budget, 0.0, 1.20)
 
-    counter_rate = lerp(0.35, 0.80, eff_neg_tough) * lerp(1.0, 0.70, urgency)
-    counter_rate = clamp(counter_rate, 0.10, 0.95)
+    counter_rate = lerp(0.75, 1.00, eff_neg_tough) * lerp(1.0, 0.95, urgency)
+    counter_rate = clamp(counter_rate, 0.60, 1.00)
 
     relationship_scale = lerp(0.0, 1.5, eff_rel_sens)
 

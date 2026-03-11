@@ -322,7 +322,7 @@ class DealGeneratorConfig:
     # --- target diversity / spam prevention (v2 absorption)
     # 동일 타깃(같은 선수)이 결과 상단에 반복 노출되는 것을 억제하기 위한 soft penalty.
     # v2는 core 단계에서 target_seen 카운트 기반으로 score를 감점한다.
-    target_repeat_penalty: float = 0.15
+    target_repeat_penalty: float = 0.0
 
     # --- market signal priority boosts (sell target ordering)
     public_request_priority_boost: float = 0.55
@@ -337,19 +337,19 @@ class DealGeneratorConfig:
     buy_target_listing_interest_cap: float = 0.85
 
     # --- buy retrieval: tiered market scan (stage 1 foundation)
-    buy_target_listed_min_quota: int = 6
+    buy_target_listed_min_quota: int = 16
     buy_target_listed_max_share: float = 0.75
-    buy_target_non_listed_base_quota: int = 8
-    buy_target_non_listed_deadline_bonus_max: int = 12
+    buy_target_non_listed_base_quota: int = 28
+    buy_target_non_listed_deadline_bonus_max: int = 36
 
-    buy_target_max_teams_scanned_base: int = 8
-    buy_target_max_teams_scanned_deadline_bonus: int = 18
-    buy_target_max_players_scanned_base: int = 120
-    buy_target_max_players_scanned_deadline_bonus: int = 220
+    buy_target_max_teams_scanned_base: int = 30
+    buy_target_max_teams_scanned_deadline_bonus: int = 30
+    buy_target_max_players_scanned_base: int = 320
+    buy_target_max_players_scanned_deadline_bonus: int = 420
 
     buy_target_expand_tier2_enabled: bool = True
-    buy_target_expand_tier2_budget_share: float = 0.35
-    buy_target_retrieval_iteration_cap: int = 400
+    buy_target_expand_tier2_budget_share: float = 0.65
+    buy_target_retrieval_iteration_cap: int = 1800
 
     buy_target_need_weight_scale: float = 0.55
     buy_target_need_mismatch_floor: float = -0.20
@@ -385,9 +385,9 @@ class DealGeneratorConfig:
 
     # --- proactive listing controls (AI)
     ai_proactive_listing_enabled: bool = True
-    ai_proactive_listing_team_daily_cap: int = 2
-    ai_proactive_listing_team_active_cap: int = 4
-    ai_proactive_listing_player_cooldown_days: int = 7
+    ai_proactive_listing_team_daily_cap: int = 10
+    ai_proactive_listing_team_active_cap: int = 20
+    ai_proactive_listing_player_cooldown_days: int = 0
     ai_proactive_listing_ttl_days_sell: int = 12
     ai_proactive_listing_ttl_days_soft_sell: int = 7
     ai_proactive_listing_ttl_days_default: int = 5
@@ -400,43 +400,43 @@ class DealGeneratorConfig:
 
     # proactive listing threshold gating
     ai_proactive_listing_threshold_enabled: bool = True
-    ai_proactive_listing_threshold_default: float = 0.55
+    ai_proactive_listing_threshold_default: float = 0.08
     ai_proactive_listing_bucket_thresholds: Dict[str, Dict[str, float]] = field(default_factory=lambda: {
         "AGGRESSIVE_BUY": {
-            "SURPLUS_EXPENDABLE": 0.66,
-            "FILLER_BAD_CONTRACT": 0.80,
-            "VETERAN_SALE": 0.90,
+            "SURPLUS_EXPENDABLE": 0.10,
+            "FILLER_BAD_CONTRACT": 0.15,
+            "VETERAN_SALE": 0.20,
         },
         "SOFT_BUY": {
-            "SURPLUS_EXPENDABLE": 0.62,
-            "FILLER_BAD_CONTRACT": 0.82,
-            "VETERAN_SALE": 0.92,
+            "SURPLUS_EXPENDABLE": 0.08,
+            "FILLER_BAD_CONTRACT": 0.12,
+            "VETERAN_SALE": 0.16,
         },
         "STAND_PAT": {
-            "SURPLUS_EXPENDABLE": 0.56,
-            "FILLER_BAD_CONTRACT": 0.86,
-            "VETERAN_SALE": 0.95,
+            "SURPLUS_EXPENDABLE": 0.07,
+            "FILLER_BAD_CONTRACT": 0.10,
+            "VETERAN_SALE": 0.14,
         },
         "SOFT_SELL": {
-            "SURPLUS_EXPENDABLE": 0.46,
-            "FILLER_BAD_CONTRACT": 0.70,
-            "VETERAN_SALE": 0.45,
+            "SURPLUS_EXPENDABLE": 0.05,
+            "FILLER_BAD_CONTRACT": 0.08,
+            "VETERAN_SALE": 0.10,
         },
         "SELL": {
-            "SURPLUS_EXPENDABLE": 0.40,
-            "FILLER_BAD_CONTRACT": 0.62,
-            "VETERAN_SALE": 0.35,
+            "SURPLUS_EXPENDABLE": 0.04,
+            "FILLER_BAD_CONTRACT": 0.06,
+            "VETERAN_SALE": 0.08,
         },
     })
 
     # threshold modifiers
-    ai_proactive_listing_threshold_horizon_win_now_delta: float = -0.03
-    ai_proactive_listing_threshold_horizon_rebuild_delta: float = -0.05
-    ai_proactive_listing_threshold_urgency_cut: float = 0.75
-    ai_proactive_listing_threshold_urgency_delta: float = -0.03
-    ai_proactive_listing_threshold_cooldown_active_delta: float = 0.05
-    ai_proactive_listing_threshold_min: float = 0.10
-    ai_proactive_listing_threshold_max: float = 0.95
+    ai_proactive_listing_threshold_horizon_win_now_delta: float = -0.10
+    ai_proactive_listing_threshold_horizon_rebuild_delta: float = -0.10
+    ai_proactive_listing_threshold_urgency_cut: float = 0.0
+    ai_proactive_listing_threshold_urgency_delta: float = -0.08
+    ai_proactive_listing_threshold_cooldown_active_delta: float = -0.08
+    ai_proactive_listing_threshold_min: float = 0.0
+    ai_proactive_listing_threshold_max: float = 0.30
 
     # --- opponent diversity / spam prevention
     opponent_repeat_penalty: float = 0.25
@@ -462,10 +462,10 @@ class DealGeneratorConfig:
     reject_penalty_scale: float = 0.06
 
     # discard gate: 평가 결과가 너무 나쁘면 후보에서 제거
-    discard_if_overpay_below: float = -18.0  # buyer margin이 이보다 더 나쁘면 후보 폐기
-    discard_if_any_margin_below: float = -22.0  # 어느 한쪽이 이보다 나쁘면 폐기
-    discard_if_reject_margin_below: float = -14.0  # REJECT인 팀 margin이 이보다 나쁘면 폐기
-    discard_if_both_margins_below: float = -10.0
+    discard_if_overpay_below: float = -100.0  # buyer margin이 이보다 더 나쁘면 후보 폐기
+    discard_if_any_margin_below: float = -120.0  # 어느 한쪽이 이보다 나쁘면 폐기
+    discard_if_reject_margin_below: float = -90.0  # REJECT인 팀 margin이 이보다 나쁘면 폐기
+    discard_if_both_margins_below: float = -80.0
 
     # --- RNG determinism
     deterministic_seed_salt: str = "deal_generator_v2"

@@ -107,11 +107,11 @@ class DecisionPolicyConfig:
 
     # How wide is the "counter corridor" around the acceptance boundary
     # corridor = required_surplus ± corridor_ratio*outgoing_total
-    counter_corridor_ratio: float = 0.06
+    counter_corridor_ratio: float = 0.25
 
     # If net is negative but within this fraction of overpay_allowed,
     # we may still COUNTER rather than hard REJECT (if counter_rate favors it).
-    counter_overpay_fraction: float = 0.65
+    counter_overpay_fraction: float = 1.0
 
     # Confidence mapping: larger => sharper transitions
     confidence_slope: float = 3.5
@@ -121,7 +121,7 @@ class DecisionPolicyConfig:
 
     # Whether to use stochastic counter behavior (optional).
     # If false, counter_rate is interpreted deterministically.
-    stochastic_counter: bool = False
+    stochastic_counter: bool = True
 
 
 # -----------------------------------------------------------------------------

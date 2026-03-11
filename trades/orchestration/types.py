@@ -234,30 +234,30 @@ class OrchestrationConfig:
     disable_reject_offers_if_any_serious_sent: bool = True
 
     # tick당 tone별 상한(스팸 방지)
-    max_user_probe_offers_per_tick: int = 1
-    max_user_lowball_offers_per_tick: int = 1
+    max_user_probe_offers_per_tick: int = 6
+    max_user_lowball_offers_per_tick: int = 6
 
     # 같은 상대가 반복해서 유저를 찌르지 않게 pair 쿨다운(일 단위)
-    user_pair_probe_cooldown_days: int = 4
-    user_pair_lowball_cooldown_days: int = 10
+    user_pair_probe_cooldown_days: int = 0
+    user_pair_lowball_cooldown_days: int = 0
 
     # exceed 윈도우 계산에서 outgoing_total scale의 바닥값(DecisionPolicy min_outgoing_scale과 맞춤)
     user_offer_min_outgoing_scale: float = 6.0
 
     # PROBE 허용치: probe_exceed_max = min(cap, max(abs_min, ratio * scale))
-    probe_exceed_scale_ratio: float = 0.02
-    probe_exceed_abs_min: float = 0.12
-    probe_exceed_abs_cap: float = 1.2
+    probe_exceed_scale_ratio: float = 0.10
+    probe_exceed_abs_min: float = 1.5
+    probe_exceed_abs_cap: float = 8.0
 
     # LOWBALL 허용치: lowball_exceed_max = min(cap, max(abs_min, ratio * scale))
-    lowball_exceed_scale_ratio: float = 0.06
-    lowball_exceed_abs_min: float = 0.30
-    lowball_exceed_abs_cap: float = 3.0
+    lowball_exceed_scale_ratio: float = 0.20
+    lowball_exceed_abs_min: float = 3.0
+    lowball_exceed_abs_cap: float = 15.0
 
     # 확률(0~1): p = base + bonus * deadline_pressure (clamp01)
-    probe_base_prob: float = 0.18
-    probe_pressure_bonus: float = 0.22
-    lowball_base_prob: float = 0.10
+    probe_base_prob: float = 0.95
+    probe_pressure_bonus: float = 0.05
+    lowball_base_prob: float = 0.85
     lowball_pressure_bonus: float = 0.15
 
     # --- 현실감: 같은 날 한 팀이 여러 번 트레이드하는 것 방지(기본 True)
@@ -273,9 +273,9 @@ class OrchestrationConfig:
 
     # --- "리그 오피스 게이트"(극단/버그성 체결 방지) — 오케스트레이션은 새로운 평가를 하지 않고,
     # 생성기 산출물(score, evaluation, decision)로만 안전 컷을 둔다.
-    ai_ai_office_gate_min_score: float = 0.25
-    ai_ai_office_gate_min_margin: float = -14.0
-    ai_ai_office_gate_overpay_slack: float = 0.5
+    ai_ai_office_gate_min_score: float = -1.0
+    ai_ai_office_gate_min_margin: float = -100.0
+    ai_ai_office_gate_overpay_slack: float = 50.0
 
 
 @dataclass(frozen=True, slots=True)
