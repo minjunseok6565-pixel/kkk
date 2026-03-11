@@ -41,8 +41,8 @@ class OrchestrationConfig:
     enabled: bool = True
 
     # --- tick 실행 정책
-    min_active_teams: int = 6
-    max_active_teams: int = 14
+    min_active_teams: int = 20
+    max_active_teams: int = 30
     deadline_bonus_active_teams: int = 6
 
     # --- 딜 생성기 호출 파라미터
