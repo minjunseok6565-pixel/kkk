@@ -586,7 +586,7 @@ def build_decision_context(
     finance_penalty_scale = lerp(0.40, 1.60, eff_fin_cons)
 
     # Min surplus: tougher negotiation means require more surplus.
-    min_surplus_required = lerp(-0.03, 0.10, eff_neg_tough)
+    min_surplus_required = lerp(-0.05, 0.05, eff_neg_tough)
     if posture in ("SELL", "SOFT_SELL"):
         min_surplus_required += 0.03
     elif posture == "AGGRESSIVE_BUY":
