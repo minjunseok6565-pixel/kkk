@@ -8,6 +8,7 @@ function ensureOffseasonDevState() {
     state.offseasonDev = {
       step: "IDLE",
       loading: false,
+      busy: false,
       error: "",
       championTeamId: "",
       enterOffseasonResult: null,
@@ -24,8 +25,22 @@ function ensureOffseasonDevState() {
       retirementProcessResult: null,
       draftLotteryResult: null,
       draftSettleResult: null,
+      draftCombineResult: null,
+      draftBundleResult: null,
+      combineCategoryCards: [],
+      combineSelectedCategory: "",
+      combineDetailRows: [],
     };
   }
+
+  // Backward compatibility for older snapshots.
+  if (typeof state.offseasonDev.busy !== "boolean") state.offseasonDev.busy = false;
+  if (state.offseasonDev.draftCombineResult === undefined) state.offseasonDev.draftCombineResult = null;
+  if (state.offseasonDev.draftBundleResult === undefined) state.offseasonDev.draftBundleResult = null;
+  if (!Array.isArray(state.offseasonDev.combineCategoryCards)) state.offseasonDev.combineCategoryCards = [];
+  if (typeof state.offseasonDev.combineSelectedCategory !== "string") state.offseasonDev.combineSelectedCategory = "";
+  if (!Array.isArray(state.offseasonDev.combineDetailRows)) state.offseasonDev.combineDetailRows = [];
+
   return state.offseasonDev;
 }
 
@@ -60,6 +75,99 @@ function renderSimpleRows(items = [], mapper = () => "") {
   const rows = Array.isArray(items) ? items : [];
   if (!rows.length) return `<div class="offseason-dev-list"><p>표시할 데이터가 없습니다.</p></div>`;
   return `<div class="offseason-dev-list">${rows.map(mapper).join("")}</div>`;
+}
+
+function getLotteryResult() {
+  const flow = ensureOffseasonDevState();
+  return flow.draftLotteryResult?.plan?.lottery_result || flow.draftLotteryResult?.lottery_result || {};
+}
+
+function getWinnersTop4() {
+  const lr = getLotteryResult();
+  const raw = Array.isArray(lr?.winners_top4) ? lr.winners_top4 : [];
+  return raw.map((t) => String(t || "")).filter(Boolean).slice(0, 4);
+}
+
+function combineCategorySpecs() {
+  return [
+    { key: "vertical", label: "Vertical", sort: "desc" },
+    { key: "standing_reach", label: "Standing Reach", sort: "desc" },
+    { key: "sprint_3_4", label: "3/4 Sprint", sort: "asc" },
+    { key: "lane_agility", label: "Lane Agility", sort: "asc" },
+    { key: "shuttle", label: "Shuttle", sort: "asc" },
+  ];
+}
+
+function toFiniteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getCombineValue(combine, categoryKey) {
+  if (!combine || typeof combine !== "object") return null;
+  const direct = toFiniteNumber(combine?.[categoryKey]);
+  if (direct !== null) return direct;
+  const m = combine?.measurements && typeof combine.measurements === "object" ? combine.measurements : null;
+  const d = combine?.drills && typeof combine.drills === "object" ? combine.drills : null;
+  return toFiniteNumber(m?.[categoryKey] ?? d?.[categoryKey]);
+}
+
+function extractCombineRowsFromBundle(bundle) {
+  const prospects = Array.isArray(bundle?.pool?.prospects) ? bundle.pool.prospects : [];
+  return prospects.map((p) => {
+    const combine = p?.meta?.combine && typeof p.meta.combine === "object" ? p.meta.combine : null;
+    return {
+      prospectTempId: String(p?.temp_id || p?.prospect_temp_id || ""),
+      name: String(p?.name || p?.display_name || p?.prospect_temp_id || "선수"),
+      pos: String(p?.pos || "-"),
+      team: String(p?.college_team_id || p?.school || "-"),
+      combine,
+    };
+  });
+}
+
+function buildTop10ByCategory(rows, categorySpec) {
+  const key = String(categorySpec?.key || "");
+  const sortOrder = String(categorySpec?.sort || "desc").toLowerCase();
+  const normalized = (Array.isArray(rows) ? rows : [])
+    .map((row) => ({ ...row, value: getCombineValue(row?.combine, key) }))
+    .filter((row) => row.value !== null);
+
+  normalized.sort((a, b) => {
+    if (sortOrder === "asc") return Number(a.value) - Number(b.value);
+    return Number(b.value) - Number(a.value);
+  });
+
+  return normalized.slice(0, 10);
+}
+
+function buildCombineCategoryCards(rows, categorySpecs = combineCategorySpecs()) {
+  return (Array.isArray(categorySpecs) ? categorySpecs : []).map((spec) => {
+    const top10 = buildTop10ByCategory(rows, spec);
+    return {
+      key: String(spec.key || ""),
+      label: String(spec.label || spec.key || "항목"),
+      sort: String(spec.sort || "desc").toLowerCase(),
+      top10,
+    };
+  });
+}
+
+function buildCombineDetailRows(rows, selectedCategory) {
+  const specs = combineCategorySpecs();
+  const found = specs.find((s) => String(s.key || "") === String(selectedCategory || ""));
+  if (!found) return [];
+
+  const out = (Array.isArray(rows) ? rows : [])
+    .map((row) => ({ ...row, value: getCombineValue(row?.combine, found.key) }))
+    .filter((row) => row.value !== null);
+
+  out.sort((a, b) => {
+    if (found.sort === "asc") return Number(a.value) - Number(b.value);
+    return Number(b.value) - Number(a.value);
+  });
+
+  return out;
 }
 
 function renderTeamOptionsList(pending = []) {
@@ -166,8 +274,7 @@ function renderExpiredContractsRows() {
 }
 
 function renderLotteryOddsRows() {
-  const flow = ensureOffseasonDevState();
-  const lr = flow.draftLotteryResult?.plan?.lottery_result || flow.draftLotteryResult?.lottery_result || {};
+  const lr = getLotteryResult();
   const seedOrder = Array.isArray(lr?.seed_order) ? lr.seed_order : [];
   const oddsByTeam = (lr?.odds_by_team && typeof lr.odds_by_team === "object") ? lr.odds_by_team : {};
 
@@ -193,22 +300,123 @@ function renderLotteryOddsRows() {
   `);
 }
 
-function renderOwnershipRows() {
+function renderLotteryIn4Rows() {
+  const winners = getWinnersTop4();
+  const rows = winners.map((teamId) => ({ teamId }));
+  return renderSimpleRows(rows, (row) => `
+    <div class="offseason-dev-row">
+      <div>
+        <strong>${row.teamId}</strong>
+        <div class="subtitle">로터리 당첨 (in 4)</div>
+      </div>
+      <span class="subtitle">당첨</span>
+    </div>
+  `);
+}
+
+function renderLotteryTop4OrderRows() {
+  const winners = getWinnersTop4();
+  const rows = winners.map((teamId, idx) => ({ slot: idx + 1, teamId }));
+  return renderSimpleRows(rows, (row) => `
+    <div class="offseason-dev-row">
+      <div>
+        <strong>${row.slot}픽 · ${row.teamId}</strong>
+        <div class="subtitle">로터리 상위 픽 순서 확정</div>
+      </div>
+      <span class="subtitle">R1 #${row.slot}</span>
+    </div>
+  `);
+}
+
+function renderRound1FinalOrderRows() {
   const flow = ensureOffseasonDevState();
   const turns = Array.isArray(flow.draftSettleResult?.turns) ? flow.draftSettleResult.turns : [];
   const rows = turns
-    .filter((t) => Number(t?.round) === 1 && Number(t?.slot) >= 1 && Number(t?.slot) <= 14)
+    .filter((t) => Number(t?.round) === 1 && Number(t?.slot) >= 1 && Number(t?.slot) <= 30)
     .sort((a, b) => Number(a?.slot || 0) - Number(b?.slot || 0));
 
   return renderSimpleRows(rows, (row) => `
     <div class="offseason-dev-row">
       <div>
-        <strong>R1 #${String(row?.slot || "-")} (${String(row?.pick_id || "")})</strong>
+        <strong>R1 #${String(row?.slot || "-")} · ${String(row?.pick_id || "")}</strong>
         <div class="subtitle">원 소유: ${String(row?.original_team || "-")}</div>
       </div>
-      <span class="subtitle">현 소유/지명: ${String(row?.drafting_team || "-")}</span>
+      <span class="subtitle">최종 지명권: ${String(row?.drafting_team || "-")}</span>
     </div>
   `);
+}
+
+function renderCombineOverviewCards() {
+  const flow = ensureOffseasonDevState();
+  const cards = Array.isArray(flow.combineCategoryCards) ? flow.combineCategoryCards : [];
+  if (!cards.length) {
+    return `<div class="offseason-dev-list"><p>컴바인 데이터를 찾지 못했습니다.</p></div>`;
+  }
+
+  const cardsHtml = cards.map((card) => {
+    const rowsHtml = (card?.top10 || []).map((row, idx) => `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${String(row?.name || "-")}</td>
+        <td>${String(row?.pos || "-")}</td>
+        <td>${Number(row?.value || 0).toFixed(2)}</td>
+      </tr>
+    `).join("");
+
+    return `
+      <button type="button" class="offseason-combine-card" data-offseason-combine-category="${String(card?.key || "")}">
+        <p class="offseason-combine-card-title"><strong>${String(card?.label || card?.key || "항목")}</strong><span class="subtitle">Top 10</span></p>
+        <table class="offseason-combine-mini-table">
+          <thead><tr><th>#</th><th>선수</th><th>POS</th><th>기록</th></tr></thead>
+          <tbody>${rowsHtml || `<tr><td colspan="4">데이터 없음</td></tr>`}</tbody>
+        </table>
+      </button>
+    `;
+  }).join("");
+
+  return `<div class="offseason-combine-grid">${cardsHtml}</div>`;
+}
+
+function renderCombineDetailTable() {
+  const flow = ensureOffseasonDevState();
+  const key = String(flow.combineSelectedCategory || "");
+  const spec = combineCategorySpecs().find((s) => s.key === key);
+  const label = spec?.label || key || "항목";
+  const rows = Array.isArray(flow.combineDetailRows) ? flow.combineDetailRows : [];
+
+  if (!rows.length) {
+    return `
+      <div class="offseason-dev-list">
+        <div class="offseason-dev-row"><strong>${label} 상세</strong><span class="subtitle">데이터 없음</span></div>
+        <div class="offseason-dev-actions"><button type="button" class="btn btn-secondary" data-offseason-combine-back="1">목록으로</button></div>
+      </div>
+    `;
+  }
+
+  const body = rows.map((row, idx) => `
+    <tr>
+      <td>${idx + 1}</td>
+      <td>${String(row?.name || "-")}</td>
+      <td>${String(row?.pos || "-")}</td>
+      <td>${String(row?.team || "-")}</td>
+      <td>${Number(row?.value || 0).toFixed(2)}</td>
+    </tr>
+  `).join("");
+
+  return `
+    <div class="offseason-dev-list">
+      <div class="offseason-dev-row">
+        <strong>${label} 전체 결과</strong>
+        <button type="button" class="btn btn-secondary" data-offseason-combine-back="1">목록으로</button>
+      </div>
+      <div class="offseason-combine-detail-wrap">
+        <table class="offseason-combine-detail-table">
+          <thead><tr><th>#</th><th>선수</th><th>POS</th><th>학교</th><th>기록</th></tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
 }
 
 function renderOffseasonDevFlow() {
@@ -312,7 +520,7 @@ function renderOffseasonDevFlow() {
 
   if (step === "RETIREMENT_PROCESSED") {
     const retiredRows = flow.retirementProcessResult?.retired_players || flow.retirementProcessResult?.players || [];
-    setOffseasonDevStatus("retirement/process 완료. 다음은 로터리/정산 단계입니다.");
+    setOffseasonDevStatus("retirement/process 완료. 다음은 로터리 확률 공개 단계입니다.");
     setOffseasonDevContentHtml(
       renderSimpleRows(retiredRows, (row) => `
         <div class="offseason-dev-row">
@@ -324,18 +532,60 @@ function renderOffseasonDevFlow() {
         </div>
       `)
     );
-    setOffseasonDevNextButton({ label: "다음으로 (lottery/settle)", disabled: false });
+    setOffseasonDevNextButton({ label: "다음으로 (로터리 확률)", disabled: false });
     return;
   }
 
-  if (step === "LOTTERY_SETTLED") {
-    setOffseasonDevStatus("로터리 1~14 확률/1픽 확률 + 픽 소유권 상세 단계입니다.");
+  if (step === "LOTTERY_ODDS") {
+    setOffseasonDevStatus("로터리 확률표 단계입니다. 다음으로 in 4 당첨팀을 공개합니다.");
     setOffseasonDevContentHtml(`
       <h4>로터리 확률표 (1~14)</h4>
       ${renderLotteryOddsRows()}
-      <h4>픽 소유권 상세 (R1 슬롯 1~14)</h4>
-      ${renderOwnershipRows()}
     `);
+    setOffseasonDevNextButton({ label: "다음으로 (로터리 in 4 공개)", disabled: false });
+    return;
+  }
+
+  if (step === "LOTTERY_IN4_REVEALED") {
+    setOffseasonDevStatus("로터리 당첨팀(in 4) 공개 단계입니다. 다음으로 1~4픽 순서를 공개합니다.");
+    setOffseasonDevContentHtml(`
+      <h4>로터리 당첨팀 (in 4)</h4>
+      ${renderLotteryIn4Rows()}
+    `);
+    setOffseasonDevNextButton({ label: "다음으로 (1~4픽 공개)", disabled: false });
+    return;
+  }
+
+  if (step === "LOTTERY_TOP4_ORDER_REVEALED") {
+    setOffseasonDevStatus("1~4픽 순서 공개 단계입니다. 다음으로 보호/스왑 정산 후 1~30픽을 공개합니다.");
+    setOffseasonDevContentHtml(`
+      <h4>로터리 1~4픽 순서</h4>
+      ${renderLotteryTop4OrderRows()}
+    `);
+    setOffseasonDevNextButton({ label: "다음으로 (보호/스왑 반영 후 1~30픽)", disabled: false });
+    return;
+  }
+
+  if (step === "DRAFT_SETTLED_ROUND1") {
+    setOffseasonDevStatus("보호/스왑 반영이 완료되었습니다. 최종 1라운드(1~30픽) 순서입니다.");
+    setOffseasonDevContentHtml(`
+      <h4>최종 1라운드 순서 (1~30)</h4>
+      ${renderRound1FinalOrderRows()}
+    `);
+    setOffseasonDevNextButton({ label: "다음으로 (컴바인)", disabled: false });
+    return;
+  }
+
+  if (step === "COMBINE_OVERVIEW") {
+    setOffseasonDevStatus("컴바인 항목별 Top 10 카드입니다. 카드를 누르면 전체 결과를 봅니다.");
+    setOffseasonDevContentHtml(renderCombineOverviewCards());
+    setOffseasonDevNextButton({ label: "완료", disabled: true });
+    return;
+  }
+
+  if (step === "COMBINE_DETAIL") {
+    setOffseasonDevStatus("컴바인 상세 결과입니다.");
+    setOffseasonDevContentHtml(renderCombineDetailTable());
     setOffseasonDevNextButton({ label: "완료", disabled: true });
     return;
   }
@@ -466,19 +716,40 @@ async function processRetirementStep() {
   flow.step = "RETIREMENT_PROCESSED";
 }
 
-async function runLotteryAndSettleStep() {
+async function runLotteryStepOnly() {
   const flow = ensureOffseasonDevState();
   flow.draftLotteryResult = await fetchJson("/api/offseason/draft/lottery", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
   });
+  flow.step = "LOTTERY_ODDS";
+}
+
+async function runSettleStepOnly() {
+  const flow = ensureOffseasonDevState();
   flow.draftSettleResult = await fetchJson("/api/offseason/draft/settle", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
   });
-  flow.step = "LOTTERY_SETTLED";
+  flow.step = "DRAFT_SETTLED_ROUND1";
+}
+
+async function runCombineAndLoadBundleStep() {
+  const flow = ensureOffseasonDevState();
+  flow.draftCombineResult = await fetchJson("/api/offseason/draft/combine", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  flow.draftBundleResult = await fetchJson("/api/offseason/draft/bundle");
+
+  const combineRows = extractCombineRowsFromBundle(flow.draftBundleResult);
+  flow.combineCategoryCards = buildCombineCategoryCards(combineRows, combineCategorySpecs());
+  flow.combineSelectedCategory = "";
+  flow.combineDetailRows = [];
+  flow.step = "COMBINE_OVERVIEW";
 }
 
 async function handleExpiredContractAction(playerId, action) {
@@ -518,12 +789,32 @@ async function handleExpiredContractAction(playerId, action) {
   }
 }
 
+function handleCombineCategoryClick(categoryKey) {
+  const flow = ensureOffseasonDevState();
+  const key = String(categoryKey || "");
+  if (!key) return;
+
+  const combineRows = extractCombineRowsFromBundle(flow.draftBundleResult);
+  flow.combineSelectedCategory = key;
+  flow.combineDetailRows = buildCombineDetailRows(combineRows, key);
+  flow.step = "COMBINE_DETAIL";
+  renderOffseasonDevFlow();
+}
+
+function handleCombineBackToOverview() {
+  const flow = ensureOffseasonDevState();
+  flow.step = "COMBINE_OVERVIEW";
+  renderOffseasonDevFlow();
+}
+
 async function advanceOffseasonDevStep() {
   const flow = ensureOffseasonDevState();
   const step = String(flow.step || "IDLE");
 
   if (step === "IDLE") return;
+  if (flow.busy) return;
 
+  flow.busy = true;
   setLoading(true, "오프시즌 단계 진행 중...");
   try {
     if (step === "ENTERED_OFFSEASON") {
@@ -548,15 +839,24 @@ async function advanceOffseasonDevStep() {
     } else if (step === "EXPIRED_CONTRACTS_LOADED") {
       await processRetirementStep();
     } else if (step === "RETIREMENT_PROCESSED") {
-      await runLotteryAndSettleStep();
+      await runLotteryStepOnly();
+    } else if (step === "LOTTERY_ODDS") {
+      flow.step = "LOTTERY_IN4_REVEALED";
+    } else if (step === "LOTTERY_IN4_REVEALED") {
+      flow.step = "LOTTERY_TOP4_ORDER_REVEALED";
+    } else if (step === "LOTTERY_TOP4_ORDER_REVEALED") {
+      await runSettleStepOnly();
+    } else if (step === "DRAFT_SETTLED_ROUND1") {
+      await runCombineAndLoadBundleStep();
     }
 
     flow.error = "";
     renderOffseasonDevFlow();
   } catch (e) {
     flow.error = String(e?.message || "오프시즌 단계 진행 중 오류가 발생했습니다.");
-    setOffseasonDevStatus(`오류: ${flow.error}`);
+    setOffseasonDevStatus(`오류: ${flow.error} (현재 단계에서 다시 시도하세요)`);
   } finally {
+    flow.busy = false;
     setLoading(false);
   }
 }
@@ -575,4 +875,6 @@ export {
   renderOffseasonDevFlow,
   setTeamOptionDecision,
   handleExpiredContractAction,
+  handleCombineCategoryClick,
+  handleCombineBackToOverview,
 };

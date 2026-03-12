@@ -38,6 +38,8 @@ import { renderTrainingDetail } from "../features/training/trainingDetail.js";
 import {
   advanceOffseasonDevStep,
   enterOffseasonFromChampionScreen,
+  handleCombineBackToOverview,
+  handleCombineCategoryClick,
   handleExpiredContractAction,
   setTeamOptionDecision,
 } from "../features/offseason/offseasonDevFlow.js";
@@ -85,6 +87,20 @@ function bindEvents() {
       const action = String(expiredTarget.dataset.offseasonExpiredAction || "").toUpperCase();
       if (!playerId || !action) return;
       handleExpiredContractAction(playerId, action).catch((e) => alert(e.message));
+      return;
+    }
+
+    const combineCategoryTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-combine-category]") : null;
+    if (combineCategoryTarget) {
+      const categoryKey = String(combineCategoryTarget.dataset.offseasonCombineCategory || "");
+      if (!categoryKey) return;
+      handleCombineCategoryClick(categoryKey);
+      return;
+    }
+
+    const combineBackTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-combine-back]") : null;
+    if (combineBackTarget) {
+      handleCombineBackToOverview();
     }
   });
   els.scheduleBtn.addEventListener("click", () => showScheduleScreen().catch((e) => alert(e.message)));
