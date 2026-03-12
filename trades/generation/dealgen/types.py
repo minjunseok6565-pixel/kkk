@@ -36,17 +36,17 @@ class DealGeneratorConfig:
     """
 
     # --- hard upper bounds (absolute safety)
-    max_targets_hard: int = 28
-    max_attempts_per_target_hard: int = 80
-    max_validations_hard: int = 900
-    max_evaluations_hard: int = 450
+    max_targets_hard: int = 40
+    max_attempts_per_target_hard: int = 120
+    max_validations_hard: int = 1400
+    max_evaluations_hard: int = 700
 
     # --- base budgets (scaled)
-    base_max_targets: int = 14
+    base_max_targets: int = 20
     base_beam_width: int = 12
-    base_max_attempts_per_target: int = 45
-    base_max_validations: int = 360
-    base_max_evaluations: int = 180
+    base_max_attempts_per_target: int = 60
+    base_max_validations: int = 520
+    base_max_evaluations: int = 260
     base_max_repairs: int = 2
 
     # --- "young + pick" heuristic
