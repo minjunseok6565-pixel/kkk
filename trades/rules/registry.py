@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Iterable, Optional, Sequence
+import copy
+from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from .base import Rule, TradeContext
 
@@ -43,7 +44,30 @@ def validate_all(
         rule.validate(deal, ctx)
 
 
-def get_default_registry() -> RuleRegistry:
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return bool(default)
+    if isinstance(value, (int, float)):
+        return bool(value)
+    s = str(value).strip().lower()
+    if s in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return bool(default)
+
+
+def get_default_registry(*, trade_rules: Optional[Mapping[str, Any]] = None) -> RuleRegistry:
     from .builtin import BUILTIN_RULES
 
-    return RuleRegistry(BUILTIN_RULES)
+    # Registry rules are mutable (enabled flag), so deep-copy to avoid mutating
+    # module-level BUILTIN_RULES across requests/ticks.
+    registry = RuleRegistry(copy.deepcopy(BUILTIN_RULES))
+
+    tr = trade_rules if isinstance(trade_rules, Mapping) else {}
+    roster_limit_enabled = _coerce_bool(tr.get("roster_limit_rule_enabled"), False)
+    registry.set_enabled("roster_limit", roster_limit_enabled)
+
+    return registry

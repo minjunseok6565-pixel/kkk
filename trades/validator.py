@@ -5,7 +5,7 @@ from typing import Optional, TYPE_CHECKING
 
 from .errors import TradeError, DEAL_INVALIDATED
 from .models import Deal, canonicalize_deal
-from .rules import build_trade_context, validate_all
+from .rules import build_trade_context, get_default_registry, validate_all
 
 if TYPE_CHECKING:
     from .rules.tick_context import TradeRuleTickContext
@@ -52,7 +52,13 @@ def validate_deal(
                     pass
 
         prepared_rules = getattr(tick_ctx, "prepared_rules", None) if tick_ctx is not None else None
-        validate_all(deal, ctx, prepared_rules=prepared_rules)
+        if prepared_rules is not None:
+            validate_all(deal, ctx, prepared_rules=prepared_rules)
+        else:
+            league = ctx.game_state.get("league") if isinstance(ctx.game_state, dict) else {}
+            trade_rules = league.get("trade_rules") if isinstance(league, dict) and isinstance(league.get("trade_rules"), dict) else {}
+            registry = get_default_registry(trade_rules=trade_rules)
+            validate_all(deal, ctx, registry=registry)
     except TradeError:
         raise
     except Exception as exc:
