@@ -112,6 +112,26 @@ const state = {
   scoutingPlayerSearchRequestSeq: 0,
   scoutingPlayerSearchDebounceTimer: null,
   scoutingActiveScoutId: "",
+  offseasonDev: {
+    step: "IDLE", // IDLE | ENTERED_OFFSEASON | COLLEGE_FINALIZED | COLLEGE_RESULTS_LOADED | DECLARERS_LOADED | TEAM_OPTIONS | CONTRACTS_PROCESSED | PLAYER_OPTIONS_LOADED | EXPIRED_CONTRACTS_LOADED | RETIREMENT_PROCESSED | LOTTERY_SETTLED
+    loading: false,
+    error: "",
+    championTeamId: "",
+    enterOffseasonResult: null,
+    collegeFinalizeResult: null,
+    collegeTeamsResult: null,
+    collegeLeadersResult: null,
+    collegeDeclarersResult: null,
+    pendingTeamOptions: [],
+    teamOptionDecisions: {},
+    contractsProcessResult: null,
+    playerOptionResults: null,
+    expiredContractsResult: null,
+    expiredNegotiationSessions: {},
+    retirementProcessResult: null,
+    draftLotteryResult: null,
+    draftSettleResult: null,
+  },
 };
 
 function createEmptyMarketTradeDealDraft() {

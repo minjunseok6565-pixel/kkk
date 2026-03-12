@@ -358,6 +358,98 @@ async function progressTenGamesFromHome() {
   }
 }
 
+async function ensurePostseasonChampionForDevFlow() {
+  if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
+
+  await fetchJson("/api/postseason/setup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      my_team_id: state.selectedTeamId,
+      use_random_field: true,
+    }),
+  });
+
+  for (let i = 0; i < 32; i += 1) {
+    const post = await fetchJson("/api/postseason/state");
+    const champion = String(post?.champion || "").toUpperCase();
+    if (champion) return champion;
+
+    if (!post?.playoffs) {
+      try {
+        await fetchJson("/api/postseason/play-in/my-team-game", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+      } catch (_) {
+        // best-effort: user team may have no pending play-in game
+      }
+    }
+
+    try {
+      await fetchJson("/api/postseason/playoffs/advance-my-team-game", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+    } catch (_) {
+      await fetchJson("/api/postseason/playoffs/auto-advance-round", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+    }
+  }
+
+  throw new Error("챔피언을 확정하지 못했습니다. 다시 시도해주세요.");
+}
+
+function showOffseasonDevChampionScreen({ champion } = {}) {
+  const cid = String(champion || "").toUpperCase();
+  const championName = TEAM_FULL_NAMES[cid] || cid || "미확정";
+  if (els.offseasonDevChampionTitle) {
+    els.offseasonDevChampionTitle.textContent = `플레이오프 우승 - ${championName}`;
+  }
+  if (els.offseasonDevChampionSubtitle) {
+    els.offseasonDevChampionSubtitle.textContent = `DEV 임의 진행으로 ${championName} 우승이 확정되었습니다.`;
+  }
+  if (els.offseasonDevChampionSummary) {
+    els.offseasonDevChampionSummary.textContent = "다음 단계에서 오프시즌 진입 API를 연결할 예정입니다.";
+  }
+  activateScreen(els.offseasonDevChampionScreen);
+}
+
+async function startOffseasonDevRunFromHome() {
+  if (!state.selectedTeamId) {
+    alert("먼저 팀을 선택해주세요.");
+    return;
+  }
+
+  const confirmed = await showConfirmModal({
+    title: "오프시즌 임의 진행 (DEV)",
+    body: "플레이오프를 빠르게 진행해 우승팀을 확정한 뒤 챔피언 화면으로 이동합니다.",
+    okLabel: "진행",
+    cancelLabel: "취소",
+  });
+  if (!confirmed) return;
+
+  setLoading(true, "DEV 오프시즌 임의 진행 준비 중...");
+  try {
+    const champion = await ensurePostseasonChampionForDevFlow();
+    if (state.offseasonDev && typeof state.offseasonDev === "object") {
+      state.offseasonDev.championTeamId = String(champion || "").toUpperCase();
+      state.offseasonDev.step = "IDLE";
+      state.offseasonDev.error = "";
+    }
+    showOffseasonDevChampionScreen({ champion });
+  } catch (e) {
+    alert(`오프시즌 임의 진행 준비 실패: ${e.message}`);
+  } finally {
+    setLoading(false);
+  }
+}
+
 async function loadSavesStatus() {
   try {
     const saveResult = await fetchJson("/api/game/saves");
@@ -529,6 +621,8 @@ export {
   progressNextGameFromHome,
   autoAdvanceToNextGameDayFromHome,
   progressTenGamesFromHome,
+  startOffseasonDevRunFromHome,
+  showOffseasonDevChampionScreen,
   loadSavesStatus,
   renderTeams,
   createNewGame,

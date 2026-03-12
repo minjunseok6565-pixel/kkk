@@ -8,6 +8,8 @@ function activateScreen(target) {
     els.startScreen,
     els.teamScreen,
     els.mainScreen,
+    els.offseasonDevChampionScreen,
+    els.offseasonDevFlowScreen,
     els.marketScreen,
     els.gameResultScreen,
     els.scheduleScreen,

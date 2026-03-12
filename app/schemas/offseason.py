@@ -9,6 +9,15 @@ class OffseasonContractsProcessRequest(BaseModel):
     user_team_id: str
 
 
+class OffseasonExpiredContractsRequest(BaseModel):
+    team_id: str
+
+
+class OffseasonPlayerOptionResultsRequest(BaseModel):
+    team_id: str
+    include_pending: bool = False
+
+
 class TeamOptionPendingRequest(BaseModel):
     user_team_id: str
 

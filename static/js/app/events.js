@@ -9,6 +9,7 @@ import {
   progressNextGameFromHome,
   autoAdvanceToNextGameDayFromHome,
   progressTenGamesFromHome,
+  startOffseasonDevRunFromHome,
 } from "../features/main/mainScreen.js";
 import { showMyTeamScreen, rerenderMyTeamBoard } from "../features/myteam/myTeamScreen.js";
 import { showTacticsScreen, toggleTacticsOptions, saveTacticsDraft, hasUnsavedTacticsChanges } from "../features/tactics/tacticsScreen.js";
@@ -34,6 +35,12 @@ import {
 } from "../features/college/scouting.js";
 import { showMedicalScreen } from "../features/medical/medicalScreen.js";
 import { renderTrainingDetail } from "../features/training/trainingDetail.js";
+import {
+  advanceOffseasonDevStep,
+  enterOffseasonFromChampionScreen,
+  handleExpiredContractAction,
+  setTeamOptionDecision,
+} from "../features/offseason/offseasonDevFlow.js";
 import { emitCacheEvent } from "./cacheEvents.js";
 import { CACHE_EVENT_TYPES, getPrefetchPlanForEvent, registerCachePolicyEventHandlers, runPrefetchPlan } from "./cachePolicy.js";
 
@@ -57,6 +64,29 @@ function bindEvents() {
   els.nextGamePlayBtn.addEventListener("click", () => progressNextGameFromHome().catch((e) => alert(e.message)));
   els.nextGameQuickBtn.addEventListener("click", () => autoAdvanceToNextGameDayFromHome().catch((e) => alert(e.message)));
   els.nextGameDev10Btn?.addEventListener("click", () => progressTenGamesFromHome().catch((e) => alert(e.message)));
+  els.nextGameDevOffseasonBtn?.addEventListener("click", () => startOffseasonDevRunFromHome().catch((e) => alert(e.message)));
+  els.offseasonDevChampionBackBtn?.addEventListener("click", () => showMainScreen());
+  els.offseasonDevFlowBackBtn?.addEventListener("click", () => showMainScreen());
+  els.offseasonDevEnterBtn?.addEventListener("click", () => enterOffseasonFromChampionScreen().catch((e) => alert(e.message)));
+  els.offseasonDevNextBtn?.addEventListener("click", () => advanceOffseasonDevStep().catch((e) => alert(e.message)));
+  els.offseasonDevContent?.addEventListener("click", (event) => {
+    const optionTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-team-option-contract-id]") : null;
+    if (optionTarget) {
+      const contractId = String(optionTarget.dataset.offseasonTeamOptionContractId || "");
+      const decision = String(optionTarget.dataset.offseasonTeamOptionDecision || "").toUpperCase();
+      if (!contractId) return;
+      setTeamOptionDecision(contractId, decision);
+      return;
+    }
+
+    const expiredTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-expired-player-id]") : null;
+    if (expiredTarget) {
+      const playerId = String(expiredTarget.dataset.offseasonExpiredPlayerId || "");
+      const action = String(expiredTarget.dataset.offseasonExpiredAction || "").toUpperCase();
+      if (!playerId || !action) return;
+      handleExpiredContractAction(playerId, action).catch((e) => alert(e.message));
+    }
+  });
   els.scheduleBtn.addEventListener("click", () => showScheduleScreen().catch((e) => alert(e.message)));
   els.scheduleBackBtn.addEventListener("click", () => showMainScreen());
   els.gameResultBackBtn?.addEventListener("click", () => showMainScreen());
