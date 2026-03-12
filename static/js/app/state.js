@@ -113,8 +113,9 @@ const state = {
   scoutingPlayerSearchDebounceTimer: null,
   scoutingActiveScoutId: "",
   offseasonDev: {
-    step: "IDLE", // IDLE | ENTERED_OFFSEASON | COLLEGE_FINALIZED | COLLEGE_RESULTS_LOADED | DECLARERS_LOADED | TEAM_OPTIONS | CONTRACTS_PROCESSED | PLAYER_OPTIONS_LOADED | EXPIRED_CONTRACTS_LOADED | RETIREMENT_PROCESSED | LOTTERY_SETTLED
+    step: "IDLE", // IDLE | ENTERED_OFFSEASON | COLLEGE_FINALIZED | COLLEGE_RESULTS_LOADED | DECLARERS_LOADED | TEAM_OPTIONS | CONTRACTS_PROCESSED | PLAYER_OPTIONS_LOADED | EXPIRED_CONTRACTS_LOADED | RETIREMENT_PROCESSED | LOTTERY_ODDS | LOTTERY_IN4_REVEALED | LOTTERY_TOP4_ORDER_REVEALED | DRAFT_SETTLED_ROUND1 | COMBINE_OVERVIEW | COMBINE_DETAIL
     loading: false,
+    busy: false,
     error: "",
     championTeamId: "",
     enterOffseasonResult: null,
@@ -131,6 +132,11 @@ const state = {
     retirementProcessResult: null,
     draftLotteryResult: null,
     draftSettleResult: null,
+    draftCombineResult: null,
+    draftBundleResult: null,
+    combineCategoryCards: [],
+    combineSelectedCategory: "",
+    combineDetailRows: [],
   },
 };
 
