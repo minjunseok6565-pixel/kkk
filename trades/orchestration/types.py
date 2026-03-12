@@ -103,8 +103,6 @@ class OrchestrationConfig:
     pressure_tier_max_results_bonus_high: int = 1
     pressure_tier_max_results_bonus_rush: int = 2
 
-    max_active_user_sessions: int = 4  # ACTIVE 협상 세션이 너무 많으면 신규 오퍼 억제
-
     # --- 유저 오퍼 보호(agreement+asset lock)
     lock_user_offers: bool = True
     user_offer_valid_days: int = 2  # Deprecated: user offer expiry should migrate to AI auto-end policy.
@@ -225,9 +223,7 @@ class OrchestrationConfig:
     #
     # 분류:
     # - PROBE: 0 < exceed_overpay <= probe_exceed_max
-    # - LOWBALL: probe_exceed_max < exceed_overpay <= lowball_exceed_max
-    # - 그 외: suppress(모욕/스팸 방지)
-    enable_user_reject_offers: bool = True
+    # - LOWBALL: exceed_overpay > probe_exceed_max
     skip_reject_offer_if_active_session_exists: bool = True
 
     # SERIOUS(uv!=REJECT) 오퍼를 이미 보냈으면, 같은 tick에서 PROBE/LOWBALL은 기본적으로 금지
