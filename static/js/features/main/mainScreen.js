@@ -361,7 +361,7 @@ async function progressTenGamesFromHome() {
 async function ensurePostseasonChampionForDevFlow() {
   if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
 
-  await fetchJson("/api/postseason/setup", {
+  const resolved = await fetchJson("/api/dev/postseason/fast-resolve", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -369,40 +369,11 @@ async function ensurePostseasonChampionForDevFlow() {
       use_random_field: true,
     }),
   });
-
-  for (let i = 0; i < 32; i += 1) {
-    const post = await fetchJson("/api/postseason/state");
-    const champion = String(post?.champion || "").toUpperCase();
-    if (champion) return champion;
-
-    if (!post?.playoffs) {
-      try {
-        await fetchJson("/api/postseason/play-in/my-team-game", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        });
-      } catch (_) {
-        // best-effort: user team may have no pending play-in game
-      }
-    }
-
-    try {
-      await fetchJson("/api/postseason/playoffs/advance-my-team-game", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-    } catch (_) {
-      await fetchJson("/api/postseason/playoffs/auto-advance-round", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-    }
+  const champion = String(resolved?.champion || "").toUpperCase();
+  if (!champion) {
+    throw new Error("DEV 포스트시즌 임의 확정에 실패했습니다.");
   }
-
-  throw new Error("챔피언을 확정하지 못했습니다. 다시 시도해주세요.");
+  return champion;
 }
 
 function showOffseasonDevChampionScreen({ champion } = {}) {
@@ -428,7 +399,7 @@ async function startOffseasonDevRunFromHome() {
 
   const confirmed = await showConfirmModal({
     title: "오프시즌 임의 진행 (DEV)",
-    body: "플레이오프를 빠르게 진행해 우승팀을 확정한 뒤 챔피언 화면으로 이동합니다.",
+    body: "실경기 시뮬 없이 포스트시즌 16시드/우승팀을 임의 확정한 뒤 챔피언 화면으로 이동합니다.",
     okLabel: "진행",
     cancelLabel: "취소",
   });
