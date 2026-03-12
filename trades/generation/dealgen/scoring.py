@@ -221,14 +221,6 @@ def score_deal(
 
     accept_score = sigmoid(mb, config.score_sigmoid_scale) + sigmoid(ms, config.score_sigmoid_scale)
 
-    # complexity penalty
-    n_assets = sum(len(v) for v in deal.legs.values())
-    n_players = sum(1 for leg in deal.legs.values() for a in leg if isinstance(a, PlayerAsset))
-    complexity_penalty = (
-        float(config.penalty_per_asset) * max(0, n_assets - 2)
-        + float(config.penalty_per_player) * max(0, n_players - 2)
-    )
-
     # deficit penalty (both sides)
     deficit_penalty = (
         float(config.penalty_overpay_weight) * max(0.0, -mb)
@@ -259,5 +251,4 @@ def score_deal(
     if seller_decision.verdict == DealVerdict.REJECT:
         reject_penalty += base + scale * max(0.0, -ms)
 
-    return float(accept_score + bonus - complexity_penalty - deficit_penalty - reject_penalty - repeat_penalty)
-
+    return float(accept_score + bonus - deficit_penalty - reject_penalty - repeat_penalty)
