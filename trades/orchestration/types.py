@@ -41,19 +41,19 @@ class OrchestrationConfig:
     enabled: bool = True
 
     # --- tick 실행 정책
-    min_active_teams: int = 6
-    max_active_teams: int = 14
-    deadline_bonus_active_teams: int = 6
+    min_active_teams: int = 8
+    max_active_teams: int = 18
+    deadline_bonus_active_teams: int = 8
 
     # --- 딜 생성기 호출 파라미터
-    per_team_max_results: int = 6
+    per_team_max_results: int = 8
     generator_config: Any = field(default_factory=_default_generator_config)
 
     # --- (A-4) per-team max_results 동적 스케일링
     # 동적 스케일링이 꺼져있으면 per_team_max_results(고정값)를 그대로 사용한다.
     enable_dynamic_per_team_max_results: bool = True
-    per_team_min_results: int = 3
-    per_team_max_results_cap: int = 9
+    per_team_min_results: int = 4
+    per_team_max_results_cap: int = 12
     per_team_results_activity_gamma: float = 0.70  # rank percentile 곡선(작을수록 상위팀에 더 몰림)
     per_team_results_day_exponent: float = 0.75    # day_mult 반영 강도
     per_team_results_team_jitter_strength: float = 0.08  # 팀별 미세 변동(±8%), stable hash 기반
