@@ -317,9 +317,9 @@ def make_ai_team_option_decision_policy(
     """Create an opt-in policy: AI teams evaluate TEAM options and may DECLINE.
 
     Scope:
-    - Only affects TEAM options.
-    - Only affects AI teams (team_id != user_team_id).
-    - Leaves PLAYER/ETO options as default (EXERCISE) for now.
+    - TEAM options: evaluated for AI teams (team_id != user_team_id).
+    - PLAYER/ETO options: delegated to `default_option_decision_policy`
+      (player-autonomy / agency-driven decision).
 
     The scoring is intentionally simple and uses only the passed-in game_state
     snapshot (ui_cache + season stats). It is deterministic and cheap.
@@ -337,9 +337,11 @@ def make_ai_team_option_decision_policy(
         try:
             opt_type = normalize_option_type(option.get("type"))
         except Exception:
-            return "EXERCISE"
+            return default_option_decision_policy(option, player_id, contract, game_state)
         if opt_type != "TEAM":
-            return "EXERCISE"
+            # IMPORTANT: player options should be player-driven (agency curve),
+            # not hard-coded to EXERCISE.
+            return default_option_decision_policy(option, player_id, contract, game_state)
 
         team_id = str(contract.get("team_id") or "").strip().upper()
         if not team_id or team_id == "FA":
