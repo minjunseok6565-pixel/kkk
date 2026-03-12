@@ -20,7 +20,12 @@ class _TickCtxStub:
     def get_team_situation(self, team_id: str):
         return SimpleNamespace(
             trade_posture="BUY",
-            constraints=SimpleNamespace(cooldown_active=False, cap_space=30_000_000),
+            constraints=SimpleNamespace(
+                cooldown_active=False,
+                cap_space=30_000_000,
+                apron_status="OVER_CAP",
+                deadline_pressure=0.0,
+            ),
             needs=[],
             time_horizon="RE_TOOL",
         )
@@ -30,11 +35,11 @@ class BuyTargetListingInterestTests(unittest.TestCase):
     def _catalog(self, refs):
         out_lal = TeamOutgoingCatalog(
             team_id="LAL",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple(r.player_id for r in refs if r.from_team == "LAL")},
+            player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple(r.player_id for r in refs if r.from_team == "LAL")},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players={
-                r.player_id: SimpleNamespace(buckets=("SURPLUS_LOW_FIT",))
+                r.player_id: SimpleNamespace(buckets=("SURPLUS_EXPENDABLE",))
                 for r in refs if r.from_team == "LAL"
             },
             picks={},
@@ -42,19 +47,18 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         )
         out_bos = TeamOutgoingCatalog(
             team_id="BOS",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple(r.player_id for r in refs if r.from_team == "BOS")},
+            player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple(r.player_id for r in refs if r.from_team == "BOS")},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players={
-                r.player_id: SimpleNamespace(buckets=("SURPLUS_LOW_FIT",))
+                r.player_id: SimpleNamespace(buckets=("SURPLUS_EXPENDABLE",))
                 for r in refs if r.from_team == "BOS"
             },
             picks={},
             swaps={},
         )
         return SimpleNamespace(
-            incoming_by_need_tag={"WING": tuple(refs)},
-            incoming_cheap_by_need_tag={"WING": tuple()},
+            incoming_all_players=tuple(refs),
             outgoing_by_team={"LAL": out_lal, "BOS": out_bos},
         )
 
@@ -139,7 +143,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         ]
         out_lal = TeamOutgoingCatalog(
             team_id="LAL",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple()},
+            player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple()},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players={"core1": SimpleNamespace(buckets=tuple())},
@@ -147,8 +151,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
             swaps={},
         )
         catalog = SimpleNamespace(
-            incoming_by_need_tag={"WING": tuple(refs)},
-            incoming_cheap_by_need_tag={"WING": tuple()},
+            incoming_all_players=tuple(refs),
             outgoing_by_team={"LAL": out_lal, "BOS": self._catalog(refs).outgoing_by_team["BOS"]},
         )
         trade_market = {
@@ -180,7 +183,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         refs = [IncomingPlayerRef("core2", "LAL", "WING", 0.8, 10.0, 8.0, 2.0, 26.0)]
         out_lal = TeamOutgoingCatalog(
             team_id="LAL",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple()},
+            player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple()},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players={"core2": SimpleNamespace(buckets=tuple())},
@@ -188,8 +191,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
             swaps={},
         )
         catalog = SimpleNamespace(
-            incoming_by_need_tag={"WING": tuple(refs)},
-            incoming_cheap_by_need_tag={"WING": tuple()},
+            incoming_all_players=tuple(refs),
             outgoing_by_team={"LAL": out_lal, "BOS": self._catalog(refs).outgoing_by_team["BOS"]},
         )
 
@@ -210,7 +212,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         refs = [IncomingPlayerRef("core1", "LAL", "WING", 0.8, 10.0, 8.0, 2.0, 26.0)]
         out_lal = TeamOutgoingCatalog(
             team_id="LAL",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple()},
+            player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple()},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players={"core1": SimpleNamespace(buckets=tuple(), return_ban_teams=tuple())},
@@ -219,7 +221,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         )
         out_bos = TeamOutgoingCatalog(
             team_id="BOS",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple()},
+            player_ids_by_bucket={"SURPLUS_EXPENDABLE": tuple()},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players={},
@@ -227,8 +229,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
             swaps={},
         )
         catalog = SimpleNamespace(
-            incoming_by_need_tag={"WING": tuple(refs)},
-            incoming_cheap_by_need_tag={"WING": tuple()},
+            incoming_all_players=tuple(refs),
             outgoing_by_team={"LAL": out_lal, "BOS": out_bos},
         )
         listed_target = TargetCandidate(
@@ -257,6 +258,51 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         )
 
         self.assertGreaterEqual(len(candidates), 1)
+
+    def test_listing_boost_can_outweigh_negative_contract_gap_when_capped(self):
+        refs = [
+            IncomingPlayerRef(
+                "listed_neg", "LAL", "WING", 0.82, 18.0, 18.0, 3.0, 27.0,
+                basketball_total=22.0,
+                contract_gap_cap_share=-0.06,
+            ),
+            IncomingPlayerRef(
+                "plain_pos", "LAL", "WING", 0.82, 18.0, 18.0, 3.0, 27.0,
+                basketball_total=22.0,
+                contract_gap_cap_share=0.01,
+            ),
+        ]
+        trade_market = {
+            "listings": {
+                "listed_neg": {
+                    "player_id": "listed_neg",
+                    "team_id": "LAL",
+                    "status": "ACTIVE",
+                    "visibility": "PUBLIC",
+                    "priority": 1.0,
+                    "updated_at": "2026-02-10",
+                }
+            }
+        }
+
+        cfg = DealGeneratorConfig(
+            buy_target_listing_interest_boost_base=0.30,
+            buy_target_listing_interest_priority_scale=0.45,
+            buy_target_listing_interest_cap=0.90,
+            buy_target_contract_base_weight=0.25,
+        )
+
+        out = select_targets_buy(
+            "BOS",
+            _TickCtxStub(trade_market=trade_market),
+            self._catalog(refs),
+            cfg,
+            budget=self._budget(),
+            rng=random.Random(11),
+            banned_players=set(),
+        )
+
+        self.assertEqual(out[0].player_id, "listed_neg")
 
 
 if __name__ == "__main__":

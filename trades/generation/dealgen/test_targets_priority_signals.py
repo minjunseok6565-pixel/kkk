@@ -26,10 +26,10 @@ class _TickCtxStub:
 
 
 class SellTargetPrioritySignalTests(unittest.TestCase):
-    def _catalog(self, players):
+    def _catalog(self, players, *, bucket="SURPLUS_EXPENDABLE"):
         out_cat = TeamOutgoingCatalog(
             team_id="LAL",
-            player_ids_by_bucket={"SURPLUS_LOW_FIT": tuple(players.keys())},
+            player_ids_by_bucket={str(bucket): tuple(players.keys())},
             pick_ids_by_bucket={"FIRST_SAFE": tuple(), "FIRST_SENSITIVE": tuple(), "SECOND": tuple()},
             swap_ids=tuple(),
             players=players,
@@ -38,13 +38,18 @@ class SellTargetPrioritySignalTests(unittest.TestCase):
         )
         return SimpleNamespace(outgoing_by_team={"LAL": out_cat})
 
-    def _player(self, pid: str, *, surplus: float = 0.4):
+    def _player(self, pid: str, *, surplus: float = 0.4, bucket="SURPLUS_EXPENDABLE", raw=None, norm=None, contract_pressure=0.0):
+        raw_v = float(surplus) if raw is None and norm is None else raw
+        norm_v = float(surplus) if raw is None and norm is None else norm
         return SimpleNamespace(
             player_id=pid,
             lock=None,
             recent_signing_banned_until=None,
-            buckets=("SURPLUS_LOW_FIT",),
+            buckets=(str(bucket),),
             surplus_score=float(surplus),
+            raw_trade_block_score=raw_v,
+            trade_block_score=norm_v,
+            contract_pressure=float(contract_pressure),
             is_expiring=False,
             market=SimpleNamespace(total=10.0),
             salary_m=8.0,
@@ -97,7 +102,7 @@ class SellTargetPrioritySignalTests(unittest.TestCase):
             banned_players=set(),
         )
 
-        # Both receive the same capped signal boost, so existing quality key (surplus) keeps order.
+        # Both receive the same capped signal boost, so existing quality key keeps order.
         self.assertEqual(out[0].player_id, "p1")
 
     def test_listing_signal_does_not_affect_sell_target_order(self):
@@ -136,6 +141,49 @@ class SellTargetPrioritySignalTests(unittest.TestCase):
         )
 
         self.assertEqual(out[0].player_id, "p1")
+
+    def test_raw_trade_block_score_priority(self):
+        cfg = DealGeneratorConfig()
+        tick_ctx = _TickCtxStub()
+        catalog = self._catalog(
+            {
+                "p1": self._player("p1", surplus=0.9, raw=0.1, bucket="SURPLUS_EXPENDABLE"),
+                "p2": self._player("p2", surplus=0.1, raw=0.8, bucket="SURPLUS_EXPENDABLE"),
+            },
+            bucket="SURPLUS_EXPENDABLE",
+        )
+
+        out = select_targets_sell(
+            "LAL",
+            tick_ctx,
+            catalog,
+            cfg,
+            budget=self._budget(),
+            rng=_DeterministicRng(),
+            banned_players=set(),
+        )
+        self.assertEqual(out[0].player_id, "p2")
+
+    def test_trade_block_score_fallback_works_when_raw_missing(self):
+        cfg = DealGeneratorConfig()
+        tick_ctx = _TickCtxStub()
+        catalog = self._catalog(
+            {
+                "p1": self._player("p1", surplus=0.1, bucket="SURPLUS_EXPENDABLE", raw=None, norm=0.2),
+                "p2": self._player("p2", surplus=0.9, bucket="SURPLUS_EXPENDABLE", raw=None, norm=0.7),
+            }
+        )
+
+        out = select_targets_sell(
+            "LAL",
+            tick_ctx,
+            catalog,
+            cfg,
+            budget=self._budget(),
+            rng=_DeterministicRng(),
+            banned_players=set(),
+        )
+        self.assertEqual(out[0].player_id, "p2")
 
 
 if __name__ == "__main__":

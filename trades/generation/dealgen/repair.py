@@ -12,6 +12,7 @@ from ...rules.policies.salary_matching_policy import SalaryMatchingParams, check
 
 from .types import DealGeneratorConfig, DealGeneratorBudget, DealGeneratorStats, DealCandidate, RuleFailureKind, parse_trade_error
 from .utils import (
+    SURPLUS_BUCKETS_EFFECTIVE,
     _count_picks,
     _count_players,
     _current_pick_ids,
@@ -451,8 +452,7 @@ def _repair_second_apron_salary_mismatch(
             "FILLER_BAD_CONTRACT",
             "FILLER_CHEAP",
             "CONSOLIDATE",
-            "SURPLUS_REDUNDANT",
-            "SURPLUS_LOW_FIT",
+        ) + SURPLUS_BUCKETS_EFFECTIVE + (
             "VETERAN_SALE",
         )
 
@@ -556,8 +556,7 @@ def _repair_second_apron_salary_mismatch(
         scan_buckets2: Tuple[BucketId, ...] = (
             "FILLER_CHEAP",
             "FILLER_BAD_CONTRACT",
-            "SURPLUS_REDUNDANT",
-            "SURPLUS_LOW_FIT",
+        ) + SURPLUS_BUCKETS_EFFECTIVE + (
             "CONSOLIDATE",
             "VETERAN_SALE",
         )
@@ -763,5 +762,3 @@ def _repair_pick_rules(cand: DealCandidate, team_id: str, catalog: TradeAssetCat
             cand.tags.append("repair:stepien_replace_second")
 
     return True
-
-

@@ -9,7 +9,7 @@ from ...models import Deal, PlayerAsset
 from ...valuation.types import DealVerdict
 
 from ..generation_tick import TradeGenerationTickContext
-from ..asset_catalog import TradeAssetCatalog, TeamOutgoingCatalog, PlayerTradeCandidate
+from ..asset_catalog import TradeAssetCatalog, TeamOutgoingCatalog, PlayerTradeCandidate, BucketId
 
 from .types import DealGeneratorConfig, DealGeneratorBudget, DealGeneratorStats, DealProposal, DealCandidate
 from .repair import repair_until_valid
@@ -388,7 +388,7 @@ def maybe_apply_fit_swap(
 
     # replacement 후보 풀
     exclude = set(outgoing_pids) | set(protected)
-    buckets = ("SURPLUS_LOW_FIT", "SURPLUS_REDUNDANT", "CONSOLIDATE", "FILLER_CHEAP")
+    buckets: Tuple[BucketId, ...] = ("SURPLUS_EXPENDABLE", "CONSOLIDATE", "FILLER_CHEAP")
     pool = _pick_replacement_pool(
         giver_out,
         buckets=buckets,

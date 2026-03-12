@@ -43,7 +43,7 @@ class DealGeneratorConfig:
 
     # --- base budgets (scaled)
     base_max_targets: int = 14
-    base_beam_width: int = 8
+    base_beam_width: int = 12
     base_max_attempts_per_target: int = 45
     base_max_validations: int = 360
     base_max_evaluations: int = 180
@@ -65,11 +65,95 @@ class DealGeneratorConfig:
     young_throwin_max_candidates: int = 6
 
     # --- deal shape constraints (generator-side)
-    max_assets_per_side: int = 6
-    max_players_moved_total: int = 4
-    max_players_per_side: int = 2
-    max_picks_per_side: int = 3
-    max_seconds_per_side: int = 2
+    skeleton_overhaul_enabled: bool = True
+    skeleton_modifiers_enabled: bool = True
+    modifier_max_variants_per_candidate: int = 3
+    modifier_protection_enabled: bool = True
+    modifier_swap_substitute_enabled: bool = True
+    modifier_protection_default_ladder: Tuple[str, ...] = ("prot_light", "prot_mid", "prot_heavy")
+    skeleton_gate_strictness: float = 0.35
+    skeleton_false_negative_bias: float = 0.75
+    max_assets_per_side: int = 9
+    max_players_moved_total: int = 7
+    max_players_per_side: int = 4
+    max_picks_per_side: int = 4
+    max_seconds_per_side: int = 4
+
+    # --- target tier routing (phase-4)
+    skeleton_route_role: Tuple[str, ...] = (
+        "compat.picks_only",
+        "compat.young_plus_pick",
+        "compat.p4p_salary",
+        "compat.consolidate_2_for_1",
+        "player_swap.role_swap_small_delta",
+        "player_swap.fit_swap_2_for_2",
+        "player_swap.one_for_two_depth",
+        "player_swap.bench_bundle_for_role",
+        "player_swap.change_of_scenery_young",
+        "timeline.veteran_for_young",
+        "salary_cleanup.rental_expiring_plus_second",
+        "salary_cleanup.pure_absorb_for_asset",
+        "salary_cleanup.partial_dump_for_expiring",
+        "salary_cleanup.bad_money_swap",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+        "pick_engineering.swap_purchase",
+        "pick_engineering.swap_substitute_for_first",
+    )
+    skeleton_route_starter: Tuple[str, ...] = (
+        "compat.picks_only",
+        "compat.young_plus_pick",
+        "compat.p4p_salary",
+        "compat.consolidate_2_for_1",
+        "player_swap.role_swap_small_delta",
+        "player_swap.fit_swap_2_for_2",
+        "player_swap.one_for_two_depth",
+        "player_swap.starter_for_two_rotation",
+        "player_swap.three_for_one_upgrade",
+        "player_swap.bench_bundle_for_role",
+        "player_swap.change_of_scenery_young",
+        "timeline.veteran_for_young",
+        "timeline.veteran_for_young_plus_protected_first",
+        "salary_cleanup.rental_expiring_plus_second",
+        "salary_cleanup.pure_absorb_for_asset",
+        "salary_cleanup.partial_dump_for_expiring",
+        "salary_cleanup.bad_money_swap",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+        "pick_engineering.swap_purchase",
+        "pick_engineering.swap_substitute_for_first",
+    )
+    skeleton_route_high_starter: Tuple[str, ...] = (
+        "compat.picks_only",
+        "compat.young_plus_pick",
+        "compat.p4p_salary",
+        "compat.consolidate_2_for_1",
+        "player_swap.role_swap_small_delta",
+        "player_swap.fit_swap_2_for_2",
+        "player_swap.one_for_two_depth",
+        "player_swap.starter_for_two_rotation",
+        "player_swap.three_for_one_upgrade",
+        "player_swap.star_lateral_plus_delta",
+        "timeline.veteran_for_young",
+        "timeline.veteran_for_young_plus_protected_first",
+        "timeline.bluechip_plus_first_plus_swap",
+        "salary_cleanup.rental_expiring_plus_second",
+        "salary_cleanup.pure_absorb_for_asset",
+        "salary_cleanup.partial_dump_for_expiring",
+        "salary_cleanup.bad_money_swap",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+        "pick_engineering.swap_purchase",
+        "pick_engineering.swap_substitute_for_first",
+    )
+    skeleton_route_pick_only: Tuple[str, ...] = (
+        "compat.picks_only",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+        "pick_engineering.swap_purchase",
+        "pick_engineering.swap_substitute_for_first",
+        "salary_cleanup.pure_absorb_for_asset",
+    )
 
     # --- sweetener loop
     sweetener_enabled: bool = True
@@ -136,11 +220,6 @@ class DealGeneratorConfig:
     fit_swap_weights_win_now: Tuple[float, float, float] = (0.05, 0.70, 0.25)
     fit_swap_weights_neutral: Tuple[float, float, float] = (0.20, 0.60, 0.20)
 
-    # --- target selection / incoming pool
-    need_tags_max: int = 4
-    incoming_pool_per_tag: int = 60
-    incoming_use_cheap_pool: bool = True
-
     # --- target diversity / spam prevention (v2 absorption)
     # 동일 타깃(같은 선수)이 결과 상단에 반복 노출되는 것을 억제하기 위한 soft penalty.
     # v2는 core 단계에서 target_seen 카운트 기반으로 score를 감점한다.
@@ -158,6 +237,53 @@ class DealGeneratorConfig:
     buy_target_listing_interest_need_weight_scale: float = 0.25
     buy_target_listing_interest_cap: float = 0.85
 
+    # --- buy retrieval: tiered market scan (stage 1 foundation)
+    buy_target_listed_min_quota: int = 6
+    buy_target_listed_max_share: float = 0.75
+    buy_target_non_listed_base_quota: int = 8
+    buy_target_non_listed_deadline_bonus_max: int = 12
+
+    buy_target_max_teams_scanned_base: int = 8
+    buy_target_max_teams_scanned_deadline_bonus: int = 18
+    buy_target_max_players_scanned_base: int = 120
+    buy_target_max_players_scanned_deadline_bonus: int = 220
+
+    buy_target_expand_tier2_enabled: bool = True
+    buy_target_expand_tier2_budget_share: float = 0.35
+    buy_target_retrieval_iteration_cap: int = 400
+
+    buy_target_need_weight_scale: float = 0.55
+    buy_target_need_mismatch_floor: float = -0.20
+    buy_target_market_weight: float = 0.30
+    buy_target_fit_weight: float = 0.45
+
+    # --- buy ranking: contract-aware replacement (salary direct penalty removed)
+    buy_target_player_core_weight_fit: float = 0.50
+    buy_target_player_core_weight_market: float = 0.35
+    buy_target_player_core_weight_need: float = 0.35
+
+    buy_target_contract_gap_softness_cap_share: float = 0.060
+    buy_target_contract_base_weight: float = 0.30
+
+    buy_target_contract_apron_mult_below_cap: float = 0.55
+    buy_target_contract_apron_mult_over_cap: float = 0.90
+    buy_target_contract_apron_mult_above_1st: float = 1.25
+    buy_target_contract_apron_mult_above_2nd: float = 1.70
+
+    buy_target_contract_posture_mult_aggressive_buy: float = 1.10
+    buy_target_contract_posture_mult_soft_buy: float = 1.00
+    buy_target_contract_posture_mult_stand_pat: float = 0.90
+    buy_target_contract_posture_mult_soft_sell: float = 0.70
+    buy_target_contract_posture_mult_sell: float = 0.60
+
+    buy_target_contract_deadline_mult_min: float = 0.90
+    buy_target_contract_deadline_mult_max: float = 1.15
+
+    buy_target_contract_team_sensitivity_min: float = 0.35
+    buy_target_contract_team_sensitivity_max: float = 2.20
+
+    buy_target_pre_score_contract_weight: float = 0.18
+
     # --- proactive listing controls (AI)
     ai_proactive_listing_enabled: bool = True
     ai_proactive_listing_team_daily_cap: int = 2
@@ -168,6 +294,50 @@ class DealGeneratorConfig:
     ai_proactive_listing_ttl_days_default: int = 5
     ai_proactive_listing_priority_base: float = 0.45
     ai_proactive_listing_priority_span: float = 0.35
+
+    # proactive listing cadence (listing only; proposal generation cadence is unchanged)
+    ai_proactive_listing_cadence: str = "WEEKLY"  # DAILY | WEEKLY
+    ai_proactive_listing_anchor_weekday: int = 0  # 0=Mon .. 6=Sun
+
+    # proactive listing threshold gating
+    ai_proactive_listing_threshold_enabled: bool = True
+    ai_proactive_listing_threshold_default: float = 0.55
+    ai_proactive_listing_bucket_thresholds: Dict[str, Dict[str, float]] = field(default_factory=lambda: {
+        "AGGRESSIVE_BUY": {
+            "SURPLUS_EXPENDABLE": 0.66,
+            "FILLER_BAD_CONTRACT": 0.80,
+            "VETERAN_SALE": 0.90,
+        },
+        "SOFT_BUY": {
+            "SURPLUS_EXPENDABLE": 0.62,
+            "FILLER_BAD_CONTRACT": 0.82,
+            "VETERAN_SALE": 0.92,
+        },
+        "STAND_PAT": {
+            "SURPLUS_EXPENDABLE": 0.56,
+            "FILLER_BAD_CONTRACT": 0.86,
+            "VETERAN_SALE": 0.95,
+        },
+        "SOFT_SELL": {
+            "SURPLUS_EXPENDABLE": 0.46,
+            "FILLER_BAD_CONTRACT": 0.70,
+            "VETERAN_SALE": 0.45,
+        },
+        "SELL": {
+            "SURPLUS_EXPENDABLE": 0.40,
+            "FILLER_BAD_CONTRACT": 0.62,
+            "VETERAN_SALE": 0.35,
+        },
+    })
+
+    # threshold modifiers
+    ai_proactive_listing_threshold_horizon_win_now_delta: float = -0.03
+    ai_proactive_listing_threshold_horizon_rebuild_delta: float = -0.05
+    ai_proactive_listing_threshold_urgency_cut: float = 0.75
+    ai_proactive_listing_threshold_urgency_delta: float = -0.03
+    ai_proactive_listing_threshold_cooldown_active_delta: float = 0.05
+    ai_proactive_listing_threshold_min: float = 0.10
+    ai_proactive_listing_threshold_max: float = 0.95
 
     # --- opponent diversity / spam prevention
     opponent_repeat_penalty: float = 0.25
@@ -262,11 +432,35 @@ class DealGeneratorStats:
     fit_swap_candidates_tried: int = 0
     fit_swap_success: int = 0
 
+    # hard-cap monitoring
+    budget_validation_cap_hits: int = 0
+    budget_evaluation_cap_hits: int = 0
+    hard_validation_cap_hits: int = 0
+    hard_evaluation_cap_hits: int = 0
+
+    # skeleton observability (phase-5)
+    unique_skeleton_count: int = 0
+    modifier_candidates: int = 0
+    modifier_applied_candidates: int = 0
+    modifier_success_rate: float = 0.0
+
+    skeleton_id_counts: Dict[str, int] = field(default_factory=dict)
+    skeleton_domain_counts: Dict[str, int] = field(default_factory=dict)
+    target_tier_counts: Dict[str, int] = field(default_factory=dict)
+    arch_compat_counts: Dict[str, int] = field(default_factory=dict)
+    modifier_trace_counts: Dict[str, int] = field(default_factory=dict)
+
     # failure kind -> count
     failures_by_kind: Dict[str, int] = field(default_factory=dict)
 
     def bump_failure(self, kind: str) -> None:
         self.failures_by_kind[kind] = int(self.failures_by_kind.get(kind, 0)) + 1
+
+    def bump_counter(self, bucket: Dict[str, int], key: str) -> None:
+        k = str(key or "")
+        if not k:
+            return
+        bucket[k] = int(bucket.get(k, 0)) + 1
 
 
 # =============================================================================
@@ -311,6 +505,13 @@ class DealCandidate:
     # for debug/tagging
     focal_player_id: str
     archetype: str
+
+    # v3 skeleton metadata (phase-1 compatibility introduction)
+    skeleton_id: str = ""
+    skeleton_domain: str = ""
+    target_tier: str = ""
+    compat_archetype: str = ""
+    modifier_trace: List[str] = field(default_factory=list)
 
     tags: List[str] = field(default_factory=list)
     repairs_used: int = 0

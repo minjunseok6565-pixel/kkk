@@ -25,6 +25,10 @@ from ..asset_catalog import (
 
 from .types import DealGeneratorConfig
 
+SURPLUS_BUCKETS_EFFECTIVE: Tuple[BucketId, ...] = (
+    "SURPLUS_EXPENDABLE",
+)
+
 # =============================================================================
 # Rule SSOT helpers (trade_rules / apron thresholds)
 # =============================================================================
@@ -126,6 +130,111 @@ def _estimate_team_payroll_after_dollars(
                 incoming += _player_salary_dollars(tick_ctx, a.player_id)
 
     return float(payroll_before - outgoing + incoming)
+
+
+
+
+def _smoothstep01(x: Any) -> float:
+    """Clamp to [0, 1] then apply smoothstep curve x*x*(3-2x)."""
+    try:
+        xf = float(x)
+    except Exception:
+        xf = 0.0
+    if xf <= 0.0:
+        return 0.0
+    if xf >= 1.0:
+        return 1.0
+    return xf * xf * (3.0 - 2.0 * xf)
+
+
+def _safe_norm(x: Any, lo: Any, hi: Any) -> float:
+    """Best-effort normalization to [0, 1]; degenerate ranges return 0."""
+    try:
+        xv = float(x)
+        lov = float(lo)
+        hiv = float(hi)
+    except Exception:
+        return 0.0
+    if hiv <= lov:
+        return 0.0
+    if xv <= lov:
+        return 0.0
+    if xv >= hiv:
+        return 1.0
+    return (xv - lov) / (hiv - lov)
+
+
+def compute_buy_retrieval_caps(team_situation: Any, cfg: DealGeneratorConfig) -> Dict[str, float]:
+    """Compute BUY retrieval intensity and dynamic scan caps (stage-1 shared helper)."""
+    try:
+        deadline = float(getattr(getattr(team_situation, "constraints", None), "deadline_pressure", 0.0) or 0.0)
+    except Exception:
+        deadline = 0.0
+    try:
+        urgency = float(getattr(team_situation, "urgency", 0.0) or 0.0)
+    except Exception:
+        urgency = 0.0
+
+    d = max(0.0, min(1.0, deadline))
+    u = max(0.0, min(1.0, urgency))
+    intensity = max(0.0, min(1.0, 0.65 * d + 0.35 * u))
+    shaped = _smoothstep01(intensity)
+
+    teams_cap = int(max(1, int(cfg.buy_target_max_teams_scanned_base) + round(float(cfg.buy_target_max_teams_scanned_deadline_bonus) * shaped)))
+    players_cap = int(max(1, int(cfg.buy_target_max_players_scanned_base) + round(float(cfg.buy_target_max_players_scanned_deadline_bonus) * shaped)))
+    non_listed_quota = int(max(0, int(cfg.buy_target_non_listed_base_quota) + round(float(cfg.buy_target_non_listed_deadline_bonus_max) * intensity)))
+
+    return {
+        "deadline_pressure": d,
+        "urgency": u,
+        "intensity": intensity,
+        "intensity_shaped": shaped,
+        "teams_cap": float(teams_cap),
+        "players_cap": float(players_cap),
+        "non_listed_quota": float(non_listed_quota),
+    }
+
+
+def classify_target_tier(
+    *,
+    target: Optional[Any] = None,
+    sale_asset: Optional[Any] = None,
+    match_tag: str = "",
+    config: Optional[DealGeneratorConfig] = None,
+) -> str:
+    """거래 focal asset을 tier로 분류한다.
+
+    반환값: ROLE | STARTER | HIGH_STARTER | STAR | PICK_ONLY
+    - target(BUY) 또는 sale_asset(SELL) 중 하나를 입력한다.
+    - threshold는 문서 기준의 단순 초기값이며, strictness 파라미터로 완화/강화 가능.
+    """
+
+    _ = config  # phase-2: 인터페이스 고정(추후 strictness/bias 반영 시 사용)
+
+    focus = target if target is not None else sale_asset
+    if focus is None:
+        return "STARTER"
+
+    market = float(getattr(focus, "market_total", 0.0) or 0.0)
+    salary_m = float(getattr(focus, "salary_m", 0.0) or 0.0)
+    remaining_years = float(getattr(focus, "remaining_years", 0.0) or 0.0)
+    need_tag = str(getattr(focus, "need_tag", "") or "").upper()
+    tag = str(match_tag or "").upper()
+    is_expiring = bool(getattr(focus, "is_expiring", False)) or (remaining_years <= 1.1)
+
+    if "PICK" in need_tag or "PICK" in tag:
+        return "PICK_ONLY"
+
+    if is_expiring and market <= 58.0 and salary_m <= 30.0:
+        return "ROLE"
+
+    if market >= 86.0:
+        return "STAR"
+    if market >= 72.0:
+        return "HIGH_STARTER"
+    if market >= 52.0:
+        return "STARTER"
+    return "ROLE"
 
 
 
@@ -330,7 +439,7 @@ def _split_young_candidates(
     Filters:
     - receiver return_ban_teams + learned banned_receivers_by_player
     - aggregation_solo_only excluded if must_be_aggregation_friendly=True
-    - uses buckets (SURPLUS_LOW_FIT, SURPLUS_REDUNDANT, FILLER_CHEAP, CONSOLIDATE)
+    - uses buckets (SURPLUS_EXPENDABLE, FILLER_CHEAP, CONSOLIDATE)
 
     """
     receiver = str(receiver_team_id).upper() if receiver_team_id else None
@@ -368,7 +477,7 @@ def _split_young_candidates(
 
     # Base pool from outgoing player buckets (same as existing v1 youngish selection)
     base: List[PlayerTradeCandidate] = []
-    for b in ("SURPLUS_LOW_FIT", "SURPLUS_REDUNDANT", "FILLER_CHEAP", "CONSOLIDATE"):
+    for b in SURPLUS_BUCKETS_EFFECTIVE + ("FILLER_CHEAP", "CONSOLIDATE"):
         for pid in out.player_ids_by_bucket.get(b, tuple()):
             pid_s = str(pid)
             if pid_s in banned_players:
@@ -702,9 +811,7 @@ def _pick_return_player_salaryish_with_need(
 
     # v2의 "match" 후보 풀 감각을 v1에 맞게 최소 구현:
     # (즉시전력/가치자산/샐매 가능 바디가 섞이되 CORE는 포함하지 않음)
-    buckets: Tuple[BucketId, ...] = (
-        "SURPLUS_LOW_FIT",
-        "SURPLUS_REDUNDANT",
+    buckets: Tuple[BucketId, ...] = SURPLUS_BUCKETS_EFFECTIVE + (
         "CONSOLIDATE",
         "FILLER_CHEAP",
         "FILLER_BAD_CONTRACT",

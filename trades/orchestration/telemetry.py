@@ -43,11 +43,21 @@ def build_tick_summary_payload(
 ) -> Dict[str, Any]:
     batch_rows = []
     for b in batches:
+        stats_dict = asdict(b.stats) if b.stats is not None else None
+        obs = None
+        if isinstance(stats_dict, dict):
+            obs = {
+                "unique_skeleton_count": int(stats_dict.get("unique_skeleton_count", 0) or 0),
+                "modifier_success_rate": float(stats_dict.get("modifier_success_rate", 0.0) or 0.0),
+                "skeleton_domain_counts": dict(stats_dict.get("skeleton_domain_counts") or {}),
+                "target_tier_counts": dict(stats_dict.get("target_tier_counts") or {}),
+            }
         batch_rows.append(
             {
                 "initiator_team_id": b.initiator_team_id,
                 "num_proposals": len(b.proposals or []),
-                "stats": asdict(b.stats) if b.stats is not None else None,
+                "stats": stats_dict,
+                "observability": obs,
             }
         )
 
