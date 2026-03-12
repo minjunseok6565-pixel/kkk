@@ -359,14 +359,14 @@ class DealGeneratorConfig:
     penalty_opponent_overpay_weight: float = 0.85
 
     # REJECT를 강하게 벌점(유저 체감상 "말도 안 되는 오퍼" 상위 노출 방지)
-    reject_penalty_base: float = 0.35
-    reject_penalty_scale: float = 0.06
+    reject_penalty_base: float = 0.26
+    reject_penalty_scale: float = 0.04
 
     # discard gate: 평가 결과가 너무 나쁘면 후보에서 제거
     discard_if_overpay_below: float = -18.0  # buyer margin이 이보다 더 나쁘면 후보 폐기
     discard_if_any_margin_below: float = -22.0  # 어느 한쪽이 이보다 나쁘면 폐기
-    discard_if_reject_margin_below: float = -14.0  # REJECT인 팀 margin이 이보다 나쁘면 폐기
-    discard_if_both_margins_below: float = -10.0
+    discard_if_reject_margin_below: float = -18.0  # REJECT인 팀 margin이 이보다 나쁘면 폐기
+    discard_if_both_margins_below: float = -13.0
 
     # --- RNG determinism
     deterministic_seed_salt: str = "deal_generator_v2"

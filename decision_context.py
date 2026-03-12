@@ -586,20 +586,20 @@ def build_decision_context(
     finance_penalty_scale = lerp(0.40, 1.60, eff_fin_cons)
 
     # Min surplus: tougher negotiation means require more surplus.
-    min_surplus_required = lerp(-0.03, 0.10, eff_neg_tough)
+    min_surplus_required = lerp(-0.04, 0.085, eff_neg_tough)
     if posture in ("SELL", "SOFT_SELL"):
-        min_surplus_required += 0.03
+        min_surplus_required += 0.02
     elif posture == "AGGRESSIVE_BUY":
-        min_surplus_required -= 0.02
+        min_surplus_required -= 0.03
     min_surplus_required = float(min_surplus_required)
 
     # Overpay budget / counter rate (from C, adapted to dc2)
     buy_factor = float(POSTURE_BUY_FACTOR.get(posture, 0.25))
-    overpay_budget = 0.18 * eff_win_now * urgency * buy_factor * (1.0 - 0.45 * eff_neg_tough)
-    overpay_budget = clamp(overpay_budget, 0.0, 0.22)
+    overpay_budget = 0.20 * eff_win_now * urgency * buy_factor * (1.0 - 0.40 * eff_neg_tough)
+    overpay_budget = clamp(overpay_budget, 0.0, 0.26)
 
-    counter_rate = lerp(0.35, 0.80, eff_neg_tough) * lerp(1.0, 0.70, urgency)
-    counter_rate = clamp(counter_rate, 0.10, 0.95)
+    counter_rate = lerp(0.30, 0.72, eff_neg_tough) * lerp(1.0, 0.75, urgency)
+    counter_rate = clamp(counter_rate, 0.08, 0.90)
 
     relationship_scale = lerp(0.0, 1.5, eff_rel_sens)
 
