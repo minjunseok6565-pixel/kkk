@@ -223,7 +223,8 @@ def build_trade_rule_tick_context(
         raise RuntimeError(f"Invalid trade context snapshot: league.season_year invalid: {y!r}") from exc
 
     # Prepare sorted enabled rules once (avoid per-deal registry build + sort)
-    registry = get_default_registry()
+    trade_rules = league.get("trade_rules") if isinstance(league.get("trade_rules"), dict) else {}
+    registry = get_default_registry(trade_rules=trade_rules)
     enabled = [r for r in registry.list_rules() if getattr(r, "enabled", False)]
     prepared_rules = sorted(enabled, key=lambda r: (getattr(r, "priority", 0), getattr(r, "rule_id", "")))
 
