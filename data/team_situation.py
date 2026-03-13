@@ -1092,27 +1092,57 @@ class TeamSituationEvaluator:
                 return str(OFF_TAG_BY_ROLE.get(role, f"OFF_{str(role).upper()}"))
             return str(DEF_TAG_BY_ROLE.get(role, f"DEF_{str(role).upper()}"))
 
-        def _prefix_if_short(tag: str, bucket: Optional[str]) -> str:
-            if bucket in ("G", "W", "B") and shortage.get(bucket, False):
-                return f"{bucket}_{tag}"
+        def _prefix_if_short(tag: str, buckets: Optional[tuple[str, ...]]) -> str:
+            # Keep canonical tag unless at least one allowed position bucket is in shortage.
+            if not buckets:
+                return tag
+            for bucket in buckets:
+                if bucket in ("G", "W", "B") and shortage.get(bucket, False):
+                    return f"{bucket}_{tag}"
             return tag
 
-        OFF_BUCKET = {
-            "Engine_Primary": "G", "Engine_Secondary": "G", "Transition_Engine": "G",
-            "Shot_Creator": "W", "Rim_Pressure": "W", "SpotUp_Spacer": "G",
-            "Movement_Shooter": "G", "Cutter_Finisher": "W", "Connector": "W",
-            "Roll_Man": "W", "ShortRoll_Hub": "B", "Pop_Threat": "B", "Post_Anchor": "B",
+        # Must stay aligned with need_attr_profiles.TAG_POSITIONS.
+        OFF_BUCKETS = {
+            "Engine_Primary": ("G",),
+            "Engine_Secondary": ("G",),
+            "Transition_Engine": ("G", "W"),
+            "Shot_Creator": ("G", "W"),
+            "Rim_Pressure": ("W", "B"),
+            "SpotUp_Spacer": ("G", "W", "B"),
+            "Movement_Shooter": ("G", "W"),
+            "Cutter_Finisher": ("W",),
+            "Connector": ("W", "B"),
+            "Roll_Man": ("W", "B"),
+            "ShortRoll_Hub": ("B",),
+            "Pop_Threat": ("B",),
+            "Post_Anchor": ("B",),
         }
 
-        DEF_BUCKET = {
-            "Zone_Top_Left": "G", "Zone_Top_Right": "G", "PnR_POA_Defender": "G",
-            "PnR_POA_Blitz": "G", "PnR_POA_Switch": "G", "PnR_POA_Switch_1_4": "G",
-            "PnR_POA_AtTheLevel": "G", "Lowman_Helper": "W", "Nail_Helper": "W",
-            "Weakside_Rotator": "W", "Switch_Wing_Strong": "W", "Switch_Wing_Weak": "W",
-            "Switch_Wing_Strong_1_4": "W", "Switch_Wing_Weak_1_4": "W", "Zone_Bottom_Left": "B",
-            "Zone_Bottom_Right": "B", "Zone_Bottom_Center": "B", "PnR_Cover_Big_Drop": "B",
-            "PnR_Cover_Big_Blitz": "B", "Backline_Anchor": "B", "PnR_Cover_Big_Switch": "B",
-            "PnR_Cover_Big_Switch_1_4": "B", "PnR_Cover_Big_HedgeRecover": "B", "PnR_Cover_Big_AtTheLevel": "B",
+        DEF_BUCKETS = {
+            "Zone_Top_Left": ("G",),
+            "Zone_Top_Right": ("G",),
+            "PnR_POA_Defender": ("G",),
+            "PnR_POA_Blitz": ("G",),
+            "PnR_POA_Switch": ("G",),
+            "PnR_POA_Switch_1_4": ("G",),
+            "PnR_POA_AtTheLevel": ("G",),
+            "Lowman_Helper": ("W",),
+            "Nail_Helper": ("W",),
+            "Weakside_Rotator": ("W",),
+            "Switch_Wing_Strong": ("W",),
+            "Switch_Wing_Weak": ("W",),
+            "Switch_Wing_Strong_1_4": ("W",),
+            "Switch_Wing_Weak_1_4": ("W",),
+            "Zone_Bottom_Left": ("B",),
+            "Zone_Bottom_Right": ("B",),
+            "Zone_Bottom_Center": ("B",),
+            "PnR_Cover_Big_Drop": ("B",),
+            "PnR_Cover_Big_Blitz": ("B",),
+            "Backline_Anchor": ("B",),
+            "PnR_Cover_Big_Switch": ("B",),
+            "PnR_Cover_Big_Switch_1_4": ("B",),
+            "PnR_Cover_Big_HedgeRecover": ("B",),
+            "PnR_Cover_Big_AtTheLevel": ("B",),
         }
 
         roles_off = list(ROLE_FIT_WEIGHTS.keys())
@@ -1253,7 +1283,7 @@ class TeamSituationEvaluator:
         role_best: Dict[str, Dict[str, Any]] = {}
         needs: List[TeamNeed] = []
 
-        def _emit(role: str, phase: str, score_100: float, coverage: float, usage: float, bucket: Optional[str]) -> None:
+        def _emit(role: str, phase: str, score_100: float, coverage: float, usage: float, buckets: Optional[tuple[str, ...]]) -> None:
             score_n = _clamp(score_100 / 100.0, 0.0, 1.0)
             low_score = _clamp((0.62 - score_n) / 0.35, 0.0, 1.0)
             low_cov = _clamp((0.35 - coverage) / 0.35, 0.0, 1.0)
@@ -1267,7 +1297,7 @@ class TeamSituationEvaluator:
             w = _clamp(base + adj, 0.0, 1.0)
             if w < 0.18:
                 return
-            tag = _prefix_if_short(_role_key(role, phase), bucket)
+            tag = _prefix_if_short(_role_key(role, phase), buckets)
             needs.append(
                 TeamNeed(
                     tag=tag,
@@ -1292,14 +1322,14 @@ class TeamSituationEvaluator:
             cov = float(off_coverage.get(r, 0.0))
             use = float(usage_off.get(r, 0.0))
             role_best[r] = {"fit": sc, "phase": "OFF", "coverage": cov, "usage": use}
-            _emit(r, "OFF", sc, cov, use, OFF_BUCKET.get(r))
+            _emit(r, "OFF", sc, cov, use, OFF_BUCKETS.get(r))
 
         for r in roles_def:
             sc = float(def_score.get(r, 50.0))
             cov = float(def_coverage.get(r, 0.0))
             use = float(usage_def.get(r, 0.0))
             role_best[r] = {"fit": sc, "phase": "DEF", "coverage": cov, "usage": use}
-            _emit(r, "DEF", sc, cov, use, DEF_BUCKET.get(r))
+            _emit(r, "DEF", sc, cov, use, DEF_BUCKETS.get(r))
 
         health_scores = [
             _clamp(v.get("fit", 50.0) / 100.0, 0.0, 1.0)
