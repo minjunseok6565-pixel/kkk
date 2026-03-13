@@ -111,6 +111,7 @@
             <button type="button" id="next-game-tactics-btn" class="menu-card next-game-action-btn">전술</button>
             <button type="button" id="next-game-quick-btn" class="menu-card next-game-action-btn">경기가 있는 날짜까지 자동진행</button>
             <button type="button" id="next-game-dev10-btn" class="menu-card next-game-action-btn">10경기 진행 (DEV)</button>
+            <button type="button" id="next-game-dev-offseason-btn" class="menu-card next-game-action-btn is-dev-offseason">오프시즌 임의 진행 (DEV)</button>
           </div>
         </section>
 
@@ -136,6 +137,43 @@
           <div class="home-panel-head"><h3>2주 일정/리스크 캘린더</h3></div>
           <div id="home-risk-calendar" class="home-risk-calendar"></div>
         </section>
+      </section>
+    </section>
+
+    <section id="offseason-dev-champion-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row">
+        <div>
+          <p class="eyebrow">OFFSEASON DEV FLOW</p>
+          <h2 id="offseason-dev-champion-title">플레이오프 우승</h2>
+          <p id="offseason-dev-champion-subtitle" class="subtitle">DEV 임의 진행으로 챔피언이 확정되었습니다.</p>
+        </div>
+        <button id="offseason-dev-champion-back-btn" class="btn btn-secondary" type="button">메인으로</button>
+      </div>
+
+      <section class="home-panel offseason-dev-shell" aria-label="오프시즌 DEV 챔피언 요약">
+        <p id="offseason-dev-champion-summary" class="subtitle">챔피언 정보를 불러오는 중입니다.</p>
+        <div class="next-game-actions">
+          <button type="button" id="offseason-dev-enter-btn" class="menu-card next-game-action-btn">오프시즌으로</button>
+        </div>
+      </section>
+    </section>
+
+    <section id="offseason-dev-flow-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row">
+        <div>
+          <p class="eyebrow">OFFSEASON DEV FLOW</p>
+          <h2 id="offseason-dev-flow-title">오프시즌 진행</h2>
+          <p id="offseason-dev-flow-subtitle" class="subtitle">단계별 오프시즌 플로우(구현 예정)</p>
+        </div>
+        <button id="offseason-dev-flow-back-btn" class="btn btn-secondary" type="button">메인으로</button>
+      </div>
+
+      <section class="home-panel offseason-dev-shell" aria-label="오프시즌 DEV 단계">
+        <p id="offseason-dev-status" class="subtitle">아직 단계 UI가 구현되지 않았습니다.</p>
+        <div id="offseason-dev-content" class="offseason-dev-content"></div>
+        <div id="offseason-dev-actions" class="next-game-actions">
+          <button type="button" id="offseason-dev-next-btn" class="menu-card next-game-action-btn">다음으로</button>
+        </div>
       </section>
     </section>
 

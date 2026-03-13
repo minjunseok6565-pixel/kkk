@@ -9,6 +9,7 @@ import {
   progressNextGameFromHome,
   autoAdvanceToNextGameDayFromHome,
   progressTenGamesFromHome,
+  startOffseasonDevRunFromHome,
 } from "../features/main/mainScreen.js";
 import { showMyTeamScreen, rerenderMyTeamBoard } from "../features/myteam/myTeamScreen.js";
 import { showTacticsScreen, toggleTacticsOptions, saveTacticsDraft, hasUnsavedTacticsChanges } from "../features/tactics/tacticsScreen.js";
@@ -34,6 +35,21 @@ import {
 } from "../features/college/scouting.js";
 import { showMedicalScreen } from "../features/medical/medicalScreen.js";
 import { renderTrainingDetail } from "../features/training/trainingDetail.js";
+import {
+  advanceOffseasonDevStep,
+  enterOffseasonFlow,
+  handleCombineBackToOverview,
+  handleCombineCategoryClick,
+  handleExpiredContractAction,
+  handleWorkoutInviteToggle,
+  handleWorkoutInviteSubmit,
+  handleWorkoutStartInterviews,
+  handleInterviewQuestionToggle,
+  handleInterviewSubmitCurrent,
+  handleContinueWorkoutRound,
+  handleProceedToWithdrawals,
+  setTeamOptionDecision,
+} from "../features/offseason/offseasonDevFlow.js";
 import { emitCacheEvent } from "./cacheEvents.js";
 import { CACHE_EVENT_TYPES, getPrefetchPlanForEvent, registerCachePolicyEventHandlers, runPrefetchPlan } from "./cachePolicy.js";
 
@@ -57,6 +73,90 @@ function bindEvents() {
   els.nextGamePlayBtn.addEventListener("click", () => progressNextGameFromHome().catch((e) => alert(e.message)));
   els.nextGameQuickBtn.addEventListener("click", () => autoAdvanceToNextGameDayFromHome().catch((e) => alert(e.message)));
   els.nextGameDev10Btn?.addEventListener("click", () => progressTenGamesFromHome().catch((e) => alert(e.message)));
+  // DEV 버튼은 오프시즌 진입 조건(챔피언 확정) 보정 용도이며, 실제 진입은 공통 게이트를 사용한다.
+  els.nextGameDevOffseasonBtn?.addEventListener("click", () => startOffseasonDevRunFromHome().catch((e) => alert(e.message)));
+  els.offseasonDevChampionBackBtn?.addEventListener("click", () => showMainScreen());
+  els.offseasonDevFlowBackBtn?.addEventListener("click", () => showMainScreen());
+  els.offseasonDevEnterBtn?.addEventListener("click", () => enterOffseasonFlow().catch((e) => alert(e.message)));
+  els.offseasonDevNextBtn?.addEventListener("click", () => advanceOffseasonDevStep().catch((e) => alert(e.message)));
+  els.offseasonDevContent?.addEventListener("click", (event) => {
+    const optionTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-team-option-contract-id]") : null;
+    if (optionTarget) {
+      const contractId = String(optionTarget.dataset.offseasonTeamOptionContractId || "");
+      const decision = String(optionTarget.dataset.offseasonTeamOptionDecision || "").toUpperCase();
+      if (!contractId) return;
+      setTeamOptionDecision(contractId, decision);
+      return;
+    }
+
+    const expiredTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-expired-player-id]") : null;
+    if (expiredTarget) {
+      const playerId = String(expiredTarget.dataset.offseasonExpiredPlayerId || "");
+      const action = String(expiredTarget.dataset.offseasonExpiredAction || "").toUpperCase();
+      if (!playerId || !action) return;
+      handleExpiredContractAction(playerId, action).catch((e) => alert(e.message));
+      return;
+    }
+
+    const combineCategoryTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-combine-category]") : null;
+    if (combineCategoryTarget) {
+      const categoryKey = String(combineCategoryTarget.dataset.offseasonCombineCategory || "");
+      if (!categoryKey) return;
+      handleCombineCategoryClick(categoryKey);
+      return;
+    }
+
+    const combineBackTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-combine-back]") : null;
+    if (combineBackTarget) {
+      handleCombineBackToOverview();
+      return;
+    }
+
+    const workoutToggleTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-workout-toggle]") : null;
+    if (workoutToggleTarget) {
+      const prospectTempId = String(workoutToggleTarget.dataset.offseasonWorkoutToggle || "");
+      if (!prospectTempId) return;
+      handleWorkoutInviteToggle(prospectTempId);
+      return;
+    }
+
+    const workoutSubmitTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-workout-submit]") : null;
+    if (workoutSubmitTarget) {
+      handleWorkoutInviteSubmit().catch((e) => alert(e.message));
+      return;
+    }
+
+    const workoutStartInterviewsTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-workout-start-interviews]") : null;
+    if (workoutStartInterviewsTarget) {
+      handleWorkoutStartInterviews().catch((e) => alert(e.message));
+      return;
+    }
+
+    const interviewQuestionTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-interview-question]") : null;
+    if (interviewQuestionTarget) {
+      const questionId = String(interviewQuestionTarget.dataset.offseasonInterviewQuestion || "");
+      if (!questionId) return;
+      handleInterviewQuestionToggle(questionId);
+      return;
+    }
+
+    const interviewSubmitTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-interview-submit]") : null;
+    if (interviewSubmitTarget) {
+      handleInterviewSubmitCurrent().catch((e) => alert(e.message));
+      return;
+    }
+
+    const continueRoundTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-workout-continue-round]") : null;
+    if (continueRoundTarget) {
+      handleContinueWorkoutRound();
+      return;
+    }
+
+    const proceedNextTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-workout-proceed-next]") : null;
+    if (proceedNextTarget) {
+      handleProceedToWithdrawals().catch((e) => alert(e.message));
+    }
+  });
   els.scheduleBtn.addEventListener("click", () => showScheduleScreen().catch((e) => alert(e.message)));
   els.scheduleBackBtn.addEventListener("click", () => showMainScreen());
   els.gameResultBackBtn?.addEventListener("click", () => showMainScreen());

@@ -1,0 +1,164 @@
+.next-game-action-btn.is-dev-offseason {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(255, 251, 235, 0.75);
+  color: #92400e;
+}
+
+.offseason-dev-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.offseason-dev-content {
+  min-height: 80px;
+  border: 1px dashed rgba(148, 163, 184, 0.45);
+  border-radius: 10px;
+  padding: 12px;
+  color: #475569;
+  background: rgba(248, 250, 252, 0.8);
+}
+
+.offseason-dev-list {
+  display: grid;
+  gap: 10px;
+}
+
+.offseason-dev-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.offseason-dev-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.offseason-lottery-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.offseason-lottery-pill.is-in4 {
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #065f46;
+}
+
+.offseason-lottery-pill.is-slot {
+  background: rgba(37, 99, 235, 0.14);
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  color: #1e3a8a;
+}
+
+.offseason-combine-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.offseason-combine-card {
+  display: grid;
+  gap: 8px;
+  text-align: left;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px;
+  cursor: pointer;
+}
+
+.offseason-combine-card:hover {
+  border-color: rgba(37, 99, 235, 0.5);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.offseason-combine-card-title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.offseason-combine-mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.offseason-combine-mini-table th,
+.offseason-combine-mini-table td {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 4px 6px;
+  text-align: left;
+}
+
+.offseason-combine-mini-table th {
+  color: #475569;
+  font-weight: 700;
+}
+
+.offseason-combine-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.offseason-combine-detail-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.offseason-combine-detail-table {
+  width: 100%;
+  min-width: 580px;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.offseason-combine-detail-table th,
+.offseason-combine-detail-table td {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.offseason-combine-detail-table th {
+  color: #334155;
+  font-weight: 700;
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.offseason-combine-rank-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.12);
+  color: #3730a3;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .offseason-combine-grid {
+    grid-template-columns: 1fr;
+  }
+}

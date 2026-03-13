@@ -8,6 +8,8 @@ function activateScreen(target) {
     els.startScreen,
     els.teamScreen,
     els.mainScreen,
+    els.offseasonDevChampionScreen,
+    els.offseasonDevFlowScreen,
     els.marketScreen,
     els.gameResultScreen,
     els.scheduleScreen,
@@ -19,7 +21,7 @@ function activateScreen(target) {
     els.collegeScreen,
     els.collegeBigboardDetailScreen,
     els.medicalScreen,
-  ].forEach((screen) => {
+  ].filter(Boolean).forEach((screen) => {
     const active = screen === target;
     screen.classList.toggle("active", active);
     screen.setAttribute("aria-hidden", active ? "false" : "true");
@@ -32,4 +34,14 @@ function activateScreen(target) {
   }
 }
 
-export { activateScreen };
+function showOffseasonEntryScreen() {
+  const target = els.offseasonDevChampionScreen || els.mainScreen;
+  activateScreen(target);
+}
+
+function showOffseasonFlowScreen() {
+  const target = els.offseasonDevFlowScreen || els.mainScreen;
+  activateScreen(target);
+}
+
+export { activateScreen, showOffseasonEntryScreen, showOffseasonFlowScreen };
