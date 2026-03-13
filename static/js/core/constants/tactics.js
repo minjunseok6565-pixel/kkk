@@ -6,7 +6,8 @@ const TACTICS_OFFENSE_SCHEMES = [
   { key: "DHO_Chicago", label: "dho_chicago" },
   { key: "Post_InsideOut", label: "post_inside_out" },
   { key: "Horns_Elbow", label: "horns_elbow" },
-  { key: "Transition_Early", label: "transition_early" }
+  { key: "Transition_Early", label: "transition_early" },
+  { key: "Preset_Offense", label: "preset_offense" }
 ];
 
 const TACTICS_DEFENSE_SCHEMES = [
