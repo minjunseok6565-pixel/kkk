@@ -1,6 +1,6 @@
 import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
-import { activateScreen } from "../../app/router.js";
+import { showOffseasonFlowScreen } from "../../app/router.js";
 import { fetchJson, setLoading } from "../../core/api.js";
 
 function ensureOffseasonDevState() {
@@ -829,9 +829,34 @@ function renderOffseasonDevFlow() {
   setOffseasonDevNextButton({ label: "다음으로", disabled: true });
 }
 
-async function enterOffseasonFromChampionScreen() {
-  if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
+async function fetchResolvedPostseasonChampion() {
+  try {
+    const post = await fetchJson("/api/postseason/state");
+    return String(post?.champion || "").toUpperCase();
+  } catch (_) {
+    return "";
+  }
+}
+
+async function ensureOffseasonEntryGate() {
+  if (!state.selectedTeamId) {
+    throw new Error("먼저 팀을 선택해주세요.");
+  }
+
   const flow = ensureOffseasonDevState();
+  const fromState = String(flow.championTeamId || "").toUpperCase();
+  const champion = fromState || await fetchResolvedPostseasonChampion();
+  if (!champion) {
+    throw new Error("오프시즌 진입 조건이 충족되지 않았습니다. 플레이오프 챔피언이 먼저 확정되어야 합니다.");
+  }
+
+  flow.championTeamId = champion;
+  return champion;
+}
+
+async function enterOffseasonFlow() {
+  const flow = ensureOffseasonDevState();
+  await ensureOffseasonEntryGate();
 
   setLoading(true, "오프시즌 진입 중...");
   try {
@@ -845,7 +870,7 @@ async function enterOffseasonFromChampionScreen() {
     flow.step = "ENTERED_OFFSEASON";
     flow.error = "";
 
-    activateScreen(els.offseasonDevFlowScreen);
+    showOffseasonFlowScreen();
     renderOffseasonDevFlow();
   } finally {
     setLoading(false);
@@ -1289,7 +1314,7 @@ function setTeamOptionDecision(contractId, decision) {
 }
 
 export {
-  enterOffseasonFromChampionScreen,
+  enterOffseasonFlow,
   advanceOffseasonDevStep,
   renderOffseasonDevFlow,
   setTeamOptionDecision,

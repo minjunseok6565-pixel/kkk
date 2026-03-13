@@ -1,6 +1,6 @@
 import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
-import { activateScreen } from "../../app/router.js";
+import { activateScreen, showOffseasonEntryScreen } from "../../app/router.js";
 import { fetchJson, invalidateCachedValuesByPrefix, setLoading, showConfirmModal } from "../../core/api.js";
 import { CACHE_EVENT_TYPES, getPrefetchPlanAfterGame, invalidateByEvent, runPrefetchPlan } from "../../app/cachePolicy.js";
 import { formatIsoDate, formatWinPct } from "../../core/format.js";
@@ -358,8 +358,20 @@ async function progressTenGamesFromHome() {
   }
 }
 
+async function fetchResolvedPostseasonChampion() {
+  try {
+    const postseason = await fetchJson("/api/postseason/state");
+    return String(postseason?.champion || "").toUpperCase();
+  } catch (_) {
+    return "";
+  }
+}
+
 async function ensurePostseasonChampionForDevFlow() {
   if (!state.selectedTeamId) throw new Error("먼저 팀을 선택해주세요.");
+
+  const existingChampion = await fetchResolvedPostseasonChampion();
+  if (existingChampion) return existingChampion;
 
   const resolved = await fetchJson("/api/dev/postseason/fast-resolve", {
     method: "POST",
@@ -383,12 +395,12 @@ function showOffseasonDevChampionScreen({ champion } = {}) {
     els.offseasonDevChampionTitle.textContent = `플레이오프 우승 - ${championName}`;
   }
   if (els.offseasonDevChampionSubtitle) {
-    els.offseasonDevChampionSubtitle.textContent = `DEV 임의 진행으로 ${championName} 우승이 확정되었습니다.`;
+    els.offseasonDevChampionSubtitle.textContent = `${championName} 우승이 확정되어 오프시즌 진입 조건이 충족되었습니다.`;
   }
   if (els.offseasonDevChampionSummary) {
-    els.offseasonDevChampionSummary.textContent = "다음 단계에서 오프시즌 진입 API를 연결할 예정입니다.";
+    els.offseasonDevChampionSummary.textContent = "DEV 버튼은 조건 보정용입니다. 아래 버튼으로 공통 오프시즌 플로우를 시작할 수 있습니다.";
   }
-  activateScreen(els.offseasonDevChampionScreen);
+  showOffseasonEntryScreen();
 }
 
 async function startOffseasonDevRunFromHome() {
@@ -398,14 +410,14 @@ async function startOffseasonDevRunFromHome() {
   }
 
   const confirmed = await showConfirmModal({
-    title: "오프시즌 임의 진행 (DEV)",
-    body: "실경기 시뮬 없이 포스트시즌 16시드/우승팀을 임의 확정한 뒤 챔피언 화면으로 이동합니다.",
-    okLabel: "진행",
+    title: "오프시즌 진입 조건 보정 (DEV)",
+    body: "챔피언이 아직 확정되지 않은 경우에만 DEV 임의 확정을 수행합니다. 이미 챔피언이 확정된 세이브에서는 공통 오프시즌 진입 화면으로 이동합니다.",
+    okLabel: "계속",
     cancelLabel: "취소",
   });
   if (!confirmed) return;
 
-  setLoading(true, "DEV 오프시즌 임의 진행 준비 중...");
+  setLoading(true, "오프시즌 진입 조건 확인 중...");
   try {
     const champion = await ensurePostseasonChampionForDevFlow();
     if (state.offseasonDev && typeof state.offseasonDev === "object") {

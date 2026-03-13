@@ -37,7 +37,7 @@ import { showMedicalScreen } from "../features/medical/medicalScreen.js";
 import { renderTrainingDetail } from "../features/training/trainingDetail.js";
 import {
   advanceOffseasonDevStep,
-  enterOffseasonFromChampionScreen,
+  enterOffseasonFlow,
   handleCombineBackToOverview,
   handleCombineCategoryClick,
   handleExpiredContractAction,
@@ -73,10 +73,11 @@ function bindEvents() {
   els.nextGamePlayBtn.addEventListener("click", () => progressNextGameFromHome().catch((e) => alert(e.message)));
   els.nextGameQuickBtn.addEventListener("click", () => autoAdvanceToNextGameDayFromHome().catch((e) => alert(e.message)));
   els.nextGameDev10Btn?.addEventListener("click", () => progressTenGamesFromHome().catch((e) => alert(e.message)));
+  // DEV 버튼은 오프시즌 진입 조건(챔피언 확정) 보정 용도이며, 실제 진입은 공통 게이트를 사용한다.
   els.nextGameDevOffseasonBtn?.addEventListener("click", () => startOffseasonDevRunFromHome().catch((e) => alert(e.message)));
   els.offseasonDevChampionBackBtn?.addEventListener("click", () => showMainScreen());
   els.offseasonDevFlowBackBtn?.addEventListener("click", () => showMainScreen());
-  els.offseasonDevEnterBtn?.addEventListener("click", () => enterOffseasonFromChampionScreen().catch((e) => alert(e.message)));
+  els.offseasonDevEnterBtn?.addEventListener("click", () => enterOffseasonFlow().catch((e) => alert(e.message)));
   els.offseasonDevNextBtn?.addEventListener("click", () => advanceOffseasonDevStep().catch((e) => alert(e.message)));
   els.offseasonDevContent?.addEventListener("click", (event) => {
     const optionTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-team-option-contract-id]") : null;
