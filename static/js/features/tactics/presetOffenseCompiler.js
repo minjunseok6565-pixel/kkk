@@ -13,6 +13,10 @@ function mapLevelToMult(level, curve = "default") {
   return table[lv] || table.mid;
 }
 
+function clampOutcome(v) {
+  return clamp(v, 0.88, 1.12);
+}
+
 function buildActionWeightMult(draft) {
   const d = sanitizePresetOffenseDraft(draft);
   const av = d.actionVolume;
@@ -33,35 +37,126 @@ function buildActionWeightMult(draft) {
 
 function buildOutcomeByActionMult(draft) {
   const d = sanitizePresetOffenseDraft(draft);
+  const passMult = mapLevelToMult(d.passFreq);
   return {
     PnR: {
-      PASS_SHORTROLL: clamp(mapLevelToMult(d.outcomes.pnr.rollPass), 0.88, 1.12),
-      SHOT_3_OD: clamp(mapLevelToMult(d.outcomes.pnr.handlerDirect) * (d.outcomes.pnr.pullupSplit.pull3 / 50), 0.88, 1.12),
-      SHOT_MID_PU: clamp(mapLevelToMult(d.outcomes.pnr.handlerDirect) * (d.outcomes.pnr.pullupSplit.pull2 / 50), 0.88, 1.12),
-      SHOT_RIM_LAYUP: clamp(mapLevelToMult(d.outcomes.pnr.handlerDirect) * (d.outcomes.pnr.rimVsFloater.rim / 50), 0.88, 1.12),
-      SHOT_TOUCH_FLOATER: clamp(mapLevelToMult(d.outcomes.pnr.handlerDirect) * (d.outcomes.pnr.rimVsFloater.floater / 50), 0.88, 1.12),
+      PASS_SHORTROLL: clampOutcome(passMult * mapLevelToMult(d.outcomes.pnr.rollPass)),
+      SHOT_3_OD: clampOutcome(mapLevelToMult(d.outcomes.pnr.handlerDirect) * (d.outcomes.pnr.pullupSplit.pull3 / 50)),
+      SHOT_MID_PU: clampOutcome(mapLevelToMult(d.outcomes.pnr.handlerDirect) * (d.outcomes.pnr.pullupSplit.pull2 / 50)),
+      SHOT_RIM_LAYUP: clampOutcome(mapLevelToMult(d.outcomes.pnr.handlerDirect) * (d.outcomes.pnr.rimVsFloater.rim / 50)),
+      SHOT_RIM_DUNK: clampOutcome(mapLevelToMult(d.outcomes.pnr.handlerDirect) * (d.outcomes.pnr.rimVsFloater.rim / 50)),
+      SHOT_RIM_CONTACT: clampOutcome(mapLevelToMult(d.outcomes.pnr.handlerDirect) * (d.outcomes.pnr.rimVsFloater.rim / 50)),
+      SHOT_TOUCH_FLOATER: clampOutcome(mapLevelToMult(d.outcomes.pnr.handlerDirect) * (d.outcomes.pnr.rimVsFloater.floater / 50)),
     },
     PnP: {
-      SHOT_3_CS: clamp(mapLevelToMult(d.outcomes.pnp.popOut), 0.88, 1.12),
-      SHOT_3_OD: clamp(mapLevelToMult(d.outcomes.pnp.handlerDirect) * (d.outcomes.pnp.pullupSplit.pull3 / 50), 0.88, 1.12),
-      SHOT_MID_PU: clamp(mapLevelToMult(d.outcomes.pnp.handlerDirect) * (d.outcomes.pnp.pullupSplit.pull2 / 50), 0.88, 1.12),
+      SHOT_3_CS: clampOutcome(mapLevelToMult(d.outcomes.pnp.popOut)),
+      SHOT_3_OD: clampOutcome(mapLevelToMult(d.outcomes.pnp.handlerDirect) * (d.outcomes.pnp.pullupSplit.pull3 / 50)),
+      SHOT_MID_PU: clampOutcome(mapLevelToMult(d.outcomes.pnp.handlerDirect) * (d.outcomes.pnp.pullupSplit.pull2 / 50)),
+      SHOT_RIM_LAYUP: clampOutcome(mapLevelToMult(d.outcomes.pnp.handlerDirect) * (d.outcomes.pnp.rimVsFloater.rim / 50)),
+      SHOT_RIM_DUNK: clampOutcome(mapLevelToMult(d.outcomes.pnp.handlerDirect) * (d.outcomes.pnp.rimVsFloater.rim / 50)),
+      SHOT_RIM_CONTACT: clampOutcome(mapLevelToMult(d.outcomes.pnp.handlerDirect) * (d.outcomes.pnp.rimVsFloater.rim / 50)),
+      SHOT_TOUCH_FLOATER: clampOutcome(mapLevelToMult(d.outcomes.pnp.handlerDirect) * (d.outcomes.pnp.rimVsFloater.floater / 50)),
     },
     TransitionEarly: {
-      SHOT_3_CS: clamp(mapLevelToMult(d.outcomes.transitionEarly.openChance3), 0.88, 1.12),
-      SHOT_3_OD: clamp(mapLevelToMult(d.outcomes.transitionEarly.handlerDirect) * (d.outcomes.transitionEarly.directSplit.trans3 / 34), 0.88, 1.12),
-      SHOT_RIM_LAYUP: clamp(mapLevelToMult(d.outcomes.transitionEarly.handlerDirect) * (d.outcomes.transitionEarly.directSplit.rim / 33), 0.88, 1.12),
-      SHOT_TOUCH_FLOATER: clamp(mapLevelToMult(d.outcomes.transitionEarly.handlerDirect) * (d.outcomes.transitionEarly.directSplit.floater / 33), 0.88, 1.12),
+      SHOT_3_CS: clampOutcome(mapLevelToMult(d.outcomes.transitionEarly.openChance3)),
+      SHOT_3_OD: clampOutcome(mapLevelToMult(d.outcomes.transitionEarly.handlerDirect) * (d.outcomes.transitionEarly.directSplit.trans3 / 34)),
+      SHOT_RIM_LAYUP: clampOutcome(mapLevelToMult(d.outcomes.transitionEarly.handlerDirect) * (d.outcomes.transitionEarly.directSplit.rim / 33)),
+      SHOT_RIM_DUNK: clampOutcome(mapLevelToMult(d.outcomes.transitionEarly.handlerDirect) * (d.outcomes.transitionEarly.directSplit.rim / 33)),
+      SHOT_RIM_CONTACT: clampOutcome(mapLevelToMult(d.outcomes.transitionEarly.handlerDirect) * (d.outcomes.transitionEarly.directSplit.rim / 33)),
+      SHOT_TOUCH_FLOATER: clampOutcome(mapLevelToMult(d.outcomes.transitionEarly.handlerDirect) * (d.outcomes.transitionEarly.directSplit.floater / 33)),
+    },
+    Drive: {
+      SHOT_RIM_LAYUP: clampOutcome(mapLevelToMult(d.outcomes.drive.rim)),
+      SHOT_RIM_DUNK: clampOutcome(mapLevelToMult(d.outcomes.drive.rim)),
+      SHOT_RIM_CONTACT: clampOutcome(mapLevelToMult(d.outcomes.drive.rim)),
+      PASS_KICKOUT: clampOutcome(passMult * mapLevelToMult(d.outcomes.drive.kickout)),
+      SHOT_MID_PU: clampOutcome(mapLevelToMult(d.outcomes.drive.pull2)),
+    },
+    ISO: {
+      SHOT_RIM_LAYUP: clampOutcome(mapLevelToMult(d.outcomes.iso.rim)),
+      SHOT_RIM_DUNK: clampOutcome(mapLevelToMult(d.outcomes.iso.rim)),
+      SHOT_RIM_CONTACT: clampOutcome(mapLevelToMult(d.outcomes.iso.rim)),
+      SHOT_TOUCH_FLOATER: clampOutcome(mapLevelToMult(d.outcomes.iso.floater)),
+      SHOT_3_OD: clampOutcome(mapLevelToMult(d.outcomes.iso.pullup) * (d.outcomes.iso.pullupSplit.pull3 / 50)),
+      SHOT_MID_PU: clampOutcome(mapLevelToMult(d.outcomes.iso.pullup) * (d.outcomes.iso.pullupSplit.pull2 / 50)),
+      PASS_KICKOUT: clampOutcome(passMult * mapLevelToMult(d.outcomes.iso.kickout)),
+    },
+    Cut: {
+      SHOT_RIM_LAYUP: clampOutcome(mapLevelToMult(d.outcomes.cut.finish)),
+      SHOT_RIM_DUNK: clampOutcome(mapLevelToMult(d.outcomes.cut.finish)),
+      SHOT_RIM_CONTACT: clampOutcome(mapLevelToMult(d.outcomes.cut.finish)),
+      PASS_EXTRA: clampOutcome(passMult * mapLevelToMult(d.outcomes.cut.pass)),
+      PASS_KICKOUT: clampOutcome(passMult * mapLevelToMult(d.outcomes.cut.pass)),
+    },
+    PostUp: {
+      SHOT_POST: clampOutcome(mapLevelToMult(d.outcomes.postUp.postFinish)),
+      SHOT_MID_PU: clampOutcome(mapLevelToMult(d.outcomes.postUp.postFadeway)),
+      PASS_KICKOUT: clampOutcome(passMult * mapLevelToMult(d.outcomes.postUp.pass)),
+      PASS_EXTRA: clampOutcome(passMult * mapLevelToMult(d.outcomes.postUp.pass)),
+      PASS_SHORTROLL: clampOutcome(passMult * mapLevelToMult(d.outcomes.postUp.pass)),
     },
   };
 }
 
+function _buildBalancedGroupMultMap({ sliderValue, increaseKeys, decreaseKeys, amp, lo = 0.9, hi = 1.15 }) {
+  const val = clamp(Number(sliderValue) || 50, 0, 100);
+  const dir = (val - 50) / 50; // -1 .. +1
+  const up = Array.isArray(increaseKeys) ? increaseKeys : [];
+  const down = Array.isArray(decreaseKeys) ? decreaseKeys : [];
+  if (!up.length || !down.length || Math.abs(dir) < 1e-9) return {};
+
+  const upCount = up.length;
+  const downCount = down.length;
+  const perUpDelta = Math.abs(dir) * amp;
+  const perDownDelta = (perUpDelta * upCount) / downCount;
+
+  const upMult = dir >= 0 ? 1 + perUpDelta : 1 - perUpDelta;
+  const downMult = dir >= 0 ? 1 - perDownDelta : 1 + perDownDelta;
+
+  const out = {};
+  up.forEach((k) => {
+    out[k] = clamp(upMult, lo, hi);
+  });
+  down.forEach((k) => {
+    out[k] = clamp(downMult, lo, hi);
+  });
+  return out;
+}
+
 function buildOutcomeGlobalMult(draft) {
   const d = sanitizePresetOffenseDraft(draft);
+
+  const foulDrawBalanced = _buildBalancedGroupMultMap({
+    sliderValue: d.foulDraw,
+    increaseKeys: ["FOUL_DRAW_RIM", "FOUL_DRAW_POST", "FOUL_DRAW_JUMPER"],
+    decreaseKeys: [
+      "SHOT_RIM_LAYUP",
+      "SHOT_RIM_DUNK",
+      "SHOT_RIM_CONTACT",
+      "SHOT_TOUCH_FLOATER",
+      "SHOT_MID_CS",
+      "SHOT_MID_PU",
+      "SHOT_POST",
+      "SHOT_3_CS",
+      "SHOT_3_OD",
+    ],
+    amp: 0.12,
+    lo: 0.9,
+    hi: 1.12,
+  });
+
+  const riskBalanced = _buildBalancedGroupMultMap({
+    sliderValue: d.riskTaking,
+    increaseKeys: ["TO_HANDLE_LOSS", "TO_CHARGE", "TO_BAD_PASS", "TO_SHOT_CLOCK"],
+    decreaseKeys: ["RESET_HUB", "RESET_RESREEN", "RESET_REDO_DHO", "RESET_POST_OUT"],
+    amp: 0.15,
+    lo: 0.9,
+    hi: 1.15,
+  });
+
   return {
-    FOUL_DRAW_RIM: clamp(0.9 + (d.foulDraw / 100) * 0.22, 0.9, 1.12),
-    FOUL_DRAW_POST: clamp(0.9 + (d.foulDraw / 100) * 0.22, 0.9, 1.12),
-    TO_HANDLE_LOSS: clamp(0.9 + (d.riskTaking / 100) * 0.25, 0.9, 1.15),
-    TO_CHARGE: clamp(1.08 - (d.riskTaking / 100) * 0.18, 0.9, 1.15),
+    ...foulDrawBalanced,
+    ...riskBalanced,
   };
 }
 

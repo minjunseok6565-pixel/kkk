@@ -4,18 +4,18 @@ function isExtremePair(a, b, level) {
   return String(a || "") === level && String(b || "") === level;
 }
 
-function enforcePairNoSameExtreme(left, right) {
+function enforcePairNoSameExtreme(left, right, tag = "pair") {
   let l = String(left || "mid");
   let r = String(right || "mid");
   const warnings = [];
 
   if (isExtremePair(l, r, "high")) {
     r = "mid";
-    warnings.push("동일 쌍에서 high/high 조합은 허용되지 않아 우측 값을 mid로 조정했습니다.");
+    warnings.push(`[${tag}] 동일 쌍에서 high/high 조합은 허용되지 않아 우측 값을 mid로 조정했습니다.`);
   }
   if (isExtremePair(l, r, "low")) {
     r = "mid";
-    warnings.push("동일 쌍에서 low/low 조합은 허용되지 않아 우측 값을 mid로 조정했습니다.");
+    warnings.push(`[${tag}] 동일 쌍에서 low/low 조합은 허용되지 않아 우측 값을 mid로 조정했습니다.`);
   }
 
   return { left: l, right: r, warnings };
@@ -29,7 +29,7 @@ function enforceDriveRule(rim, kickout, pull2) {
     const lowIdx = vals.findIndex((v) => v !== "high");
     if (lowIdx >= 0 && vals[lowIdx] !== "low") {
       vals[lowIdx] = "low";
-      warnings.push("Drive 규칙에 따라 high가 2개 이상일 때 나머지 1개를 low로 조정했습니다.");
+      warnings.push("[drive] Drive 규칙에 따라 high가 2개 이상일 때 나머지 1개를 low로 조정했습니다.");
     }
   }
   return { rim: vals[0], kickout: vals[1], pull2: vals[2], warnings };
@@ -47,7 +47,7 @@ function enforceIsoRule(rim, floater, pullup, kickout) {
     if (!(hasMid && hasLow)) {
       vals[rest[0]] = "mid";
       vals[rest[1]] = "low";
-      warnings.push("ISO 규칙에 따라 high 2개일 때 나머지 2개를 mid/low로 조정했습니다.");
+      warnings.push("[iso] ISO 규칙에 따라 high 2개일 때 나머지 2개를 mid/low로 조정했습니다.");
     }
   }
   return { rim: vals[0], floater: vals[1], pullup: vals[2], kickout: vals[3], warnings };
@@ -61,7 +61,7 @@ function enforcePostUpRule(postFinish, postFadeway, pass) {
     const lowIdx = vals.findIndex((v) => v !== "high");
     if (lowIdx >= 0 && vals[lowIdx] !== "low") {
       vals[lowIdx] = "low";
-      warnings.push("PostUp 규칙에 따라 high가 2개 이상일 때 나머지 1개를 low로 조정했습니다.");
+      warnings.push("[postUp] PostUp 규칙에 따라 high가 2개 이상일 때 나머지 1개를 low로 조정했습니다.");
     }
   }
   return { postFinish: vals[0], postFadeway: vals[1], pass: vals[2], warnings };
@@ -72,17 +72,17 @@ function validatePresetOffenseDraft(rawDraft) {
   const warnings = [];
   const errors = [];
 
-  const pnr = enforcePairNoSameExtreme(draft.outcomes.pnr.handlerDirect, draft.outcomes.pnr.rollPass);
+  const pnr = enforcePairNoSameExtreme(draft.outcomes.pnr.handlerDirect, draft.outcomes.pnr.rollPass, "pnrPair");
   draft.outcomes.pnr.handlerDirect = pnr.left;
   draft.outcomes.pnr.rollPass = pnr.right;
   warnings.push(...pnr.warnings);
 
-  const pnp = enforcePairNoSameExtreme(draft.outcomes.pnp.handlerDirect, draft.outcomes.pnp.popOut);
+  const pnp = enforcePairNoSameExtreme(draft.outcomes.pnp.handlerDirect, draft.outcomes.pnp.popOut, "pnpPair");
   draft.outcomes.pnp.handlerDirect = pnp.left;
   draft.outcomes.pnp.popOut = pnp.right;
   warnings.push(...pnp.warnings);
 
-  const te = enforcePairNoSameExtreme(draft.outcomes.transitionEarly.handlerDirect, draft.outcomes.transitionEarly.openChance3);
+  const te = enforcePairNoSameExtreme(draft.outcomes.transitionEarly.handlerDirect, draft.outcomes.transitionEarly.openChance3, "transitionPair");
   draft.outcomes.transitionEarly.handlerDirect = te.left;
   draft.outcomes.transitionEarly.openChance3 = te.right;
   warnings.push(...te.warnings);
@@ -112,6 +112,8 @@ function validatePresetOffenseDraft(rawDraft) {
     }
   };
 
+  checkLevel(draft.passFreq, "passFreq");
+  checkLevel(draft.offballFreq, "offballFreq");
   checkLevel(draft.outcomes.pnr.handlerDirect, "pnr.handlerDirect");
   checkLevel(draft.outcomes.pnr.rollPass, "pnr.rollPass");
   checkLevel(draft.outcomes.pnp.handlerDirect, "pnp.handlerDirect");

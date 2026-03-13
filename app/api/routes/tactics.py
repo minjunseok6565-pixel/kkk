@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Mapping
 
 from fastapi import APIRouter, HTTPException
@@ -20,9 +21,75 @@ def _rows_from_payload(raw: Any) -> List[Dict[str, Any]]:
     return out
 
 
+def _coerce_float(v: Any) -> float | None:
+    try:
+        num = float(v)
+    except Exception:
+        return None
+    if not math.isfinite(num):
+        return None
+    return num
+
+
+def _sanitize_number_dict(raw: Any) -> Dict[str, float]:
+    if not isinstance(raw, Mapping):
+        return {}
+    out: Dict[str, float] = {}
+    for k, v in raw.items():
+        key = str(k or "").strip()
+        if not key:
+            continue
+        num = _coerce_float(v)
+        if num is None:
+            continue
+        out[key] = num
+    return out
+
+
+def _sanitize_nested_number_dict(raw: Any) -> Dict[str, Dict[str, float]]:
+    if not isinstance(raw, Mapping):
+        return {}
+    out: Dict[str, Dict[str, float]] = {}
+    for action, values in raw.items():
+        action_key = str(action or "").strip()
+        if not action_key:
+            continue
+        parsed = _sanitize_number_dict(values)
+        if parsed:
+            out[action_key] = parsed
+    return out
+
+
+def _sanitize_context(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, Mapping):
+        return {}
+    src = dict(raw)
+    out: Dict[str, Any] = {}
+
+    tempo = _coerce_float(src.get("tempo_mult"))
+    if tempo is not None:
+        out["tempo_mult"] = tempo
+
+    draft_snapshot = src.get("USER_PRESET_OFFENSE_DRAFT_V1")
+    if isinstance(draft_snapshot, Mapping):
+        out["USER_PRESET_OFFENSE_DRAFT_V1"] = dict(draft_snapshot)
+
+    for k, v in src.items():
+        key = str(k or "").strip()
+        if key in {"tempo_mult", "USER_PRESET_OFFENSE_DRAFT_V1"}:
+            continue
+        out[key] = v
+    return out
+
+
 def _to_engine_tactics(payload: Mapping[str, Any]) -> Dict[str, Any]:
     """Normalize frontend tactics payload into engine SSOT format."""
     raw = dict(payload or {})
+
+    action_weight_mult = _sanitize_number_dict(raw.get("action_weight_mult"))
+    outcome_by_action_mult = _sanitize_nested_number_dict(raw.get("outcome_by_action_mult"))
+    outcome_global_mult = _sanitize_number_dict(raw.get("outcome_global_mult"))
+    context = _sanitize_context(raw.get("context"))
 
     # Already-engine payload: keep shape but ensure dict types.
     if "offense_scheme" in raw or "defense_scheme" in raw or "lineup" in raw:
@@ -35,6 +102,10 @@ def _to_engine_tactics(payload: Mapping[str, Any]) -> Dict[str, Any]:
             out["rotation_offense_role_by_pid"] = {}
         if not isinstance(out.get("defense_role_overrides"), dict):
             out["defense_role_overrides"] = {}
+        out["action_weight_mult"] = action_weight_mult
+        out["outcome_by_action_mult"] = outcome_by_action_mult
+        out["outcome_global_mult"] = outcome_global_mult
+        out["context"] = context
         return out
 
     starters = _rows_from_payload(raw.get("starters"))
@@ -91,7 +162,10 @@ def _to_engine_tactics(payload: Mapping[str, Any]) -> Dict[str, Any]:
         "minutes": minutes,
         "rotation_offense_role_by_pid": off_by_pid,
         "defense_role_overrides": def_by_role,
-        "context": dict(raw.get("context") or {}),
+        "action_weight_mult": action_weight_mult,
+        "outcome_by_action_mult": outcome_by_action_mult,
+        "outcome_global_mult": outcome_global_mult,
+        "context": context,
     }
 
 
@@ -101,9 +175,6 @@ def _to_ui_tactics(payload: Any) -> Any:
     raw = dict(payload)
     if "offenseScheme" in raw or "defenseScheme" in raw:
         return raw
-
-    starters = []
-    rotation = []
 
     lineup = raw.get("lineup") if isinstance(raw.get("lineup"), Mapping) else {}
     starter_pids = lineup.get("starters") if isinstance(lineup.get("starters"), list) else []
@@ -131,6 +202,10 @@ def _to_ui_tactics(payload: Any) -> Any:
 
     starters = [_row_for_pid(pid) for pid in starter_pids]
     rotation = [_row_for_pid(pid) for pid in bench_pids]
+    context = _sanitize_context(raw.get("context"))
+    preset_draft = None
+    if isinstance(context.get("USER_PRESET_OFFENSE_DRAFT_V1"), Mapping):
+        preset_draft = dict(context.get("USER_PRESET_OFFENSE_DRAFT_V1") or {})
 
     return {
         "offenseScheme": str(raw.get("offense_scheme") or "Spread_HeavyPnR"),
@@ -138,6 +213,11 @@ def _to_ui_tactics(payload: Any) -> Any:
         "starters": starters,
         "rotation": rotation,
         "baselineHash": "",
+        "action_weight_mult": _sanitize_number_dict(raw.get("action_weight_mult")),
+        "outcome_by_action_mult": _sanitize_nested_number_dict(raw.get("outcome_by_action_mult")),
+        "outcome_global_mult": _sanitize_number_dict(raw.get("outcome_global_mult")),
+        "context": context,
+        "presetOffenseDraft": preset_draft,
     }
 
 
