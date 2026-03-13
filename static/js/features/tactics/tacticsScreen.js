@@ -4,15 +4,50 @@ import { activateScreen } from "../../app/router.js";
 import { fetchCachedJson, fetchJson, setLoading } from "../../core/api.js";
 import { TACTICS_OFFENSE_SCHEMES, TACTICS_DEFENSE_SCHEMES, TACTICS_OFFENSE_ROLES } from "../../core/constants/tactics.js";
 import { tacticsSchemeLabel, tacticDisplayLabel, getDefenseRolesForScheme, buildTacticsDraft, computeTacticsInsights, rowHealthState } from "./tacticsInsights.js";
+import {
+  createDefaultPresetOffenseDraft,
+  sanitizePresetOffenseDraft,
+} from "./presetOffenseDraft.js";
+import {
+  compilePresetOffenseDraft,
+  mergeCompiledPresetIntoTactics,
+} from "./presetOffenseCompiler.js";
+import {
+  openPresetOffenseModal as openPresetOffenseModalUi,
+  bindPresetOffenseModalEvents,
+} from "./presetOffenseModal.js";
+import {
+  draftFromSavedTactics,
+  injectDraftSnapshotToContext,
+} from "./presetOffenseSerde.js";
 import { fetchTeamDetail, hasTeamDetailCache } from "../team/teamDetailCache.js";
 import { CACHE_EVENT_TYPES, CACHE_TTL_MS, buildCacheKeys, getPrefetchPlanForEvent, runPrefetchPlan } from "../../app/cachePolicy.js";
 import { emitCacheEvent } from "../../app/cacheEvents.js";
 
 let tacticsRequestSeq = 0;
 
+function updatePresetOffenseButtonVisibility() {
+  if (!els.presetOffenseOpenBtn || !state.tacticsDraft) return;
+  const isPreset = String(state.tacticsDraft.offenseScheme) === "Preset_Offense";
+  els.presetOffenseOpenBtn.classList.toggle("hidden", !isPreset);
+}
+
+function openPresetOffenseModal() {
+  state.presetOffenseDraft = sanitizePresetOffenseDraft(state.presetOffenseDraft || createDefaultPresetOffenseDraft());
+  openPresetOffenseModalUi(state.presetOffenseDraft, (nextDraft, validation) => {
+    state.presetOffenseDraft = sanitizePresetOffenseDraft(nextDraft);
+    if (els.presetOffenseErrors) {
+      const warn = validation?.warnings?.length ? ` (자동 조정 ${validation.warnings.length}건)` : "";
+      els.presetOffenseErrors.textContent = `프리셋 공격 설정이 적용되었습니다. 전술 저장을 눌러 반영하세요.${warn}`;
+    }
+    markTacticsDirty();
+  });
+}
+
 function applyTacticsDetail(detail, savedTactics, teamId) {
   state.rosterRows = detail?.roster || [];
   state.tacticsDraft = normalizeDraftForRoster(savedTactics?.tactics, state.rosterRows);
+  state.presetOffenseDraft = draftFromSavedTactics(savedTactics?.tactics);
   state.tacticsDraftTeamId = teamId;
   state.tacticsDirty = false;
   state.tacticsSaving = false;
@@ -68,7 +103,7 @@ function normalizeDraftForRoster(raw, rosterRows) {
 }
 
 function buildTacticsPayload() {
-  return {
+  const payload = {
     offenseScheme: state.tacticsDraft?.offenseScheme,
     defenseScheme: state.tacticsDraft?.defenseScheme,
     starters: (state.tacticsDraft?.starters || []).map((r) => ({
@@ -85,6 +120,12 @@ function buildTacticsPayload() {
     })),
     baselineHash: String(state.tacticsDraft?.baselineHash || ""),
   };
+  if (String(payload.offenseScheme || "") === "Preset_Offense") {
+    const compiled = compilePresetOffenseDraft(state.presetOffenseDraft || createDefaultPresetOffenseDraft(), payload);
+    Object.assign(payload, mergeCompiledPresetIntoTactics(payload, compiled));
+    Object.assign(payload, injectDraftSnapshotToContext(state.presetOffenseDraft, payload));
+  }
+  return payload;
 }
 
 function updateTacticsSaveButton() {
@@ -161,6 +202,7 @@ function renderSchemeOptions(kind) {
     btn.addEventListener("click", () => {
       if (isOff) {
         state.tacticsDraft.offenseScheme = btn.dataset.key;
+        updatePresetOffenseButtonVisibility();
       } else {
         state.tacticsDraft.defenseScheme = btn.dataset.key;
         const defRoles = getDefenseRolesForScheme(btn.dataset.key);
@@ -274,6 +316,7 @@ function renderTacticsScreen() {
 
   if (els.tacticsOffenseCurrent) els.tacticsOffenseCurrent.textContent = tacticDisplayLabel(tacticsSchemeLabel(TACTICS_OFFENSE_SCHEMES, state.tacticsDraft.offenseScheme));
   if (els.tacticsDefenseCurrent) els.tacticsDefenseCurrent.textContent = tacticDisplayLabel(tacticsSchemeLabel(TACTICS_DEFENSE_SCHEMES, state.tacticsDraft.defenseScheme));
+  updatePresetOffenseButtonVisibility();
 
   els.tacticsStarters.innerHTML = state.tacticsDraft.starters.map((r, i) => buildLineupRowHtml("starters", i, r, defRoles, insights)).join("");
   els.tacticsRotation.innerHTML = state.tacticsDraft.rotation.map((r, i) => buildLineupRowHtml("rotation", i, r, defRoles, insights)).join("");
@@ -295,6 +338,7 @@ async function showTacticsScreen() {
   const hasCachedDetail = hasTeamDetailCache(teamId);
   if (!hasCachedDetail) setLoading(true, "전술 데이터를 불러오는 중...");
   try {
+    bindPresetOffenseModalEvents();
     let latestSavedTactics = { tactics: null };
     const tacticsCacheKey = buildCacheKeys(teamId).tactics;
     const savedTacticsPromise = fetchCachedJson({
@@ -341,6 +385,7 @@ export {
   renderTacticsScreen,
   showTacticsScreen,
   toggleTacticsOptions,
+  openPresetOffenseModal,
   saveTacticsDraft,
   hasUnsavedTacticsChanges,
 };

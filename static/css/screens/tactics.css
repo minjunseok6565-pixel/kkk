@@ -181,6 +181,11 @@
 
 #tactics-screen .tactics-scheme-picker { position: relative; }
 
+#tactics-screen #preset-offense-open-btn {
+  margin-top: 8px;
+  width: 100%;
+}
+
 #tactics-screen .tactics-scheme-card {
   width: 100%;
   border: 1px solid rgba(59, 130, 246, 0.28);
@@ -362,4 +367,71 @@
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+/* Preset offense modal */
+#preset-offense-modal .modal-card {
+  width: min(860px, 92vw);
+}
+
+#preset-offense-modal .modal-body {
+  margin-top: 8px;
+  display: grid;
+  gap: 12px;
+}
+
+#preset-offense-modal .preset-offense-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+
+#preset-offense-modal .preset-offense-grid label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.84rem;
+  color: #334155;
+  font-weight: 700;
+}
+
+#preset-offense-modal .preset-offense-grid input[type="range"] {
+  width: 100%;
+}
+
+#preset-offense-modal .preset-offense-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#preset-offense-modal .preset-offense-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.09);
+  color: #1e3a8a;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+#preset-offense-errors {
+  margin-top: 8px;
+  min-height: 22px;
+  border-radius: 8px;
+  padding: 4px 8px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(254, 243, 199, 0.55);
+  color: #92400e;
+}
+
+@media (max-width: 840px) {
+  #preset-offense-modal .modal-card {
+    width: min(92vw, 640px);
+  }
+
+  #preset-offense-modal .preset-offense-grid {
+    grid-template-columns: 1fr;
+  }
 }

@@ -617,6 +617,15 @@
               <span class="tactics-scheme-desc">볼 핸들링과 오프볼 흐름 중심 운영</span>
             </button>
             <div id="tactics-offense-options" class="tactics-options hidden"></div>
+            <button
+              type="button"
+              id="preset-offense-open-btn"
+              class="btn btn-secondary hidden"
+              aria-haspopup="dialog"
+              aria-controls="preset-offense-modal"
+            >
+              프리셋 공격 상세 설정
+            </button>
           </div>
           <div class="tactics-scheme-picker">
             <button type="button" id="tactics-defense-btn" class="tactics-scheme-card">
@@ -677,6 +686,35 @@
           <div id="tactics-roster-list" class="tactics-roster-list"></div>
         </section>
       </section>
+
+      <div
+        id="preset-offense-modal"
+        class="modal hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="preset-offense-modal-title"
+        aria-describedby="preset-offense-modal-desc"
+        aria-hidden="true"
+      >
+        <div id="preset-offense-modal-backdrop" class="modal-backdrop" data-close="preset-offense-modal"></div>
+        <div class="modal-card" role="document" tabindex="-1">
+          <span tabindex="0" aria-hidden="true" data-focus-sentinel="start"></span>
+          <div class="modal-header">
+            <h3 id="preset-offense-modal-title">Preset Offense 상세 설정</h3>
+            <button type="button" id="preset-offense-close-btn" class="btn btn-secondary" aria-label="모달 닫기">닫기</button>
+          </div>
+          <p id="preset-offense-modal-desc" class="subtitle">상세 슬라이더/토글로 프리셋 공격 전술을 조정합니다.</p>
+          <div id="preset-offense-errors" class="empty-copy" role="status" aria-live="polite"></div>
+          <form id="preset-offense-form" class="modal-body" novalidate>
+            <p class="empty-copy">프리셋 공격 상세 설정 UI가 여기에 렌더됩니다.</p>
+          </form>
+          <div class="modal-actions">
+            <button type="button" id="preset-offense-reset-btn" class="btn btn-secondary">초기화</button>
+            <button type="button" id="preset-offense-apply-btn" class="btn btn-primary">적용</button>
+          </div>
+          <span tabindex="0" aria-hidden="true" data-focus-sentinel="end"></span>
+        </div>
+      </div>
     </section>
 
 
