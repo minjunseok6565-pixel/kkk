@@ -404,6 +404,90 @@
   gap: 8px;
 }
 
+
+#preset-offense-modal .preset-offense-constraint-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#preset-offense-modal .preset-constraint-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+}
+
+#preset-offense-modal .preset-constraint-pill.is-ok {
+  background: rgba(16, 185, 129, 0.1);
+  color: #065f46;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+#preset-offense-modal .preset-constraint-pill.is-warning {
+  background: rgba(245, 158, 11, 0.12);
+  color: #92400e;
+  border-color: rgba(245, 158, 11, 0.34);
+}
+
+#preset-offense-modal .preset-offense-level-group.is-warning {
+  border-color: rgba(245, 158, 11, 0.6);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.16);
+}
+
+#preset-offense-modal .preset-offense-rule-badge {
+  display: inline-block;
+  margin-left: 6px;
+  font-style: normal;
+  font-size: 0.68rem;
+  color: #92400e;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(254, 243, 199, 0.7);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+#preset-offense-modal .preset-offense-level-group {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  padding: 8px;
+  background: #fff;
+  display: grid;
+  gap: 6px;
+}
+
+#preset-offense-modal .preset-offense-level-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+#preset-offense-modal .preset-offense-level-buttons {
+  display: inline-flex;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+#preset-offense-modal .preset-level-btn {
+  border: 0;
+  background: #f8fafc;
+  color: #475569;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+#preset-offense-modal .preset-level-btn + .preset-level-btn {
+  border-left: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+#preset-offense-modal .preset-level-btn.is-active {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
 #preset-offense-modal .preset-offense-chip {
   display: inline-flex;
   align-items: center;
