@@ -23,6 +23,7 @@ SHOT_DIET_SUPPORTED_OFFENSE_SCHEMES = {
     "Post_InsideOut",
     "Horns_Elbow",
     "Transition_Early",
+    "Preset_Offense",
 }
 
 # -------------------------

@@ -111,4 +111,17 @@ OFF_SCHEME_ACTION_WEIGHTS: Dict[str, Dict[str, float]] = {
         "PnP": 2,
         "PostUp": 3,
     },
+    "Preset_Offense": {
+        "PnR": 10,
+        "PnP": 8,
+        "Drive": 10,
+        "TransitionEarly": 7,
+        "ISO": 7,
+        "Kickout": 10,
+        "ExtraPass": 9,
+        "SpotUp": 10,
+        "Cut": 8,
+        "DHO": 8,
+        "PostUp": 7,
+    },
 }
