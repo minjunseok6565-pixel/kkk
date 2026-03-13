@@ -27,6 +27,8 @@ from typing import Any, Dict, Optional, Mapping, Literal, List, Tuple, Callable
 
 import warnings
 
+from need_attr_profiles import ALL_NEW_NEED_TAGS
+
 
 # ---------------------------------------------------------------------
 # Types (mirrors team_situation.py)
@@ -91,6 +93,38 @@ def _avg(vals: List[float]) -> float:
     if not vals:
         return 0.0
     return sum(vals) / max(1, len(vals))
+
+
+
+def _is_supported_need_tag(tag: str) -> bool:
+    t = str(tag or "").strip().upper()
+    if not t:
+        return False
+    if t in ALL_NEW_NEED_TAGS:
+        return True
+    for pref in ("G_", "W_", "B_"):
+        if t.startswith(pref) and t[len(pref):] in ALL_NEW_NEED_TAGS:
+            return True
+    return False
+
+
+def _normalize_need_map_from_situation(needs: Any) -> Tuple[Dict[str, float], List[float]]:
+    need_map: Dict[str, float] = {}
+    weights: List[float] = []
+    if not isinstance(needs, list):
+        return need_map, weights
+
+    for n in needs:
+        try:
+            tag = str(getattr(n, "tag", "") or "").strip().upper()
+            w = clamp01(float(getattr(n, "weight", 0.0) or 0.0))
+        except Exception:
+            continue
+        if not _is_supported_need_tag(tag):
+            continue
+        need_map[tag] = max(need_map.get(tag, 0.0), w)
+        weights.append(w)
+    return need_map, weights
 
 def normalize_team_id(team_id: str) -> str:
     """Best-effort team id normalization.
@@ -450,19 +484,7 @@ def build_decision_context(
         flexibility = clamp01(float(getattr(signals, "flexibility", flexibility) or flexibility))
 
     needs = getattr(team_situation, "needs", []) or []
-    need_weights: List[float] = []
-    need_map: Dict[str, float] = {}
-    if isinstance(needs, list):
-        for n in needs:
-            try:
-                tag = str(getattr(n, "tag", "") or "")
-                w = clamp01(float(getattr(n, "weight", 0.0) or 0.0))
-            except Exception:
-                continue
-            if not tag:
-                continue
-            need_map[tag] = max(need_map.get(tag, 0.0), w)  # keep strongest
-            need_weights.append(w)
+    need_map, need_weights = _normalize_need_map_from_situation(needs)
     need_intensity = clamp01(_avg(need_weights))
 
     # -----------------------------------------------------------------

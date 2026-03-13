@@ -15,13 +15,6 @@ be captured by per-player fit/needs matching:
   7) Soft roster slot / rotation limit waste (too many incoming players)
   8) Outgoing "hole" penalty (sharp loss in guard/wing/big resources)
 
-In addition, team_situation may output need tags that are *deal-structural* and
-should NOT be part of per-player fit scoring:
-
-  - GUARD_DEPTH / WING_DEPTH / BIG_DEPTH / BENCH_DEPTH
-  - CAP_FLEX
-  - OFFENSE_UPGRADE / DEFENSE_UPGRADE
-
 This module consumes DecisionContext.need_map (already computed by team_situation)
 and only measures the *delta from the deal*, never re-evaluating the team.
 """
@@ -31,14 +24,12 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from decision_context import DecisionContext
 
-from contracts.terms import player_contract_terms
-
 from .env import ValuationEnv
 
 try:  # path safety (project integration will likely use relative import)
-    from role_need_tags import role_to_need_tag_only
+    from need_attr_profiles import ALL_NEW_NEED_TAGS, tag_supply
 except Exception:  # pragma: no cover
-    from .role_need_tags import role_to_need_tag_only
+    from need_attr_profiles import ALL_NEW_NEED_TAGS, tag_supply
 
 from .types import (
     AssetKind,
@@ -55,13 +46,6 @@ from .types import (
 # -----------------------------------------------------------------------------
 # Constants (need tags)
 # -----------------------------------------------------------------------------
-GUARD_DEPTH = "GUARD_DEPTH"
-WING_DEPTH = "WING_DEPTH"
-BIG_DEPTH = "BIG_DEPTH"
-BENCH_DEPTH = "BENCH_DEPTH"
-CAP_FLEX = "CAP_FLEX"
-OFFENSE_UPGRADE = "OFFENSE_UPGRADE"
-DEFENSE_UPGRADE = "DEFENSE_UPGRADE"
 
 
 # -----------------------------------------------------------------------------
@@ -158,88 +142,6 @@ def _team_total_grade(tv: TeamValuation) -> float:
     return _safe_float(tv.team_value.total, 0.0)
 
 
-def _primary_archetype_tag(player: PlayerSnapshot) -> str:
-    """Pick a single archetype tag used for diminishing-returns bucketing.
-
-    - Prefer role_fit (if present) -> map role->need_tag.
-    - Fallback to depth bucket (GUARD/WING/BIG).
-
-    This is intentionally simple: we only need a *stable* grouping.
-    """
-    role_fit = None
-    if isinstance(player.meta, dict):
-        role_fit = player.meta.get("role_fit")
-    if role_fit is None and isinstance(player.attrs, dict):
-        role_fit = player.attrs.get("role_fit")
-
-    best_tag = None
-    best_score = 0.0
-    if isinstance(role_fit, dict):
-        for role, score in role_fit.items():
-            tag = role_to_need_tag_only(str(role))
-            if tag == "ROLE_GAP":
-                continue
-            sc = _safe_float(score, 0.0)
-            if sc > best_score:
-                best_score = sc
-                best_tag = tag
-    if best_tag:
-        return str(best_tag)
-
-    # fallback to positional bucket
-    buckets = classify_depth_buckets(player)
-    return buckets[0] if buckets else "WING"
-
-
-def _defense_signal(player: PlayerSnapshot) -> float:
-    """0..1 defense signal proxy based on attrs/meta if available."""
-    # 1) explicit meta/attrs override
-    if isinstance(player.meta, dict) and "defense" in player.meta:
-        return _clamp(_safe_float(player.meta.get("defense"), 0.5), 0.0, 1.0)
-    if isinstance(player.attrs, dict) and "defense" in player.attrs:
-        return _clamp(_safe_float(player.attrs.get("defense"), 0.5), 0.0, 1.0)
-
-    # 2) typical attribute keys (2K-ish)
-    keys = (
-        "PerimeterDefense",
-        "InteriorDefense",
-        "Steal",
-        "Block",
-        "DefIQ",
-        "DEF",
-        "Defense",
-    )
-    best = 0.0
-    if isinstance(player.attrs, dict):
-        for k in keys:
-            if k in player.attrs:
-                v = _safe_float(player.attrs.get(k), 0.0)
-                if v > 1.5:
-                    v = v / 99.0
-                best = max(best, _clamp(v, 0.0, 1.0))
-
-    # default: neutral
-    if best <= 1e-9:
-        return 0.5
-    return best
-
-
-def _commitment_metric(player: PlayerSnapshot, *, current_season_year: int) -> float:
-    """Contract commitment proxy (salary * remaining_years).
-
-    This is intentionally a *soft* approximation:
-    - Options/partial guarantees are ignored in v1.
-    - If remaining years cannot be derived, fallback to contract.years.
-    """
-
-    cur = int(current_season_year)
-    terms = player_contract_terms(player, current_season_year=cur)
-
-    salary_now = max(_safe_float(getattr(player, "salary_amount", None), 0.0), _safe_float(terms.salary_now, 0.0))
-    years = float(max(0, int(terms.remaining_years)))
-    return max(0.0, float(salary_now)) * years
-
-
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
@@ -250,12 +152,6 @@ class PackageEffectsConfig:
     consolidation_scale: float = 0.10   # relative strength vs package totals
     consolidation_cap_ratio: float = 0.18
 
-    # --- 6) Diminishing returns
-    diminishing_factors: Tuple[float, ...] = (1.00, 0.78, 0.62, 0.50, 0.42)
-    diminishing_now_weight: float = 0.85
-    diminishing_future_weight: float = 0.35
-    diminishing_min_bucket_grade: float = 1.5  # ignore very low value players
-
     # --- 7) Soft roster slot / rotation waste
     roster_excess_waste_rate: float = 0.85  # fraction of bottom incoming players' value wasted
     roster_excess_cap_ratio: float = 0.22
@@ -265,30 +161,16 @@ class PackageEffectsConfig:
     hole_penalty_exponent: float = 1.15
     hole_penalty_cap_ratio: float = 0.18
 
-    # --- Depth needs (structural)
-    depth_need_scale: float = 1.00
-    bench_low_grade: float = 1.5
-    starter_cutoff_grade: float = 8.0
+    # --- New need/supply package balance (attrs-tag based)
+    need_supply_excess_scale: float = 0.90
+    need_supply_excess_exponent: float = 1.35
+    need_supply_excess_cap_ratio: float = 0.28
 
-    # --- CAP_FLEX
-    cap_flex_scale: float = 0.00000006  # scale salary*years (dollars) -> value units
-    cap_flex_cap_ratio: float = 0.16
-
-    # Cap-room usage cost ("cap space is an asset")
-    # - Applies when net incoming salary is absorbed using positive cap space.
-    # - This should NOT be clamped by outgoing package value; it is its own real cost.
-    cap_room_weight_base: float = 0.35  # even if CAP_FLEX need is low, cap room still has some cost
-    cap_room_value_per_cap_fraction: float = 90.0  # using 100% of cap (hypothetical) => ~90 value units before weighting
-    cap_room_cost_exponent: float = 1.25
-    cap_room_abs_cap: float = 22.0
-
-    # Commitment delta cap (future)
-    cap_commit_abs_cap: float = 18.0
-
-    # --- Upgrade needs
-    upgrade_scale: float = 0.75
-    defense_proxy_floor: float = 0.35
-    defense_proxy_cap: float = 1.00
+    # Optional slot-efficiency bonus
+    slot_efficiency_enabled: bool = True
+    slot_efficiency_scale: float = 0.20
+    slot_efficiency_cap_ratio: float = 0.10
+    slot_efficiency_depth_stress_dampen: float = 0.45
 
     # --- Agency distress valuation link (trade request / grievance)
     # SSOT policy: valuation uses only trade_request_level and applies discount
@@ -345,32 +227,31 @@ class PackageEffects:
         # 5) Consolidation / dispersion structure
         delta1 = self._consolidation_effect(incoming, outgoing, ctx, package_scale_total, steps)
 
-        # 6) Diminishing returns for redundant incoming players
-        delta2 = self._diminishing_returns(incoming, steps)
+        # 6) Soft roster slot / rotation waste (too many incoming players)
+        delta2 = self._roster_excess_waste(incoming, outgoing, base_out_mass, steps)
 
-        # 7) Soft roster slot / rotation waste (too many incoming players)
-        delta3 = self._roster_excess_waste(incoming, outgoing, base_out_mass, steps)
+        # 7) Outgoing hole penalty (position discontinuity)
+        delta3 = self._outgoing_hole_penalty(incoming, outgoing, base_out_mass, steps)
 
-        # Depth needs (GUARD/WING/BIG/BENCH) based on deal delta *only*
-        delta4 = self._depth_need_adjustment(incoming, outgoing, ctx, steps)
+        # 8) New need-supply balance adjustment (attrs-tag based)
+        delta4, ns_meta = self._need_supply_balance_adjustment(
+            incoming=incoming,
+            outgoing=outgoing,
+            ctx=ctx,
+            base_out_mass=base_out_mass,
+            steps=steps,
+        )
 
-        # 8) Outgoing hole penalty (position discontinuity)
-        delta5 = self._outgoing_hole_penalty(incoming, outgoing, base_out_mass, steps)
+        # 9) Agency distress (trade-request / grievance) impacts perceived value.
+        delta5 = self._agency_distress_adjustment(incoming, outgoing, steps)
 
-        # CAP_FLEX adjustment (contract commitment delta)
-        delta6 = self._cap_flex_adjustment(incoming, outgoing, ctx, env, steps)
-
-        # OFF/DEF upgrade adjustments
-        delta7 = self._upgrade_adjustment(incoming, outgoing, ctx, steps)
-
-        # Agency distress (trade-request / grievance) impacts perceived value.
-        delta8 = self._agency_distress_adjustment(incoming, outgoing, steps)
-
-        total = delta1 + delta2 + delta3 + delta4 + delta5 + delta6 + delta7 + delta8
+        total = delta1 + delta2 + delta3 + delta4 + delta5
         meta["base_in"] = {"now": base_in.now, "future": base_in.future, "total": base_in.total, "mass": base_in_mass}
         meta["base_out"] = {"now": base_out.now, "future": base_out.future, "total": base_out.total, "mass": base_out_mass}
         meta["package_delta"] = {"now": total.now, "future": total.future, "total": total.total}
         meta["team_id"] = str(team_id)
+        if isinstance(locals().get("ns_meta"), dict):
+            meta["need_supply"] = ns_meta
 
         return total, tuple(steps), meta
 
@@ -475,86 +356,7 @@ class PackageEffects:
     # ------------------------------------------------------------------
     # 6) Diminishing returns
     # ------------------------------------------------------------------
-    def _diminishing_returns(
-        self,
-        incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        steps: List[ValuationStep],
-    ) -> ValueComponents:
-        cfg = self.config
-        players = self._players(incoming)
-        if len(players) <= 1:
-            return ValueComponents.zero()
 
-        # bucket incoming players by a single archetype tag
-        buckets: Dict[str, List[Tuple[TeamValuation, PlayerSnapshot]]] = {}
-        for tv, p in players:
-            if _team_total_grade(tv) < cfg.diminishing_min_bucket_grade:
-                continue
-            tag = _primary_archetype_tag(p)
-            buckets.setdefault(tag, []).append((tv, p))
-
-        penalty = ValueComponents.zero()
-        per_bucket: Dict[str, Any] = {}
-
-        for tag, items in buckets.items():
-            if len(items) <= 1:
-                continue
-            # most valuable first
-            items_sorted = sorted(items, key=lambda x: _team_total_grade(x[0]), reverse=True)
-
-            # factors: 1.0 for first, then diminishing
-            factors = list(cfg.diminishing_factors)
-            if len(items_sorted) > len(factors):
-                factors.extend([factors[-1]] * (len(items_sorted) - len(factors)))
-
-            bucket_pen = ValueComponents.zero()
-            details: List[Dict[str, Any]] = []
-            for i, (tv, p) in enumerate(items_sorted):
-                f = _clamp(factors[i], 0.0, 1.0)
-                if f >= 0.999:
-                    continue
-                # we already counted full tv.team_value; subtract wasted portion
-                w = 1.0 - f
-                bucket_pen = bucket_pen + _vc(
-                    now=tv.team_value.now * w * cfg.diminishing_now_weight,
-                    future=tv.team_value.future * w * cfg.diminishing_future_weight,
-                )
-                details.append(
-                    {
-                        "player_id": p.player_id,
-                        "asset_key": tv.asset_key,
-                        "rank": i + 1,
-                        "factor": f,
-                        "waste_ratio": w,
-                        "team_value_total": tv.team_value.total,
-                    }
-                )
-
-            if bucket_pen.total > cfg.eps:
-                penalty = penalty - bucket_pen  # negative adjustment
-                per_bucket[tag] = {
-                    "penalty": {"now": bucket_pen.now, "future": bucket_pen.future, "total": bucket_pen.total},
-                    "players": details,
-                }
-
-        if abs(penalty.total) <= cfg.eps:
-            return ValueComponents.zero()
-
-        steps.append(
-            ValuationStep(
-                stage=ValuationStage.PACKAGE,
-                mode=StepMode.ADD,
-                code="DIMINISHING_RETURNS",
-                label="중복/체감 감소(비슷한 역할/포지션 다수 인바운드)",
-                delta=penalty,
-                meta={"buckets": per_bucket},
-            )
-        )
-        return penalty
-
-    # ------------------------------------------------------------------
-    # 7) Soft roster slot / rotation waste
-    # ------------------------------------------------------------------
     def _roster_excess_waste(
         self,
         incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
@@ -618,95 +420,7 @@ class PackageEffects:
     # ------------------------------------------------------------------
     # Depth needs (structural, need_map-driven)
     # ------------------------------------------------------------------
-    def _depth_need_adjustment(
-        self,
-        incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        ctx: DecisionContext,
-        steps: List[ValuationStep],
-    ) -> ValueComponents:
-        cfg = self.config
-        need_map = dict(ctx.need_map or {})
-        if not need_map and getattr(ctx, "policies", None) is not None:
-            try:
-                need_map = dict(ctx.policies.fit.need_map or {})
-            except Exception:
-                need_map = {}
 
-        w_guard = _clamp(_safe_float(need_map.get(GUARD_DEPTH), 0.0), 0.0, 1.0)
-        w_wing = _clamp(_safe_float(need_map.get(WING_DEPTH), 0.0), 0.0, 1.0)
-        w_big = _clamp(_safe_float(need_map.get(BIG_DEPTH), 0.0), 0.0, 1.0)
-        w_bench = _clamp(_safe_float(need_map.get(BENCH_DEPTH), 0.0), 0.0, 1.0)
-
-        if (w_guard + w_wing + w_big + w_bench) <= cfg.eps:
-            return ValueComponents.zero()
-
-        def depth_supply(items: Sequence[Tuple[TeamValuation, AssetSnapshot]]) -> Dict[str, float]:
-            s = {"GUARD": 0.0, "WING": 0.0, "BIG": 0.0, "BENCH": 0.0}
-            for tv, snap in items:
-                if tv.kind != AssetKind.PLAYER or not isinstance(snap, PlayerSnapshot):
-                    continue
-                grade = max(_market_now_grade(tv), 0.0)
-                buckets = classify_depth_buckets(snap)
-                if not buckets:
-                    continue
-                share = grade / max(len(buckets), 1)
-                for b in buckets:
-                    if b in ("GUARD", "WING", "BIG"):
-                        s[b] += share
-
-                # bench: only count mid-tier players
-                if cfg.bench_low_grade <= grade <= cfg.starter_cutoff_grade:
-                    s["BENCH"] += grade
-            return s
-
-        in_s = depth_supply(incoming)
-        out_s = depth_supply(outgoing)
-
-        delta_guard = in_s["GUARD"] - out_s["GUARD"]
-        delta_wing = in_s["WING"] - out_s["WING"]
-        delta_big = in_s["BIG"] - out_s["BIG"]
-        delta_bench = in_s["BENCH"] - out_s["BENCH"]
-
-        bonus_total = (
-            cfg.depth_need_scale
-            * (w_guard * delta_guard + w_wing * delta_wing + w_big * delta_big + w_bench * delta_bench)
-        )
-
-        if abs(bonus_total) <= cfg.eps:
-            return ValueComponents.zero()
-
-        delta = _vc(now=bonus_total, future=0.0)
-        steps.append(
-            ValuationStep(
-                stage=ValuationStage.PACKAGE,
-                mode=StepMode.ADD,
-                code="DEPTH_NEED_DELTA",
-                label="뎁스 니즈(G/W/B/Bench) 딜 델타 보정",
-                delta=delta,
-                meta={
-                    "weights": {
-                        GUARD_DEPTH: w_guard,
-                        WING_DEPTH: w_wing,
-                        BIG_DEPTH: w_big,
-                        BENCH_DEPTH: w_bench,
-                    },
-                    "delta": {
-                        "guard": delta_guard,
-                        "wing": delta_wing,
-                        "big": delta_big,
-                        "bench": delta_bench,
-                    },
-                    "incoming_supply": in_s,
-                    "outgoing_supply": out_s,
-                },
-            )
-        )
-        return delta
-
-    # ------------------------------------------------------------------
-    # 8) Outgoing hole penalty (delta-only, need_map-independent)
-    # ------------------------------------------------------------------
     def _outgoing_hole_penalty(
         self,
         incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
@@ -761,207 +475,132 @@ class PackageEffects:
         )
         return delta
 
-    # ------------------------------------------------------------------
-    # CAP_FLEX (need_map-driven)
-    # ------------------------------------------------------------------
-    def _cap_flex_adjustment(
-        self,
-        incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
-        ctx: DecisionContext,
-        env: ValuationEnv,
-        steps: List[ValuationStep],
-    ) -> ValueComponents:
-        cfg = self.config
-
+    def _resolve_need_map_new(self, ctx: DecisionContext) -> Dict[str, float]:
         need_map = dict(ctx.need_map or {})
         if not need_map and getattr(ctx, "policies", None) is not None:
             try:
                 need_map = dict(ctx.policies.fit.need_map or {})
             except Exception:
                 need_map = {}
-        w_need = _clamp(_safe_float(need_map.get(CAP_FLEX), 0.0), 0.0, 1.0)
+        out: Dict[str, float] = {}
+        for k, v in need_map.items():
+            t = str(k or "").strip().upper()
+            if not t:
+                continue
+            ok = t in ALL_NEW_NEED_TAGS
+            if not ok:
+                for pref in ("G_", "W_", "B_"):
+                    if t.startswith(pref) and t[len(pref):] in ALL_NEW_NEED_TAGS:
+                        ok = True
+                        break
+            if not ok:
+                continue
+            out[t] = _clamp(_safe_float(v, 0.0), 0.0, 1.0)
+        return out
 
-        # --------------------------------------------------------------
-        # (A) Cap-room usage cost (NOW): using cap space is a real resource.
-        # --------------------------------------------------------------
-        cap_space_before = 0.0
-        if isinstance(getattr(ctx, "debug", None), dict):
-            cap_space_before = _safe_float(ctx.debug.get("cap_space"), 0.0)
-        cap_space_before = max(0.0, float(cap_space_before))
-
-        cur_sy = int(env.current_season_year)
-        if cur_sy <= 0:
-            raise ValueError("ValuationEnv.current_season_year must be a positive integer")
-
-        cap_now = float(env.cap_model.salary_cap_for_season(int(cur_sy)))
-        cap_source = "env"
-
-        def salary_now(p: PlayerSnapshot) -> float:
-            s = _safe_float(getattr(p, "salary_amount", None), 0.0)
-            if s > cfg.eps:
-                return float(s)
-            t = player_contract_terms(p, current_season_year=int(cur_sy))
-            return float(max(0.0, _safe_float(t.salary_now, 0.0)))
-
-        def sum_salary_now(items: Sequence[Tuple[TeamValuation, AssetSnapshot]]) -> float:
-            acc = 0.0
-            for tv, snap in items:
-                if tv.kind != AssetKind.PLAYER or not isinstance(snap, PlayerSnapshot):
+    def _package_supply_vector(self, items: Sequence[Tuple[TeamValuation, AssetSnapshot]]) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        for tv, snap in items:
+            if tv.kind != AssetKind.PLAYER or not isinstance(snap, PlayerSnapshot):
+                continue
+            attrs = snap.attrs if isinstance(snap.attrs, dict) else {}
+            try:
+                sv = tag_supply(attrs, strict=True) or {}
+            except Exception:
+                sv = {}
+            for k, v in sv.items():
+                t = str(k or "").strip().upper()
+                if not t:
                     continue
-                acc += salary_now(snap)
-            return float(acc)
+                out[t] = out.get(t, 0.0) + _clamp(_safe_float(v, 0.0), 0.0, 1.0)
+        return out
 
-        in_sal = sum_salary_now(incoming)
-        out_sal = sum_salary_now(outgoing)
-        net_added = in_sal - out_sal
-
-        cap_room_used = min(max(net_added, 0.0), cap_space_before)
-        used_frac = 0.0
-        if float(cap_now) > cfg.eps:
-            used_frac = cap_room_used / float(cap_now)
-
-        # even if CAP_FLEX need is low, cap room isn't free
-        w_room = _clamp(cfg.cap_room_weight_base + (1.0 - cfg.cap_room_weight_base) * w_need, 0.0, 1.0)
-        raw_now = 0.0
-        if float(cap_now) > cfg.eps:
-            raw_now = -w_room * cfg.cap_room_value_per_cap_fraction * (used_frac ** cfg.cap_room_cost_exponent)
-        raw_now = _clamp(raw_now, -cfg.cap_room_abs_cap, 0.0)
-
-        delta_now = ValueComponents.zero()
-        if abs(raw_now) > cfg.eps:
-            delta_now = _vc(now=raw_now, future=0.0)
-            steps.append(
-                ValuationStep(
-                    stage=ValuationStage.PACKAGE,
-                    mode=StepMode.ADD,
-                    code="CAP_ROOM_USED_COST",
-                    label="캡스페이스 사용 비용(자원)",
-                    delta=delta_now,
-                    meta={
-                        "weight_need": w_need,
-                        "weight_effective": w_room,
-                        "cap_space_before": cap_space_before,
-                        "cap_now": cap_now,
-                        "cap_source": cap_source,
-                        "cur_season_year": cur_sy,
-                        "incoming_salary_now": in_sal,
-                        "outgoing_salary_now": out_sal,
-                        "net_added_salary_now": net_added,
-                        "cap_room_used": cap_room_used,
-                        "used_frac": used_frac,
-                        "value_per_cap_fraction": cfg.cap_room_value_per_cap_fraction,
-                        "exponent": cfg.cap_room_cost_exponent,
-                    },
-                )
-            )
-
-        # --------------------------------------------------------------
-        # (B) Commitment delta (FUTURE): long-term flexibility preference.
-        # --------------------------------------------------------------
-        def sum_commit(items: Sequence[Tuple[TeamValuation, AssetSnapshot]]) -> float:
-            acc = 0.0
-            for tv, snap in items:
-                if tv.kind != AssetKind.PLAYER or not isinstance(snap, PlayerSnapshot):
-                    continue
-                acc += _commitment_metric(snap, current_season_year=int(cur_sy))
-            return float(acc)
-
-        in_c = sum_commit(incoming)
-        out_c = sum_commit(outgoing)
-        delta_commit = in_c - out_c
-
-        raw_fut = -w_need * delta_commit * cfg.cap_flex_scale
-        raw_fut = _clamp(raw_fut, -cfg.cap_commit_abs_cap, cfg.cap_commit_abs_cap)
-
-        delta_fut = ValueComponents.zero()
-        if abs(raw_fut) > cfg.eps:
-            delta_fut = _vc(now=0.0, future=raw_fut)
-            steps.append(
-                ValuationStep(
-                    stage=ValuationStage.PACKAGE,
-                    mode=StepMode.ADD,
-                    code="CAP_FLEX_COMMITMENT_DELTA",
-                    label="유연성(CAP_FLEX) 커미트먼트 델타",
-                    delta=delta_fut,
-                    meta={
-                        "weight": w_need,
-                        "cur_season_year": cur_sy,
-                        "delta_commitment": delta_commit,
-                        "scale": cfg.cap_flex_scale,
-                        "incoming_commit": in_c,
-                        "outgoing_commit": out_c,
-                        "abs_cap": cfg.cap_commit_abs_cap,
-                    },
-                )
-            )
-        return delta_now + delta_fut
-
-    # ------------------------------------------------------------------
-    # OFF/DEF upgrade (need_map-driven)
-    # ------------------------------------------------------------------
-    def _upgrade_adjustment(
+    def _need_supply_balance_adjustment(
         self,
+        *,
         incoming: Sequence[Tuple[TeamValuation, AssetSnapshot]],
         outgoing: Sequence[Tuple[TeamValuation, AssetSnapshot]],
         ctx: DecisionContext,
+        base_out_mass: float,
         steps: List[ValuationStep],
-    ) -> ValueComponents:
+    ) -> Tuple[ValueComponents, Dict[str, Any]]:
         cfg = self.config
-        need_map = dict(ctx.need_map or {})
-        if not need_map and getattr(ctx, "policies", None) is not None:
-            try:
-                need_map = dict(ctx.policies.fit.need_map or {})
-            except Exception:
-                need_map = {}
+        need_map = self._resolve_need_map_new(ctx)
+        in_supply = self._package_supply_vector(incoming)
+        out_supply = self._package_supply_vector(outgoing)
 
-        w_off = _clamp(_safe_float(need_map.get(OFFENSE_UPGRADE), 0.0), 0.0, 1.0)
-        w_def = _clamp(_safe_float(need_map.get(DEFENSE_UPGRADE), 0.0), 0.0, 1.0)
-        if (w_off + w_def) <= cfg.eps:
-            return ValueComponents.zero()
+        tags = sorted(set(need_map.keys()) | set(in_supply.keys()) | set(out_supply.keys()))
+        if not tags:
+            return ValueComponents.zero(), {"need_map": {}, "incoming_supply": {}, "outgoing_supply": {}}
 
-        def sum_off(items: Sequence[Tuple[TeamValuation, AssetSnapshot]]) -> float:
-            acc = 0.0
-            for tv, snap in items:
-                if tv.kind != AssetKind.PLAYER or not isinstance(snap, PlayerSnapshot):
-                    continue
-                acc += max(_market_now_grade(tv), 0.0)
-            return acc
+        fulfilled: Dict[str, float] = {}
+        excess: Dict[str, float] = {}
+        need_w_excess_sum = 0.0
+        fulfilled_mass = 0.0
 
-        def sum_def(items: Sequence[Tuple[TeamValuation, AssetSnapshot]]) -> float:
-            acc = 0.0
-            for tv, snap in items:
-                if tv.kind != AssetKind.PLAYER or not isinstance(snap, PlayerSnapshot):
-                    continue
-                base = max(_market_now_grade(tv), 0.0)
-                sig = _clamp(_defense_signal(snap), cfg.defense_proxy_floor, cfg.defense_proxy_cap)
-                acc += base * sig
-            return acc
+        for t in tags:
+            need = _clamp(_safe_float(need_map.get(t, 0.0), 0.0), 0.0, 1.0)
+            supply = max(0.0, _safe_float(in_supply.get(t, 0.0), 0.0))
+            f = min(need, supply)
+            e = max(0.0, supply - need)
+            fulfilled[t] = f
+            excess[t] = e
+            fulfilled_mass += f
+            if need > 0.0 and e > 0.0:
+                need_w_excess_sum += need * e
 
-        delta_off = sum_off(incoming) - sum_off(outgoing)
-        delta_def = sum_def(incoming) - sum_def(outgoing)
+        raw_pen = cfg.need_supply_excess_scale * (need_w_excess_sum ** cfg.need_supply_excess_exponent)
+        cap = cfg.need_supply_excess_cap_ratio * max(base_out_mass, cfg.eps)
+        pen_total = _clamp(raw_pen, 0.0, cap)
+        penalty = _split_total_to_components(-pen_total, w_now=float(ctx.knobs.w_now), w_future=float(ctx.knobs.w_future))
 
-        raw = cfg.upgrade_scale * (w_off * delta_off + w_def * delta_def)
-        if abs(raw) <= cfg.eps:
-            return ValueComponents.zero()
+        bonus = ValueComponents.zero()
+        bonus_total = 0.0
+        in_players = len(self._players(incoming))
+        # depth stress proxy from prefixed positional needs
+        depth_stress = 0.0
+        for pref in ("G_", "W_", "B_"):
+            depth_stress = max(depth_stress, max((_safe_float(v, 0.0) for k, v in need_map.items() if str(k).startswith(pref)), default=0.0))
 
-        delta = _vc(now=raw, future=0.0)
-        steps.append(
-            ValuationStep(
-                stage=ValuationStage.PACKAGE,
-                mode=StepMode.ADD,
-                code="OFF_DEF_UPGRADE_DELTA",
-                label="공격/수비 업그레이드(딜 조합) 보정",
-                delta=delta,
-                meta={
-                    "weights": {OFFENSE_UPGRADE: w_off, DEFENSE_UPGRADE: w_def},
-                    "delta_off": delta_off,
-                    "delta_def": delta_def,
-                    "upgrade_scale": cfg.upgrade_scale,
-                },
+        if cfg.slot_efficiency_enabled and in_players > 0 and fulfilled_mass > cfg.eps:
+            raw_bonus = cfg.slot_efficiency_scale * (fulfilled_mass / max(1.0, float(in_players)))
+            damp = 1.0 - cfg.slot_efficiency_depth_stress_dampen * _clamp(depth_stress, 0.0, 1.0)
+            raw_bonus *= _clamp(damp, 0.0, 1.0)
+            bcap = cfg.slot_efficiency_cap_ratio * max(base_out_mass, cfg.eps)
+            bonus_total = _clamp(raw_bonus, 0.0, bcap)
+            bonus = _split_total_to_components(bonus_total, w_now=float(ctx.knobs.w_now), w_future=float(ctx.knobs.w_future))
+
+        delta = penalty + bonus
+        if abs(delta.total) > cfg.eps:
+            steps.append(
+                ValuationStep(
+                    stage=ValuationStage.PACKAGE,
+                    mode=StepMode.ADD,
+                    code="NEED_SUPPLY_BALANCE_DELTA",
+                    label="니즈 충족/초과공급 패키지 보정",
+                    delta=delta,
+                    meta={
+                        "fulfilled_mass": fulfilled_mass,
+                        "need_weighted_excess_sum": need_w_excess_sum,
+                        "penalty_total": pen_total,
+                        "slot_efficiency_bonus_total": bonus_total,
+                        "depth_stress": depth_stress,
+                        "incoming_players": in_players,
+                    },
+                )
             )
-        )
-        return delta
+
+        meta = {
+            "need_map": {k: _safe_float(v, 0.0) for k, v in need_map.items()},
+            "incoming_supply": {k: _safe_float(v, 0.0) for k, v in in_supply.items()},
+            "outgoing_supply": {k: _safe_float(v, 0.0) for k, v in out_supply.items()},
+            "fulfilled": {k: _safe_float(v, 0.0) for k, v in fulfilled.items()},
+            "excess": {k: _safe_float(v, 0.0) for k, v in excess.items()},
+            "penalty_total": pen_total,
+            "slot_efficiency_bonus_total": bonus_total,
+        }
+        return delta, meta
+
 
 
     def _agency_distress_adjustment(
