@@ -41,6 +41,13 @@ import {
   handleCombineBackToOverview,
   handleCombineCategoryClick,
   handleExpiredContractAction,
+  handleWorkoutInviteToggle,
+  handleWorkoutInviteSubmit,
+  handleWorkoutStartInterviews,
+  handleInterviewQuestionToggle,
+  handleInterviewSubmitCurrent,
+  handleContinueWorkoutRound,
+  handleProceedToWithdrawals,
   setTeamOptionDecision,
 } from "../features/offseason/offseasonDevFlow.js";
 import { emitCacheEvent } from "./cacheEvents.js";
@@ -101,6 +108,52 @@ function bindEvents() {
     const combineBackTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-combine-back]") : null;
     if (combineBackTarget) {
       handleCombineBackToOverview();
+      return;
+    }
+
+    const workoutToggleTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-workout-toggle]") : null;
+    if (workoutToggleTarget) {
+      const prospectTempId = String(workoutToggleTarget.dataset.offseasonWorkoutToggle || "");
+      if (!prospectTempId) return;
+      handleWorkoutInviteToggle(prospectTempId);
+      return;
+    }
+
+    const workoutSubmitTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-workout-submit]") : null;
+    if (workoutSubmitTarget) {
+      handleWorkoutInviteSubmit().catch((e) => alert(e.message));
+      return;
+    }
+
+    const workoutStartInterviewsTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-workout-start-interviews]") : null;
+    if (workoutStartInterviewsTarget) {
+      handleWorkoutStartInterviews().catch((e) => alert(e.message));
+      return;
+    }
+
+    const interviewQuestionTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-interview-question]") : null;
+    if (interviewQuestionTarget) {
+      const questionId = String(interviewQuestionTarget.dataset.offseasonInterviewQuestion || "");
+      if (!questionId) return;
+      handleInterviewQuestionToggle(questionId);
+      return;
+    }
+
+    const interviewSubmitTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-interview-submit]") : null;
+    if (interviewSubmitTarget) {
+      handleInterviewSubmitCurrent().catch((e) => alert(e.message));
+      return;
+    }
+
+    const continueRoundTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-workout-continue-round]") : null;
+    if (continueRoundTarget) {
+      handleContinueWorkoutRound();
+      return;
+    }
+
+    const proceedNextTarget = event.target instanceof HTMLElement ? event.target.closest("button[data-offseason-workout-proceed-next]") : null;
+    if (proceedNextTarget) {
+      handleProceedToWithdrawals().catch((e) => alert(e.message));
     }
   });
   els.scheduleBtn.addEventListener("click", () => showScheduleScreen().catch((e) => alert(e.message)));

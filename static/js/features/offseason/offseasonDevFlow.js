@@ -30,6 +30,18 @@ function ensureOffseasonDevState() {
       combineCategoryCards: [],
       combineSelectedCategory: "",
       combineDetailRows: [],
+      workoutRound: 1,
+      workoutMaxRounds: 3,
+      workoutInviteLimit: 10,
+      workoutInvitedCurrent: [],
+      workoutInvitedByRound: {},
+      workoutDoneProspectIds: [],
+      workoutResultsByRound: {},
+      interviewQuestionCatalog: [],
+      interviewSelectionsByRound: {},
+      interviewResultsByRound: {},
+      interviewCurrentProspectIndex: 0,
+      workoutDecisionPendingRound: 0,
     };
   }
 
@@ -40,6 +52,18 @@ function ensureOffseasonDevState() {
   if (!Array.isArray(state.offseasonDev.combineCategoryCards)) state.offseasonDev.combineCategoryCards = [];
   if (typeof state.offseasonDev.combineSelectedCategory !== "string") state.offseasonDev.combineSelectedCategory = "";
   if (!Array.isArray(state.offseasonDev.combineDetailRows)) state.offseasonDev.combineDetailRows = [];
+  if (!Number.isFinite(Number(state.offseasonDev.workoutRound))) state.offseasonDev.workoutRound = 1;
+  if (!Number.isFinite(Number(state.offseasonDev.workoutMaxRounds))) state.offseasonDev.workoutMaxRounds = 3;
+  if (!Number.isFinite(Number(state.offseasonDev.workoutInviteLimit))) state.offseasonDev.workoutInviteLimit = 10;
+  if (!Array.isArray(state.offseasonDev.workoutInvitedCurrent)) state.offseasonDev.workoutInvitedCurrent = [];
+  if (!state.offseasonDev.workoutInvitedByRound || typeof state.offseasonDev.workoutInvitedByRound !== "object") state.offseasonDev.workoutInvitedByRound = {};
+  if (!Array.isArray(state.offseasonDev.workoutDoneProspectIds)) state.offseasonDev.workoutDoneProspectIds = [];
+  if (!state.offseasonDev.workoutResultsByRound || typeof state.offseasonDev.workoutResultsByRound !== "object") state.offseasonDev.workoutResultsByRound = {};
+  if (!Array.isArray(state.offseasonDev.interviewQuestionCatalog)) state.offseasonDev.interviewQuestionCatalog = [];
+  if (!state.offseasonDev.interviewSelectionsByRound || typeof state.offseasonDev.interviewSelectionsByRound !== "object") state.offseasonDev.interviewSelectionsByRound = {};
+  if (!state.offseasonDev.interviewResultsByRound || typeof state.offseasonDev.interviewResultsByRound !== "object") state.offseasonDev.interviewResultsByRound = {};
+  if (!Number.isFinite(Number(state.offseasonDev.interviewCurrentProspectIndex))) state.offseasonDev.interviewCurrentProspectIndex = 0;
+  if (!Number.isFinite(Number(state.offseasonDev.workoutDecisionPendingRound))) state.offseasonDev.workoutDecisionPendingRound = 0;
 
   return state.offseasonDev;
 }
@@ -419,6 +443,173 @@ function renderCombineDetailTable() {
   `;
 }
 
+function loadWorkoutProspectsFromBundle() {
+  const flow = ensureOffseasonDevState();
+  const prospects = Array.isArray(flow.draftBundleResult?.pool?.prospects) ? flow.draftBundleResult.pool.prospects : [];
+  return prospects.map((p) => ({
+    prospectTempId: String(p?.temp_id || p?.prospect_temp_id || ""),
+    name: String(p?.name || "선수"),
+    pos: String(p?.pos || "-"),
+    team: String(p?.college?.college_team_name || p?.college?.college_team_id || p?.college_team_id || "-"),
+    workout: p?.workout?.result && typeof p.workout.result === "object" ? p.workout.result : null,
+    interview: p?.interview?.result && typeof p.interview.result === "object" ? p.interview.result : null,
+  })).filter((row) => row.prospectTempId);
+}
+
+function getCurrentWorkoutRound() {
+  const flow = ensureOffseasonDevState();
+  const round = Number(flow.workoutRound || 1);
+  return Math.max(1, Math.min(Number(flow.workoutMaxRounds || 3), Number.isFinite(round) ? round : 1));
+}
+
+function readRoundInvites(round) {
+  const flow = ensureOffseasonDevState();
+  const key = String(round);
+  return Array.isArray(flow.workoutInvitedByRound?.[key]) ? flow.workoutInvitedByRound[key] : [];
+}
+
+function renderWorkoutInviteSelect() {
+  const flow = ensureOffseasonDevState();
+  const round = getCurrentWorkoutRound();
+  const inviteLimit = Number(flow.workoutInviteLimit || 10);
+  const selected = Array.isArray(flow.workoutInvitedCurrent) ? flow.workoutInvitedCurrent : [];
+  const done = new Set(Array.isArray(flow.workoutDoneProspectIds) ? flow.workoutDoneProspectIds.map((id) => String(id || "")) : []);
+  const candidates = loadWorkoutProspectsFromBundle().filter((row) => !done.has(row.prospectTempId));
+
+  if (!candidates.length) {
+    return `<div class="offseason-dev-list"><p>추가로 초청 가능한 선수가 없습니다. 다음 단계로 진행하세요.</p></div>`;
+  }
+
+  const rows = candidates.slice(0, 120).map((row) => {
+    const chosen = selected.includes(row.prospectTempId);
+    const cls = chosen ? "btn" : "btn btn-secondary";
+    return `
+      <div class="offseason-dev-row">
+        <div>
+          <strong>${row.name}</strong>
+          <div class="subtitle">${row.pos} · ${row.team}</div>
+        </div>
+        <button type="button" class="${cls}" data-offseason-workout-toggle="${row.prospectTempId}">${chosen ? "선택됨" : "선택"}</button>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="offseason-dev-list">
+      <div class="offseason-dev-row">
+        <strong>워크아웃 ${round}회차 초청</strong>
+        <span class="subtitle">${selected.length} / ${inviteLimit}</span>
+      </div>
+      ${rows}
+      <div class="offseason-dev-actions">
+        <button type="button" class="btn" data-offseason-workout-submit="1" ${selected.length ? "" : "disabled"}>초청 완료</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderWorkoutResultsTable() {
+  const flow = ensureOffseasonDevState();
+  const round = getCurrentWorkoutRound();
+  const invited = readRoundInvites(round);
+  const byId = new Map(loadWorkoutProspectsFromBundle().map((row) => [row.prospectTempId, row]));
+  const rows = invited.map((pid) => byId.get(pid)).filter(Boolean);
+
+  const tableBody = rows.map((row) => {
+    const scores = row.workout?.scores || {};
+    const notes = Array.isArray(row.workout?.notes) ? row.workout.notes.slice(0, 2).join(" · ") : "-";
+    return `
+      <tr>
+        <td>${row.name}</td><td>${row.pos}</td>
+        <td>${Number(scores?.overall || 0).toFixed(1)}</td>
+        <td>${Number(scores?.shooting || 0).toFixed(1)}</td>
+        <td>${Number(scores?.ball_skills || 0).toFixed(1)}</td>
+        <td>${Number(scores?.defense || 0).toFixed(1)}</td>
+        <td>${Number(scores?.medical_risk || 0).toFixed(1)}</td>
+        <td>${notes}</td>
+      </tr>
+    `;
+  }).join("");
+
+  return `
+    <div class="offseason-dev-list">
+      <div class="offseason-dev-row"><strong>워크아웃 ${round}회차 결과</strong><span class="subtitle">${rows.length}명</span></div>
+      <div class="offseason-combine-detail-wrap">
+        <table class="offseason-combine-detail-table">
+          <thead><tr><th>선수</th><th>POS</th><th>Overall</th><th>Shooting</th><th>Ball</th><th>Defense</th><th>Medical</th><th>비고</th></tr></thead>
+          <tbody>${tableBody || `<tr><td colspan="8">결과가 없습니다.</td></tr>`}</tbody>
+        </table>
+      </div>
+      <div class="offseason-dev-actions">
+        <button type="button" class="btn" data-offseason-workout-start-interviews="1">인터뷰</button>
+      </div>
+    </div>
+  `;
+}
+
+function getInterviewSelectionFor(round, prospectTempId) {
+  const flow = ensureOffseasonDevState();
+  const rkey = String(round);
+  const pkey = String(prospectTempId || "");
+  const byRound = flow.interviewSelectionsByRound?.[rkey];
+  if (!byRound || typeof byRound !== "object") return [];
+  return Array.isArray(byRound[pkey]) ? byRound[pkey] : [];
+}
+
+function renderInterviewProgress() {
+  const flow = ensureOffseasonDevState();
+  const round = getCurrentWorkoutRound();
+  const invited = readRoundInvites(round);
+  const idx = Math.max(0, Number(flow.interviewCurrentProspectIndex || 0));
+  const currentProspectId = invited[idx] || "";
+  const prospectsById = new Map(loadWorkoutProspectsFromBundle().map((row) => [row.prospectTempId, row]));
+  const current = prospectsById.get(currentProspectId);
+  if (!currentProspectId || !current) {
+    return `<div class="offseason-dev-list"><p>인터뷰 대상 선수가 없습니다.</p></div>`;
+  }
+
+  const qs = Array.isArray(flow.interviewQuestionCatalog) ? flow.interviewQuestionCatalog : [];
+  const selectedQids = getInterviewSelectionFor(round, currentProspectId);
+  const qHtml = qs.map((q) => {
+    const qid = String(q?.id || "");
+    const selected = selectedQids.includes(qid);
+    return `
+      <button type="button" class="${selected ? "btn" : "btn btn-secondary"}" data-offseason-interview-question="${qid}">
+        ${String(q?.question || qid || "질문")}
+      </button>
+    `;
+  }).join("");
+
+  return `
+    <div class="offseason-dev-list">
+      <div class="offseason-dev-row">
+        <strong>인터뷰 ${round}회차 · ${idx + 1}/${invited.length}</strong>
+        <span class="subtitle">${current.name} (${current.pos})</span>
+      </div>
+      <p class="subtitle">질문 3개를 선택 후 제출하세요. (현재 ${selectedQids.length}/3)</p>
+      <div class="offseason-dev-actions">${qHtml}</div>
+      <div class="offseason-dev-actions">
+        <button type="button" class="btn" data-offseason-interview-submit="1" ${selectedQids.length === 3 ? "" : "disabled"}>질문 제출</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderRoundCompleteDecision() {
+  const flow = ensureOffseasonDevState();
+  const round = Number(flow.workoutDecisionPendingRound || getCurrentWorkoutRound());
+  const canContinue = round < Number(flow.workoutMaxRounds || 3);
+  return `
+    <div class="offseason-dev-list">
+      <div class="offseason-dev-row"><strong>워크아웃이 종료되었습니다.</strong><span class="subtitle">${round}회차 완료</span></div>
+      <div class="offseason-dev-actions">
+        ${canContinue ? `<button type="button" class="btn btn-secondary" data-offseason-workout-continue-round="1">워크아웃 추가 진행</button>` : ""}
+        <button type="button" class="btn" data-offseason-workout-proceed-next="1">다음 단계로 이동</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderOffseasonDevFlow() {
   const flow = ensureOffseasonDevState();
   const step = String(flow.step || "IDLE");
@@ -579,13 +770,56 @@ function renderOffseasonDevFlow() {
   if (step === "COMBINE_OVERVIEW") {
     setOffseasonDevStatus("컴바인 항목별 Top 10 카드입니다. 카드를 누르면 전체 결과를 봅니다.");
     setOffseasonDevContentHtml(renderCombineOverviewCards());
-    setOffseasonDevNextButton({ label: "완료", disabled: true });
+    setOffseasonDevNextButton({ label: "다음으로 (워크아웃 1회차)", disabled: false });
     return;
   }
 
   if (step === "COMBINE_DETAIL") {
     setOffseasonDevStatus("컴바인 상세 결과입니다.");
     setOffseasonDevContentHtml(renderCombineDetailTable());
+    setOffseasonDevNextButton({ label: "다음으로 (워크아웃 1회차)", disabled: false });
+    return;
+  }
+
+  if (step === "WORKOUT_INVITE_SELECT") {
+    const round = getCurrentWorkoutRound();
+    setOffseasonDevStatus(`워크아웃 ${round}회차입니다. 최대 10명을 초청하세요.`);
+    setOffseasonDevContentHtml(renderWorkoutInviteSelect());
+    setOffseasonDevNextButton({ label: "초청 완료 버튼으로 진행", disabled: true });
+    return;
+  }
+
+  if (step === "WORKOUT_RESULT") {
+    const round = getCurrentWorkoutRound();
+    setOffseasonDevStatus(`워크아웃 ${round}회차 결과입니다. 인터뷰를 진행하세요.`);
+    setOffseasonDevContentHtml(renderWorkoutResultsTable());
+    setOffseasonDevNextButton({ label: "인터뷰 버튼으로 진행", disabled: true });
+    return;
+  }
+
+  if (step === "INTERVIEW_PROGRESS") {
+    const round = getCurrentWorkoutRound();
+    setOffseasonDevStatus(`인터뷰 ${round}회차 진행 중입니다. 선수당 질문 3개를 선택하세요.`);
+    setOffseasonDevContentHtml(renderInterviewProgress());
+    setOffseasonDevNextButton({ label: "인터뷰 화면에서 진행", disabled: true });
+    return;
+  }
+
+  if (step === "ROUND_COMPLETE") {
+    setOffseasonDevStatus("이번 회차 워크아웃+인터뷰가 완료되었습니다.");
+    setOffseasonDevContentHtml(renderRoundCompleteDecision());
+    setOffseasonDevNextButton({ label: "버튼으로 분기 선택", disabled: true });
+    return;
+  }
+
+  if (step === "WITHDRAWALS_PROCESSED") {
+    setOffseasonDevStatus("드래프트 철회(withdrawals) 처리가 완료되었습니다.");
+    const result = flow.withdrawalsResult || {};
+    setOffseasonDevContentHtml(`
+      <div class="offseason-dev-list">
+        <div class="offseason-dev-row"><strong>withdrawals 완료</strong><span class="subtitle">status: ${String(result?.ok ? "ok" : "done")}</span></div>
+      </div>
+    `);
     setOffseasonDevNextButton({ label: "완료", disabled: true });
     return;
   }
@@ -736,6 +970,29 @@ async function runSettleStepOnly() {
   flow.step = "DRAFT_SETTLED_ROUND1";
 }
 
+async function loadDraftBundleForViewer() {
+  const flow = ensureOffseasonDevState();
+  const teamId = String(state.selectedTeamId || "").trim();
+  const q = teamId ? `?viewer_team_id=${encodeURIComponent(teamId)}` : "";
+  flow.draftBundleResult = await fetchJson(`/api/offseason/draft/bundle${q}`);
+  return flow.draftBundleResult;
+}
+
+function resetWorkoutInterviewFlowState() {
+  const flow = ensureOffseasonDevState();
+  flow.workoutRound = 1;
+  flow.workoutInvitedCurrent = [];
+  flow.workoutInvitedByRound = {};
+  flow.workoutDoneProspectIds = [];
+  flow.workoutResultsByRound = {};
+  flow.interviewQuestionCatalog = [];
+  flow.interviewSelectionsByRound = {};
+  flow.interviewResultsByRound = {};
+  flow.interviewCurrentProspectIndex = 0;
+  flow.workoutDecisionPendingRound = 0;
+  flow.withdrawalsResult = null;
+}
+
 async function runCombineAndLoadBundleStep() {
   const flow = ensureOffseasonDevState();
   flow.draftCombineResult = await fetchJson("/api/offseason/draft/combine", {
@@ -743,12 +1000,13 @@ async function runCombineAndLoadBundleStep() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
   });
-  flow.draftBundleResult = await fetchJson("/api/offseason/draft/bundle");
+  await loadDraftBundleForViewer();
 
   const combineRows = extractCombineRowsFromBundle(flow.draftBundleResult);
   flow.combineCategoryCards = buildCombineCategoryCards(combineRows, combineCategorySpecs());
   flow.combineSelectedCategory = "";
   flow.combineDetailRows = [];
+  resetWorkoutInterviewFlowState();
   flow.step = "COMBINE_OVERVIEW";
 }
 
@@ -807,6 +1065,162 @@ function handleCombineBackToOverview() {
   renderOffseasonDevFlow();
 }
 
+function handleWorkoutInviteToggle(prospectTempId) {
+  const flow = ensureOffseasonDevState();
+  const pid = String(prospectTempId || "").trim();
+  if (!pid) return;
+
+  const limit = Number(flow.workoutInviteLimit || 10);
+  const selected = Array.isArray(flow.workoutInvitedCurrent) ? [...flow.workoutInvitedCurrent] : [];
+  const idx = selected.indexOf(pid);
+  if (idx >= 0) {
+    selected.splice(idx, 1);
+  } else if (selected.length < limit) {
+    selected.push(pid);
+  }
+  flow.workoutInvitedCurrent = selected;
+  renderOffseasonDevFlow();
+}
+
+async function handleWorkoutInviteSubmit() {
+  const flow = ensureOffseasonDevState();
+  const round = getCurrentWorkoutRound();
+  const invited = Array.isArray(flow.workoutInvitedCurrent) ? flow.workoutInvitedCurrent.map((id) => String(id || "")).filter(Boolean) : [];
+  if (!invited.length) throw new Error("워크아웃에 초청할 선수를 선택해주세요.");
+
+  setLoading(true, "워크아웃 실행 중...");
+  try {
+    const result = await fetchJson("/api/offseason/draft/workouts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        team_id: state.selectedTeamId,
+        invited_prospect_temp_ids: invited,
+        max_invites: Number(flow.workoutInviteLimit || 10),
+      }),
+    });
+
+    flow.workoutInvitedByRound[String(round)] = invited;
+    flow.workoutDoneProspectIds = Array.from(new Set([...(flow.workoutDoneProspectIds || []), ...invited]));
+    flow.workoutResultsByRound[String(round)] = result;
+    await loadDraftBundleForViewer();
+    flow.step = "WORKOUT_RESULT";
+    renderOffseasonDevFlow();
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleWorkoutStartInterviews() {
+  const flow = ensureOffseasonDevState();
+  const questionsResult = await fetchJson("/api/offseason/draft/interviews/questions");
+  flow.interviewQuestionCatalog = Array.isArray(questionsResult?.questions) ? questionsResult.questions : [];
+  flow.interviewCurrentProspectIndex = 0;
+  flow.step = "INTERVIEW_PROGRESS";
+  renderOffseasonDevFlow();
+}
+
+function handleInterviewQuestionToggle(questionId) {
+  const flow = ensureOffseasonDevState();
+  const round = getCurrentWorkoutRound();
+  const invited = readRoundInvites(round);
+  const idx = Math.max(0, Number(flow.interviewCurrentProspectIndex || 0));
+  const pid = String(invited[idx] || "");
+  const qid = String(questionId || "").trim();
+  if (!pid || !qid) return;
+
+  const rkey = String(round);
+  if (!flow.interviewSelectionsByRound[rkey] || typeof flow.interviewSelectionsByRound[rkey] !== "object") {
+    flow.interviewSelectionsByRound[rkey] = {};
+  }
+  const selected = Array.isArray(flow.interviewSelectionsByRound[rkey][pid]) ? [...flow.interviewSelectionsByRound[rkey][pid]] : [];
+  const hitIdx = selected.indexOf(qid);
+  if (hitIdx >= 0) {
+    selected.splice(hitIdx, 1);
+  } else if (selected.length < 3) {
+    selected.push(qid);
+  }
+  flow.interviewSelectionsByRound[rkey][pid] = selected;
+  renderOffseasonDevFlow();
+}
+
+async function handleInterviewSubmitCurrent() {
+  const flow = ensureOffseasonDevState();
+  const round = getCurrentWorkoutRound();
+  const invited = readRoundInvites(round);
+  const idx = Math.max(0, Number(flow.interviewCurrentProspectIndex || 0));
+  const pid = String(invited[idx] || "");
+  if (!pid) return;
+
+  const selected = getInterviewSelectionFor(round, pid);
+  if (selected.length !== 3) {
+    throw new Error("선수당 질문 3개를 선택해야 합니다.");
+  }
+
+  if (idx < invited.length - 1) {
+    flow.interviewCurrentProspectIndex = idx + 1;
+    renderOffseasonDevFlow();
+    return;
+  }
+
+  const rkey = String(round);
+  const byPid = (flow.interviewSelectionsByRound?.[rkey] && typeof flow.interviewSelectionsByRound[rkey] === "object") ? flow.interviewSelectionsByRound[rkey] : {};
+  const payload = invited.map((prospectTempId) => ({
+    prospect_temp_id: String(prospectTempId || ""),
+    selected_question_ids: Array.isArray(byPid?.[prospectTempId]) ? byPid[prospectTempId] : [],
+  })).filter((row) => row.prospect_temp_id && row.selected_question_ids.length === 3);
+
+  if (payload.length !== invited.length) {
+    throw new Error("인터뷰 질문 선택이 완료되지 않은 선수가 있습니다.");
+  }
+
+  setLoading(true, "인터뷰 결과 생성 중...");
+  try {
+    const result = await fetchJson("/api/offseason/draft/interviews", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        team_id: state.selectedTeamId,
+        interviews: payload,
+      }),
+    });
+    flow.interviewResultsByRound[rkey] = result;
+    await loadDraftBundleForViewer();
+    flow.workoutDecisionPendingRound = round;
+    flow.step = "ROUND_COMPLETE";
+    renderOffseasonDevFlow();
+  } finally {
+    setLoading(false);
+  }
+}
+
+function handleContinueWorkoutRound() {
+  const flow = ensureOffseasonDevState();
+  const maxRounds = Number(flow.workoutMaxRounds || 3);
+  const nextRound = Math.min(maxRounds, getCurrentWorkoutRound() + 1);
+  flow.workoutRound = nextRound;
+  flow.workoutInvitedCurrent = [];
+  flow.interviewCurrentProspectIndex = 0;
+  flow.step = "WORKOUT_INVITE_SELECT";
+  renderOffseasonDevFlow();
+}
+
+async function handleProceedToWithdrawals() {
+  const flow = ensureOffseasonDevState();
+  setLoading(true, "드래프트 철회 처리 중...");
+  try {
+    flow.withdrawalsResult = await fetchJson("/api/offseason/draft/withdrawals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    flow.step = "WITHDRAWALS_PROCESSED";
+    renderOffseasonDevFlow();
+  } finally {
+    setLoading(false);
+  }
+}
+
 async function advanceOffseasonDevStep() {
   const flow = ensureOffseasonDevState();
   const step = String(flow.step || "IDLE");
@@ -848,6 +1262,11 @@ async function advanceOffseasonDevStep() {
       await runSettleStepOnly();
     } else if (step === "DRAFT_SETTLED_ROUND1") {
       await runCombineAndLoadBundleStep();
+    } else if (step === "COMBINE_OVERVIEW" || step === "COMBINE_DETAIL") {
+      flow.workoutRound = 1;
+      flow.workoutInvitedCurrent = [];
+      flow.interviewCurrentProspectIndex = 0;
+      flow.step = "WORKOUT_INVITE_SELECT";
     }
 
     flow.error = "";
@@ -877,4 +1296,11 @@ export {
   handleExpiredContractAction,
   handleCombineCategoryClick,
   handleCombineBackToOverview,
+  handleWorkoutInviteToggle,
+  handleWorkoutInviteSubmit,
+  handleWorkoutStartInterviews,
+  handleInterviewQuestionToggle,
+  handleInterviewSubmitCurrent,
+  handleContinueWorkoutRound,
+  handleProceedToWithdrawals,
 };
