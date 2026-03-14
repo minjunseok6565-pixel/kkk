@@ -444,7 +444,17 @@ class TeamSituationEvaluator:
         contract_sig = self._compute_contract_pressure(tid, roster)
         constraints = self._compute_constraints(tid, roster, perf)
         style_sig = self._compute_style_signals(tid)
-        role_sig, role_needs = self._compute_role_fit_and_needs(tid, roster, style_sig=style_sig, roster_sig=roster_sig)
+        season_progress = _safe_float(self.ctx.records_index.get(tid, {}).get("season_progress"), 0.0)
+        stat_trust = _early_stat_trust(season_progress)
+        role_sig, role_needs = self._compute_role_fit_and_needs(
+            tid,
+            roster,
+            style_sig=style_sig,
+            roster_sig=roster_sig,
+            ortg_pct=float(rt.get("ortg_pct", 0.5) or 0.5),
+            def_pct=float(rt.get("def_pct", 0.5) or 0.5),
+            stat_trust=float(stat_trust),
+        )
 
         signals = TeamSituationSignals(
             win_pct=float(perf["win_pct"]),
@@ -1015,6 +1025,9 @@ class TeamSituationEvaluator:
         *,
         style_sig: Optional[Dict[str, Any]] = None,
         roster_sig: Optional[Dict[str, Any]] = None,
+        ortg_pct: float = 0.5,
+        def_pct: float = 0.5,
+        stat_trust: float = 1.0,
     ) -> Tuple[Dict[str, Any], List[TeamNeed]]:
         """Aggressive replacement: build needs from role scores + usage/coverage + position shortage.
 
@@ -1298,8 +1311,25 @@ class TeamSituationEvaluator:
                 adj += _clamp((delta - dz) / span, 0.0, 1.0) * float(cfg.usage_cov_positive_boost)
             elif delta < -dz:
                 adj -= _clamp((-delta - dz) / span, 0.0, 1.0) * float(cfg.usage_cov_negative_penalty)
-            w = _clamp(base + adj, 0.0, 1.0)
-            if w < float(cfg.min_emit_weight):
+
+            if phase == "OFF":
+                weak = _clamp((float(cfg.eff_bad_pct_center_off) - float(ortg_pct)) / max(1e-9, float(cfg.eff_bad_pct_center_off)), 0.0, 1.0)
+                add_scale = float(cfg.eff_add_scale_off)
+                mult_scale = float(cfg.eff_mult_scale_off)
+                relax_max = float(cfg.eff_emit_relax_max_off)
+            else:
+                weak = _clamp((float(cfg.eff_bad_pct_center_def) - float(def_pct)) / max(1e-9, float(cfg.eff_bad_pct_center_def)), 0.0, 1.0)
+                add_scale = float(cfg.eff_add_scale_def)
+                mult_scale = float(cfg.eff_mult_scale_def)
+                relax_max = float(cfg.eff_emit_relax_max_def)
+
+            weak *= _clamp(float(stat_trust), float(cfg.eff_early_dampen_min), 1.0)
+            eff_add = weak * add_scale
+            eff_mult = 1.0 + weak * mult_scale
+            w = _clamp((base + adj + eff_add) * eff_mult, 0.0, 1.0)
+
+            effective_min_emit = max(0.0, float(cfg.min_emit_weight) - weak * relax_max)
+            if w < effective_min_emit:
                 return
             tag = _prefix_if_short(_role_key(role, phase), buckets)
             needs.append(
@@ -1317,6 +1347,14 @@ class TeamSituationEvaluator:
                         "pos_counts": dict(pos_counts),
                         "pos_rel": dict(rel),
                         "pos_shortage": dict(shortage),
+                        "efficiency_context": {
+                            "ortg_pct": float(ortg_pct),
+                            "def_pct": float(def_pct),
+                            "phase_weakness": float(weak),
+                            "eff_add": float(eff_add),
+                            "eff_mult": float(eff_mult),
+                            "effective_min_emit": float(effective_min_emit),
+                        },
                     },
                 )
             )

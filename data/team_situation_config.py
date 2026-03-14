@@ -35,5 +35,22 @@ class TeamSituationNeedTagConfig:
     # Final noise floor
     min_emit_weight: float = 0.18
 
+    # Efficiency-aware need amplification (phase-specific)
+    eff_bad_pct_center_off: float = 0.45
+    eff_bad_pct_center_def: float = 0.45
+
+    eff_add_scale_off: float = 0.10
+    eff_add_scale_def: float = 0.10
+
+    eff_mult_scale_off: float = 0.20
+    eff_mult_scale_def: float = 0.20
+
+    # min_emit_weight dynamic relaxation at poor efficiency
+    eff_emit_relax_max_off: float = 0.05
+    eff_emit_relax_max_def: float = 0.05
+
+    # Early-season dampening (apply with stat_trust-like signal)
+    eff_early_dampen_min: float = 0.50
+
 
 TEAM_SITUATION_NEED_TAG_CONFIG = TeamSituationNeedTagConfig()
