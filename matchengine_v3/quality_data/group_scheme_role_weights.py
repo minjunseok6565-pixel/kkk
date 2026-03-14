@@ -361,12 +361,25 @@ GROUP_SCHEME_ROLE_WEIGHTS: Dict[str, Dict[str, Dict[str, float]]] = {'catch_shoo
                             'Weakside_Rotator': 0.1}}}
 
 
-# Preset_Defense slot: copy Drop role weights per outcome group for neutral-safe behavior.
+# Preset_Defense slot: remap AtTheLevel role weights into preset-role-G/W/B buckets.
 _PRESET_DEFENSE_SCHEME_KEY = "프리셋-수비"
-_DROP_SCHEME_KEY = "drop"
+_AT_LEVEL_SCHEME_KEY = "앳-더-레벨"
 for _gid, _scheme_weights in GROUP_SCHEME_ROLE_WEIGHTS.items():
     if not isinstance(_scheme_weights, dict):
         continue
-    _drop_weights = _scheme_weights.get(_DROP_SCHEME_KEY)
-    if isinstance(_drop_weights, dict):
-        _scheme_weights[_PRESET_DEFENSE_SCHEME_KEY] = dict(_drop_weights)
+    _atl_weights = _scheme_weights.get(_AT_LEVEL_SCHEME_KEY)
+    if not isinstance(_atl_weights, dict):
+        continue
+
+    _g = float(_atl_weights.get("PnR_POA_AtTheLevel", 0.0))
+    _w = float(_atl_weights.get("Nail_Helper", 0.0))
+    _b = float(_atl_weights.get("PnR_Cover_Big_AtTheLevel", 0.0))
+    _tot = _g + _w + _b
+    if _tot <= 0:
+        continue
+
+    _scheme_weights[_PRESET_DEFENSE_SCHEME_KEY] = {
+        "preset-role-G": _g / _tot,
+        "preset-role-W": _w / _tot,
+        "preset-role-B": _b / _tot,
+    }

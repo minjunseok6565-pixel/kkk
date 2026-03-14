@@ -35,7 +35,7 @@ const TACTICS_DEFENSE_ROLE_BY_SCHEME = {
   Blitz_TrapPnR: ["PnR_POA_Blitz", "PnR_Cover_Big_Blitz", "Lowman_Helper", "Nail_Helper", "Weakside_Rotator"],
   AtTheLevel: ["PnR_POA_AtTheLevel", "PnR_Cover_Big_AtTheLevel", "Lowman_Helper", "Nail_Helper", "Weakside_Rotator"],
   Zone: ["Zone_Top_Left", "Zone_Top_Right", "Zone_Bottom_Left", "Zone_Bottom_Right", "Zone_Bottom_Center"],
-  Preset_Defense: ["preset-role", "preset-role", "preset-role", "preset-role", "preset-role"]
+  Preset_Defense: ["preset-role-G", "preset-role-W", "preset-role-B"]
 };
 
 export { TACTICS_OFFENSE_SCHEMES, TACTICS_DEFENSE_SCHEMES, TACTICS_OFFENSE_ROLES, TACTICS_DEFENSE_ROLE_BY_SCHEME };

@@ -187,10 +187,30 @@ ROLE_STAT_PROFILES: Dict[str, Dict[str, Dict[str, float]]] = {'2-3 존디펜스'
                                       'REB_DR': 0.1}}}
 
 
-# Preset_Defense slot: reuse Drop role stat profiles as a neutral-safe baseline.
+# Preset_Defense slot: explicit G/W/B role stat profiles.
 _PRESET_DEFENSE_SCHEME_KEY = "프리셋-수비"
-_DROP_SCHEME_KEY = "drop"
 ROLE_STAT_PROFILES[_PRESET_DEFENSE_SCHEME_KEY] = {
-    _role: dict(_weights)
-    for _role, _weights in ROLE_STAT_PROFILES.get(_DROP_SCHEME_KEY, {}).items()
+    "preset-role-G": {
+        "DEF_HELP": 0.1,
+        "DEF_POA": 0.45,
+        "DEF_STEAL": 0.1,
+        "ENDURANCE": 0.25,
+        "PHYSICAL": 0.1,
+    },
+    "preset-role-W": {
+        "DEF_HELP": 0.4,
+        "DEF_POA": 0.2,
+        "DEF_STEAL": 0.15,
+        "ENDURANCE": 0.15,
+        "PHYSICAL": 0.1,
+    },
+    "preset-role-B": {
+        "DEF_HELP": 0.15,
+        "DEF_POA": 0.3,
+        "DEF_RIM": 0.1,
+        "DEF_STEAL": 0.05,
+        "ENDURANCE": 0.25,
+        "PHYSICAL": 0.1,
+        "REB_DR": 0.05,
+    },
 }
