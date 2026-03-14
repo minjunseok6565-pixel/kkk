@@ -343,9 +343,25 @@ class MarketPricer:
                 )
             )
 
-        base_now = now_base + star_bonus
+        base_now_raw = now_base + star_bonus
 
-        # 3) Age -> future multiplier (market-level expected horizon)
+        # 3) Age -> now decay (post-peak decline in current impact)
+        now_decay = self._age_to_now_decay_factor(age)
+        if abs(now_decay - 1.0) > cfg.eps:
+            steps.append(
+                ValuationStep(
+                    stage=ValuationStage.MARKET,
+                    mode=StepMode.MUL,
+                    code="AGE_NOW_DECAY",
+                    label="나이 기반 현재가치 감쇠",
+                    factor=now_decay,
+                    delta=_vc(0.0, 0.0),
+                    meta={"age": age},
+                )
+            )
+        base_now = base_now_raw * now_decay
+
+        # 4) Age -> future multiplier (market-level expected horizon)
         age_future_factor = self._age_to_future_factor(age)
         steps.append(
             ValuationStep(
@@ -574,6 +590,14 @@ class MarketPricer:
         x = (ovr - cfg.player_star_softplus_shift) * cfg.player_star_softplus_scale
         return _softplus(x) * 0.9  # bonus magnitude is tunable; keep deterministic
 
+    def _age_to_now_decay_factor(self, age: float) -> float:
+        cfg = self.config
+        if age <= cfg.age_peak:
+            return 1.0
+        diff = age - cfg.age_peak
+        factor = 1.0 - diff * cfg.age_now_decay_per_year
+        return _clamp(factor, 0.35, 1.0)
+
     def _age_to_future_factor(self, age: float) -> float:
         cfg = self.config
         # below peak -> growth, above peak -> decay, both clamped
@@ -584,63 +608,6 @@ class MarketPricer:
             diff = age - cfg.age_peak
             factor = 1.0 - diff * cfg.age_future_decay_per_year_over_peak
         return _clamp(factor, cfg.age_future_floor, cfg.age_future_cap)
-
-    def _contract_efficiency_factor(self, snap: PlayerSnapshot) -> Tuple[float, Dict[str, Any]]:
-        """
-        contract efficiency는 '시장가'에 속한다:
-        - 같은 선수라도 싼 계약이면 시장가가 올라가고, 비싼 계약이면 내려간다.
-        """
-        cfg = self.config
-        ovr = _safe_float(snap.ovr, 70.0)
-
-        # actual salary for the current season: prefer roster salary_amount, else contract meta
-        actual_salary = _safe_float(snap.salary_amount, 0.0)
-        contract_years = 0
-
-        if snap.contract is not None:
-            contract_years = _safe_int(snap.contract.years, 0)
-            # contract salary_by_year may exist; but without current season injection,
-            # we keep roster.salary_amount as the primary actual_salary signal.
-            if actual_salary <= cfg.eps:
-                # fallback to any known salary
-                if isinstance(snap.contract.salary_by_year, dict) and snap.contract.salary_by_year:
-                    # pick the smallest positive salary as proxy to avoid weird jumps
-                    vals = [v for v in snap.contract.salary_by_year.values() if _safe_float(v, 0.0) > 0]
-                    if vals:
-                        actual_salary = float(sorted(vals)[0])
-
-        expected_salary, expected_salary_meta = self._expected_salary_from_ovr(ovr)
-        if actual_salary <= cfg.eps:
-            # if we truly don't know, neutral
-            return 1.0, {"ovr": ovr, "expected_salary": expected_salary, "expected_salary_meta": expected_salary_meta, "actual_salary": None, "years": contract_years}
-
-        ratio = expected_salary / max(actual_salary, cfg.eps)
-        # ratio > 1 => underpaid => value up
-        # ratio < 1 => overpaid => value down
-        factor = _clamp(ratio, cfg.contract_efficiency_factor_floor, cfg.contract_efficiency_factor_cap)
-
-        # long contracts: slight market discount (not "risk", just price of immobility)
-        if contract_years > 0:
-            years_pen = 1.0 - cfg.contract_years_penalty_per_year * max(contract_years - 1, 0)
-            years_pen = _clamp(years_pen, 0.75, 1.0)
-            factor *= years_pen
-
-       # Helpful debug metadata (kept deterministic)
-        salary_cap = _safe_float(getattr(cfg, "salary_cap", None), 0.0)
-        actual_pct = (actual_salary / salary_cap) if salary_cap > cfg.eps else None
-        expected_pct = (expected_salary / salary_cap) if salary_cap > cfg.eps else None
-
-        return float(factor), {
-            "ovr": ovr,
-            "expected_salary": expected_salary,
-            "expected_salary_meta": expected_salary_meta,
-            "actual_salary": actual_salary,
-            "salary_ratio": ratio,
-            "years": contract_years,
-            "salary_cap": (salary_cap if salary_cap > cfg.eps else None),
-            "actual_salary_cap_pct": actual_pct,
-            "expected_salary_cap_pct": expected_pct,
-        }
 
     def _resolve_expected_salary_scale(self) -> Tuple[float, float, Dict[str, Any]]:
         """Resolve expected-salary curve scale.
@@ -1067,4 +1034,3 @@ class MarketPricer:
             steps=tuple(steps),
             meta={"label": snap.label, "owner_team": snap.owner_team, "source_pick_id": snap.source_pick_id},
         )
-
