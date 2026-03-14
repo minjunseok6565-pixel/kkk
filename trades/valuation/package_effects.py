@@ -166,6 +166,13 @@ class PackageEffectsConfig:
     need_supply_excess_exponent: float = 1.35
     need_supply_excess_cap_ratio: float = 0.28
 
+    # Need-weighted soft gating for package incoming supply contribution
+    need_supply_gate_enabled: bool = True
+    need_supply_gate_threshold_min: float = 0.25
+    need_supply_gate_threshold_max: float = 0.45
+    need_supply_gate_hard_floor_cap: float = 0.12
+    need_supply_gate_soft_width: float = 0.20
+
     # Optional slot-efficiency bonus
     slot_efficiency_enabled: bool = True
     slot_efficiency_scale: float = 0.20
@@ -515,6 +522,37 @@ class PackageEffects:
                 out[t] = out.get(t, 0.0) + _clamp(_safe_float(v, 0.0), 0.0, 1.0)
         return out
 
+    def _need_threshold(self, need_w: float) -> float:
+        cfg = self.config
+        n = _clamp(_safe_float(need_w, 0.0), 0.0, 1.0)
+
+        t_min = _clamp(_safe_float(cfg.need_supply_gate_threshold_min, 0.0), 0.0, 1.0)
+        t_max = _clamp(_safe_float(cfg.need_supply_gate_threshold_max, 1.0), 0.0, 1.0)
+        if t_min > t_max:
+            t_min, t_max = t_max, t_min
+
+        return t_max - (t_max - t_min) * n
+
+    def _effective_supply(self, raw_supply: float, need_w: float) -> Tuple[float, float, float, bool]:
+        """Return (effective, gate, threshold, hard_floor_blocked)."""
+        cfg = self.config
+        s_raw = _clamp(_safe_float(raw_supply, 0.0), 0.0, 1.0)
+
+        if not bool(cfg.need_supply_gate_enabled):
+            return s_raw, 1.0, self._need_threshold(need_w), False
+
+        floor_cap = _clamp(_safe_float(cfg.need_supply_gate_hard_floor_cap, 0.0), 0.0, 1.0)
+        if s_raw < floor_cap:
+            return 0.0, 0.0, self._need_threshold(need_w), True
+
+        threshold = self._need_threshold(need_w)
+        soft_width = max(_safe_float(cfg.need_supply_gate_soft_width, 0.0), cfg.eps)
+
+        x = (s_raw - threshold) / soft_width
+        u = _clamp(0.5 + 0.5 * x, 0.0, 1.0)
+        gate = _clamp(u * u * (3.0 - 2.0 * u), 0.0, 1.0)
+        return _clamp(s_raw * gate, 0.0, 1.0), gate, threshold, False
+
     def _need_supply_balance_adjustment(
         self,
         *,
@@ -535,14 +573,28 @@ class PackageEffects:
 
         fulfilled: Dict[str, float] = {}
         excess: Dict[str, float] = {}
+        incoming_supply_raw: Dict[str, float] = {}
+        incoming_supply_effective: Dict[str, float] = {}
+        threshold_by_tag: Dict[str, float] = {}
+        gate_by_tag: Dict[str, float] = {}
+        hard_floor_blocked_tags: List[str] = []
         need_w_excess_sum = 0.0
         fulfilled_mass = 0.0
 
         for t in tags:
             need = _clamp(_safe_float(need_map.get(t, 0.0), 0.0), 0.0, 1.0)
-            supply = max(0.0, _safe_float(in_supply.get(t, 0.0), 0.0))
-            f = min(need, supply)
-            e = max(0.0, supply - need)
+            s_raw = max(0.0, _safe_float(in_supply.get(t, 0.0), 0.0))
+            s_eff, gate, thr, hard_floor_blocked = self._effective_supply(s_raw, need)
+
+            incoming_supply_raw[t] = s_raw
+            incoming_supply_effective[t] = s_eff
+            threshold_by_tag[t] = thr
+            gate_by_tag[t] = gate
+            if hard_floor_blocked:
+                hard_floor_blocked_tags.append(t)
+
+            f = min(need, s_eff)
+            e = max(0.0, s_eff - need)
             fulfilled[t] = f
             excess[t] = e
             fulfilled_mass += f
@@ -592,8 +644,14 @@ class PackageEffects:
 
         meta = {
             "need_map": {k: _safe_float(v, 0.0) for k, v in need_map.items()},
-            "incoming_supply": {k: _safe_float(v, 0.0) for k, v in in_supply.items()},
+            # Backward-compat: keep legacy incoming_supply as raw (pre-gating) aggregated supply.
+            "incoming_supply": {k: _safe_float(v, 0.0) for k, v in incoming_supply_raw.items()},
+            "incoming_supply_raw": {k: _safe_float(v, 0.0) for k, v in incoming_supply_raw.items()},
+            "incoming_supply_effective": {k: _safe_float(v, 0.0) for k, v in incoming_supply_effective.items()},
             "outgoing_supply": {k: _safe_float(v, 0.0) for k, v in out_supply.items()},
+            "gate_by_tag": {k: _safe_float(v, 0.0) for k, v in gate_by_tag.items()},
+            "threshold_by_tag": {k: _safe_float(v, 0.0) for k, v in threshold_by_tag.items()},
+            "hard_floor_blocked_tags": tuple(dict.fromkeys(str(k) for k in hard_floor_blocked_tags)),
             "fulfilled": {k: _safe_float(v, 0.0) for k, v in fulfilled.items()},
             "excess": {k: _safe_float(v, 0.0) for k, v in excess.items()},
             "penalty_total": pen_total,
