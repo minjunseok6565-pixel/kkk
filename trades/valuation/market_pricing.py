@@ -130,6 +130,7 @@ class MarketPricingConfig:
 
     # --- Age / horizon split (market-level expectation)
     age_peak: float = 27.0
+    age_now_decay_per_year: float = 0.06
     age_future_growth_per_year_under_peak: float = 0.07
     age_future_decay_per_year_over_peak: float = 0.05
     age_future_floor: float = 0.20
@@ -342,9 +343,25 @@ class MarketPricer:
                 )
             )
 
-        base_now = now_base + star_bonus
+        base_now_raw = now_base + star_bonus
 
-        # 3) Age -> future multiplier (market-level expected horizon)
+        # 3) Age -> now decay (post-peak decline in current impact)
+        now_decay = self._age_to_now_decay_factor(age)
+        if abs(now_decay - 1.0) > cfg.eps:
+            steps.append(
+                ValuationStep(
+                    stage=ValuationStage.MARKET,
+                    mode=StepMode.MUL,
+                    code="AGE_NOW_DECAY",
+                    label="나이 기반 현재가치 감쇠",
+                    factor=now_decay,
+                    delta=_vc(0.0, 0.0),
+                    meta={"age": age},
+                )
+            )
+        base_now = base_now_raw * now_decay
+
+        # 4) Age -> future multiplier (market-level expected horizon)
         age_future_factor = self._age_to_future_factor(age)
         steps.append(
             ValuationStep(
@@ -572,6 +589,14 @@ class MarketPricer:
         # Softplus above a shift; scaled
         x = (ovr - cfg.player_star_softplus_shift) * cfg.player_star_softplus_scale
         return _softplus(x) * 0.9  # bonus magnitude is tunable; keep deterministic
+
+    def _age_to_now_decay_factor(self, age: float) -> float:
+        cfg = self.config
+        if age <= cfg.age_peak:
+            return 1.0
+        diff = age - cfg.age_peak
+        factor = 1.0 - diff * cfg.age_now_decay_per_year
+        return _clamp(factor, 0.35, 1.0)
 
     def _age_to_future_factor(self, age: float) -> float:
         cfg = self.config
