@@ -39,6 +39,7 @@ from league_repo import LeagueRepo
 from derived_formulas import compute_derived
 from team_utils import get_conference_standings
 from config import ALL_TEAM_IDS
+from data.team_situation_config import TEAM_SITUATION_NEED_TAG_CONFIG
 
 def _load_trade_rule_helpers():
     """Lazy-load trade-rule helpers to avoid import cycles at module import time.
@@ -1027,10 +1028,11 @@ class TeamSituationEvaluator:
         except Exception:
             return ({"role_fit_health": 0.5, "role_best": {}}, [])
 
-        rotation = (roster or [])[:8]
+        rotation = (roster or [])[:10]
         if not rotation:
             return ({"role_fit_health": 0.5, "role_best": {}}, [])
 
+        cfg = TEAM_SITUATION_NEED_TAG_CONFIG
         style = style_sig or self._compute_style_signals(team_id)
         pos_counts = ((roster_sig or {}).get("pos_counts") if isinstance(roster_sig, dict) else None) or _count_positions(rotation)
         total_pos = max(1, int(pos_counts.get("G", 0) + pos_counts.get("W", 0) + pos_counts.get("B", 0)))
@@ -1040,7 +1042,7 @@ class TeamSituationEvaluator:
             "B": float(pos_counts.get("B", 0)) / total_pos,
         }
         shortage = {
-            k: bool(rel.get(k, 0.0) <= 0.25 and int(pos_counts.get(k, 0)) <= 3)
+            k: bool(rel.get(k, 0.0) <= float(cfg.pos_shortage_rel_max) and int(pos_counts.get(k, 0)) <= int(cfg.pos_shortage_abs_max))
             for k in ("G", "W", "B")
         }
 
@@ -1172,7 +1174,7 @@ class TeamSituationEvaluator:
                 w = rank_w[i] if i < len(rank_w) else 0.5
                 off_acc[r] += sc * w
                 off_w[r] += w
-                if sc >= 55.0:
+                if sc >= float(cfg.coverage_score_min):
                     off_cov[r] += 1.0
 
         off_score = {r: (off_acc[r] / off_w[r] if off_w[r] > 1e-9 else 50.0) for r in roles_off}
@@ -1218,7 +1220,7 @@ class TeamSituationEvaluator:
                 w = rank_w[i] if i < len(rank_w) else 0.5
                 def_acc[r] += sc * w
                 def_w[r] += w
-                if sc >= 55.0:
+                if sc >= float(cfg.coverage_score_min):
                     def_cov[r] += 1.0
 
         def_score = {r: (def_acc[r] / def_w[r] if def_w[r] > 1e-9 else 50.0) for r in roles_def}
@@ -1285,17 +1287,19 @@ class TeamSituationEvaluator:
 
         def _emit(role: str, phase: str, score_100: float, coverage: float, usage: float, buckets: Optional[tuple[str, ...]]) -> None:
             score_n = _clamp(score_100 / 100.0, 0.0, 1.0)
-            low_score = _clamp((0.62 - score_n) / 0.35, 0.0, 1.0)
-            low_cov = _clamp((0.35 - coverage) / 0.35, 0.0, 1.0)
+            low_score = _clamp((float(cfg.low_score_center) - score_n) / max(1e-9, float(cfg.low_score_span)), 0.0, 1.0)
+            low_cov = _clamp((float(cfg.low_cov_center) - coverage) / max(1e-9, float(cfg.low_cov_span)), 0.0, 1.0)
             base = max(low_score, low_cov)
             delta = usage - coverage
             adj = 0.0
-            if delta > 0.08:
-                adj += _clamp((delta - 0.08) / 0.40, 0.0, 1.0) * 0.20
-            elif delta < -0.08:
-                adj -= _clamp((-delta - 0.08) / 0.40, 0.0, 1.0) * 0.15
+            dz = float(cfg.usage_cov_delta_deadzone)
+            span = max(1e-9, float(cfg.usage_cov_delta_span))
+            if delta > dz:
+                adj += _clamp((delta - dz) / span, 0.0, 1.0) * float(cfg.usage_cov_positive_boost)
+            elif delta < -dz:
+                adj -= _clamp((-delta - dz) / span, 0.0, 1.0) * float(cfg.usage_cov_negative_penalty)
             w = _clamp(base + adj, 0.0, 1.0)
-            if w < 0.18:
+            if w < float(cfg.min_emit_weight):
                 return
             tag = _prefix_if_short(_role_key(role, phase), buckets)
             needs.append(
