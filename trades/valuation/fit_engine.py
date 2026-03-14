@@ -79,6 +79,13 @@ class FitEngineConfig:
     # attrs validation policy for need_attr_profiles.tag_supply
     supply_strict_attrs_0_99: bool = True
 
+    # Need-weighted soft gating for supply contribution
+    supply_gate_enabled: bool = True
+    supply_gate_threshold_min: float = 0.25
+    supply_gate_threshold_max: float = 0.45
+    supply_gate_hard_floor_cap: float = 0.12
+    supply_gate_soft_width: float = 0.20
+
     # keep epsilon for numeric safety
     eps: float = 1e-9
 
@@ -92,6 +99,11 @@ class FitScoreBreakdown:
     used_need_tags: Tuple[str, ...]
     ignored_need_tags: Tuple[str, ...]
     weight_by_tag: Dict[str, float]
+    raw_supply_by_tag: Dict[str, float]
+    effective_supply_by_tag: Dict[str, float]
+    threshold_by_tag: Dict[str, float]
+    gate_by_tag: Dict[str, float]
+    hard_floor_blocked_tags: Tuple[str, ...]
     supply_by_tag: Dict[str, float]
     contribution_by_tag: Dict[str, float]
     unmet_by_tag: Dict[str, float]
@@ -165,6 +177,37 @@ class FitEngine:
                         break
         return out
 
+    def _need_threshold(self, need_w: float) -> float:
+        cfg = self.config
+        n = _clamp(_safe_float(need_w, 0.0), 0.0, 1.0)
+
+        t_min = _clamp(_safe_float(cfg.supply_gate_threshold_min, 0.0), 0.0, 1.0)
+        t_max = _clamp(_safe_float(cfg.supply_gate_threshold_max, 1.0), 0.0, 1.0)
+        if t_min > t_max:
+            t_min, t_max = t_max, t_min
+
+        return t_max - (t_max - t_min) * n
+
+    def _effective_supply(self, raw_supply: float, need_w: float) -> Tuple[float, float, float, bool]:
+        """Return (effective, gate, threshold, hard_floor_blocked)."""
+        cfg = self.config
+        s_raw = _clamp(_safe_float(raw_supply, 0.0), 0.0, 1.0)
+
+        if not bool(cfg.supply_gate_enabled):
+            return s_raw, 1.0, self._need_threshold(need_w), False
+
+        floor_cap = _clamp(_safe_float(cfg.supply_gate_hard_floor_cap, 0.0), 0.0, 1.0)
+        if s_raw < floor_cap:
+            return 0.0, 0.0, self._need_threshold(need_w), True
+
+        threshold = self._need_threshold(need_w)
+        soft_width = max(_safe_float(cfg.supply_gate_soft_width, 0.0), cfg.eps)
+
+        x = (s_raw - threshold) / soft_width
+        u = _clamp(0.5 + 0.5 * x, 0.0, 1.0)
+        gate = _clamp(u * u * (3.0 - 2.0 * u), 0.0, 1.0)
+        return _clamp(s_raw * gate, 0.0, 1.0), gate, threshold, False
+
     def score_fit(
         self,
         need_map: Mapping[str, float],
@@ -190,6 +233,11 @@ class FitEngine:
         used_need_tags: List[str] = []
         ignored_need_tags: List[str] = []
         weight_by_tag: Dict[str, float] = {}
+        raw_supply_by_tag: Dict[str, float] = {}
+        effective_supply_by_tag: Dict[str, float] = {}
+        threshold_by_tag: Dict[str, float] = {}
+        gate_by_tag: Dict[str, float] = {}
+        hard_floor_blocked_tags: List[str] = []
         supply_by_tag: Dict[str, float] = {}
         contribution_by_tag: Dict[str, float] = {}
         unmet_by_tag: Dict[str, float] = {}
@@ -204,15 +252,22 @@ class FitEngine:
             if ww <= 0.0:
                 ignored_need_tags.append(tag_s)
                 continue
-            # NOTE: keep original semantics: lookup uses the original `tag` key.
-            s = _clamp(_safe_float(supply.get(tag_s, 0.0), 0.0), 0.0, 1.0)
+            s_raw = _clamp(_safe_float(supply.get(tag_s, 0.0), 0.0), 0.0, 1.0)
+            s, gate, thr, hard_floor_blocked = self._effective_supply(s_raw, ww)
+            if hard_floor_blocked:
+                hard_floor_blocked_tags.append(tag_s)
 
             total_w += ww
             acc += ww * s
 
             used_need_tags.append(tag_s)
             weight_by_tag[tag_s] = ww
-            supply_by_tag[tag_s] = s
+            raw_supply_by_tag[tag_s] = s_raw
+            effective_supply_by_tag[tag_s] = s
+            threshold_by_tag[tag_s] = thr
+            gate_by_tag[tag_s] = gate
+            # Backward-compat: keep legacy supply_by_tag as raw (pre-gating) supply.
+            supply_by_tag[tag_s] = s_raw
             contribution_by_tag[tag_s] = ww * s
 
             unmet_by_tag[tag_s] = _clamp(max(0.0, ww - s), 0.0, 1.0)
@@ -229,6 +284,11 @@ class FitEngine:
                 used_need_tags=tuple(),
                 ignored_need_tags=tuple(dict.fromkeys(ignored_need_tags)),
                 weight_by_tag=weight_by_tag,
+                raw_supply_by_tag=raw_supply_by_tag,
+                effective_supply_by_tag=effective_supply_by_tag,
+                threshold_by_tag=threshold_by_tag,
+                gate_by_tag=gate_by_tag,
+                hard_floor_blocked_tags=tuple(dict.fromkeys(hard_floor_blocked_tags)),
                 supply_by_tag=supply_by_tag,
                 contribution_by_tag=contribution_by_tag,
                 unmet_by_tag=unmet_by_tag,
@@ -244,6 +304,11 @@ class FitEngine:
             used_need_tags=tuple(used_need_tags),
             ignored_need_tags=tuple(dict.fromkeys(ignored_need_tags)),
             weight_by_tag=weight_by_tag,
+            raw_supply_by_tag=raw_supply_by_tag,
+            effective_supply_by_tag=effective_supply_by_tag,
+            threshold_by_tag=threshold_by_tag,
+            gate_by_tag=gate_by_tag,
+            hard_floor_blocked_tags=tuple(dict.fromkeys(hard_floor_blocked_tags)),
             supply_by_tag=supply_by_tag,
             contribution_by_tag=contribution_by_tag,
             unmet_by_tag=unmet_by_tag,
