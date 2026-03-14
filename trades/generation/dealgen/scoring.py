@@ -202,7 +202,7 @@ def score_deal(
     config: DealGeneratorConfig,
     opponent_repeat_count: int,
 ) -> float:
-    """게임용 점수: (양팀) ACCEPT에 가까울수록, 단순할수록, 시장 다양할수록 높은 점수.
+    """게임용 점수: (양팀) ACCEPT에 가까울수록, 시장 다양할수록 높은 점수.
 
     원칙
     - 최우선: 양팀이 ACCEPT 가능한 딜
@@ -220,14 +220,6 @@ def score_deal(
         return 1.0 / (1.0 + math.exp(-z))
 
     accept_score = sigmoid(mb, config.score_sigmoid_scale) + sigmoid(ms, config.score_sigmoid_scale)
-
-    # complexity penalty
-    n_assets = sum(len(v) for v in deal.legs.values())
-    n_players = sum(1 for leg in deal.legs.values() for a in leg if isinstance(a, PlayerAsset))
-    complexity_penalty = (
-        float(config.penalty_per_asset) * max(0, n_assets - 2)
-        + float(config.penalty_per_player) * max(0, n_players - 2)
-    )
 
     # deficit penalty (both sides)
     deficit_penalty = (
@@ -259,5 +251,4 @@ def score_deal(
     if seller_decision.verdict == DealVerdict.REJECT:
         reject_penalty += base + scale * max(0.0, -ms)
 
-    return float(accept_score + bonus - complexity_penalty - deficit_penalty - reject_penalty - repeat_penalty)
-
+    return float(accept_score + bonus - deficit_penalty - reject_penalty - repeat_penalty)
