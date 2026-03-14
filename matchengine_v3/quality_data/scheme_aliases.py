@@ -18,6 +18,7 @@ SCHEME_ALIASES: Dict[str, str] = {
     "AtTheLevel": "앳-더-레벨",
     "Blitz_TrapPnR": "블리츠-트랩",
     "Zone": "2-3 존디펜스",
+    "Preset_Defense": "프리셋-수비",
     "all_switch": "올-스위치",
     "all-switch": "올-스위치",
     "switch": "올-스위치",
@@ -54,4 +55,11 @@ SCHEME_ALIASES: Dict[str, str] = {
     "atlevel": "앳-더-레벨",
     "앳-더-레벨": "앳-더-레벨",
     "앳더레벨": "앳-더-레벨",
+
+    # Preset defense
+    "preset_defense": "프리셋-수비",
+    "preset-defense": "프리셋-수비",
+    "presetdefense": "프리셋-수비",
+    "프리셋수비": "프리셋-수비",
+    "프리셋-수비": "프리셋-수비",
 }

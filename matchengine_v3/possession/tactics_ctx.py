@@ -21,6 +21,8 @@ _SCHEME_HELP_BASELINE = {
     "Hedge_ShowRecover": 0.30,
     "AtTheLevel": 0.37,
     "Drop": 0.20,
+    # Preset starts near the middle of existing schemes as a neutral-safe baseline.
+    "Preset_Defense": 0.30,
     # 1-4 switch keeps a backline anchor, so it needs more help than all-switch but still less than drop/hedge.
     "Switch_1_4": -0.15,
     "Switch_Everything": -0.25,

@@ -157,7 +157,8 @@ async function saveTacticsDraft({ showSuccessMessage = true } = {}) {
   const teamId = String(state.tacticsDraftTeamId || state.selectedTeamId || "").trim();
   if (!teamId) return true;
 
-  const starterDupRoles = getStarterDefenseRoleDuplicates();
+  const isPresetDefense = String(state.tacticsDraft?.defenseScheme || "") === "Preset_Defense";
+  const starterDupRoles = isPresetDefense ? [] : getStarterDefenseRoleDuplicates();
   if (starterDupRoles.length) {
     if (els.tacticsTotalMessage) {
       els.tacticsTotalMessage.textContent = `전술 저장 실패: 선발 수비에 중복 역할(${starterDupRoles.map((role) => tacticDisplayLabel(role)).join(", ")})이 있습니다.`;
