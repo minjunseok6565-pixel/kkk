@@ -359,3 +359,14 @@ GROUP_SCHEME_ROLE_WEIGHTS: Dict[str, Dict[str, Dict[str, float]]] = {'catch_shoo
                             'PnR_Cover_Big_AtTheLevel': 0.22,
                             'PnR_POA_AtTheLevel': 0.45,
                             'Weakside_Rotator': 0.1}}}
+
+
+# Preset_Defense slot: copy Drop role weights per outcome group for neutral-safe behavior.
+_PRESET_DEFENSE_SCHEME_KEY = "프리셋-수비"
+_DROP_SCHEME_KEY = "drop"
+for _gid, _scheme_weights in GROUP_SCHEME_ROLE_WEIGHTS.items():
+    if not isinstance(_scheme_weights, dict):
+        continue
+    _drop_weights = _scheme_weights.get(_DROP_SCHEME_KEY)
+    if isinstance(_drop_weights, dict):
+        _scheme_weights[_PRESET_DEFENSE_SCHEME_KEY] = dict(_drop_weights)

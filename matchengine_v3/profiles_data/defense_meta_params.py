@@ -79,6 +79,18 @@ DEFENSE_META_PARAMS = {
             "Cut": 0.94,
             "HornsSet": 1.02,
         },
+        "Preset_Defense": {
+            # Neutral-safe scaffold for preset overlays.
+            "PnR": 1.00,
+            "DHO": 1.00,
+            "Drive": 1.00,
+            "PostUp": 1.00,
+            "Cut": 1.00,
+            "SpotUp": 1.00,
+            "HornsSet": 1.00,
+            "Kickout": 1.00,
+            "ExtraPass": 1.00,
+        },
     },
     "defense_meta_priors_rules": {
         "Drop": [

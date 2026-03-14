@@ -17,7 +17,8 @@ const TACTICS_DEFENSE_SCHEMES = [
   { key: "Hedge_ShowRecover", label: "hedge_show_recover" },
   { key: "Blitz_TrapPnR", label: "blitz_trap" },
   { key: "AtTheLevel", label: "at_the_level" },
-  { key: "Zone", label: "zone" }
+  { key: "Zone", label: "zone" },
+  { key: "Preset_Defense", label: "preset_defense" }
 ];
 
 const TACTICS_OFFENSE_ROLES = [
@@ -33,7 +34,8 @@ const TACTICS_DEFENSE_ROLE_BY_SCHEME = {
   Hedge_ShowRecover: ["PnR_POA_Defender", "PnR_Cover_Big_HedgeRecover", "Lowman_Helper", "Nail_Helper", "Weakside_Rotator"],
   Blitz_TrapPnR: ["PnR_POA_Blitz", "PnR_Cover_Big_Blitz", "Lowman_Helper", "Nail_Helper", "Weakside_Rotator"],
   AtTheLevel: ["PnR_POA_AtTheLevel", "PnR_Cover_Big_AtTheLevel", "Lowman_Helper", "Nail_Helper", "Weakside_Rotator"],
-  Zone: ["Zone_Top_Left", "Zone_Top_Right", "Zone_Bottom_Left", "Zone_Bottom_Right", "Zone_Bottom_Center"]
+  Zone: ["Zone_Top_Left", "Zone_Top_Right", "Zone_Bottom_Left", "Zone_Bottom_Right", "Zone_Bottom_Center"],
+  Preset_Defense: ["preset-role", "preset-role", "preset-role", "preset-role", "preset-role"]
 };
 
 export { TACTICS_OFFENSE_SCHEMES, TACTICS_DEFENSE_SCHEMES, TACTICS_OFFENSE_ROLES, TACTICS_DEFENSE_ROLE_BY_SCHEME };
