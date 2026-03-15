@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Set
 
+import game_time
 import state
 
 from .types import CleanupReport, OrchestrationConfig
@@ -102,7 +103,7 @@ def _normalize_listing_entry(
     *,
     today_iso: Optional[str] = None,
 ) -> Dict[str, Any]:
-    now_iso = _coerce_iso_date(today_iso) or date.today().isoformat()
+    now_iso = game_time.require_date_iso(today_iso, field="today_iso")
     p = dict(payload or {}) if isinstance(payload, dict) else {}
     team_id = str(p.get("team_id") or "").upper()
     listed_by = str(p.get("listed_by") or "USER").upper()
@@ -270,7 +271,8 @@ def list_team_trade_listings(
     for pid, raw in listings.items():
         if not isinstance(raw, dict):
             continue
-        e = _normalize_listing_entry(str(pid), raw)
+        fallback_iso = _coerce_iso_date(raw.get("updated_at")) or _coerce_iso_date(raw.get("created_at")) or game_time.game_date_iso()
+        e = _normalize_listing_entry(str(pid), raw, today_iso=fallback_iso)
         if e.get("team_id") != tid:
             continue
         if active_only:
@@ -294,7 +296,8 @@ def get_active_listing_team_ids(trade_market: Dict[str, Any], *, today: date) ->
     for pid, raw in listings.items():
         if not isinstance(raw, dict):
             continue
-        e = _normalize_listing_entry(str(pid), raw)
+        fallback_iso = _coerce_iso_date(raw.get("updated_at")) or _coerce_iso_date(raw.get("created_at")) or game_time.game_date_iso()
+        e = _normalize_listing_entry(str(pid), raw, today_iso=fallback_iso)
         if str(e.get("status") or "").upper() != "ACTIVE":
             continue
         exp = e.get("expires_on")
