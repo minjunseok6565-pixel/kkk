@@ -35,6 +35,9 @@ class TeamSituationNeedTagConfig:
     # Final noise floor
     min_emit_weight: float = 0.18
 
+    # Soft gate around min_emit_weight (sigmoid temperature)
+    soft_gate_tau: float = 0.04
+
     # Efficiency-aware need amplification (phase-specific)
     eff_bad_pct_center_off: float = 0.45
     eff_bad_pct_center_def: float = 0.45
