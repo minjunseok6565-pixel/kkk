@@ -21,7 +21,7 @@ This module MUST NOT:
 
 from dataclasses import replace
 from datetime import date
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import random
 
@@ -37,6 +37,7 @@ from .deal_evaluator import evaluate_deal_for_team as _evaluate_deal_for_team
 from .env import ValuationEnv
 from .market_pricing import MarketPricingConfig
 from .team_utility import TeamUtilityConfig
+from .package_effects import PackageEffectsConfig
 from .decision_policy import decide_deal as _decide_deal
 from .types import DealDecision, TeamDealEvaluation, TeamSideValuation
 
@@ -109,6 +110,15 @@ def _safe_date(d: Any) -> date:
                 details={"exc_type": type(exc).__name__},
             )
     raise TradeError(code="MISSING_GAME_DATE", message="In-game current_date is required (OS clock disabled).")
+
+
+def _safe_float(x: Any, default: float = 0.0) -> float:
+    try:
+        if x is None:
+            return float(default)
+        return float(x)
+    except Exception:
+        return float(default)
 
 
 def _safe_db_path(db_path: Optional[str]) -> str:
@@ -209,6 +219,93 @@ def _extract_trade_rules_from_league_ctx(team_situation_ctx: Any) -> Optional[Di
         return dict(trade_rules) if isinstance(trade_rules, dict) else None
     except Exception:
         return None
+
+
+def _safe_bool(x: Any, default: bool) -> bool:
+    if isinstance(x, bool):
+        return x
+    if isinstance(x, (int, float)):
+        return bool(int(x))
+    if isinstance(x, str):
+        t = x.strip().lower()
+        if t in ("1", "true", "t", "yes", "y", "on"):
+            return True
+        if t in ("0", "false", "f", "no", "n", "off"):
+            return False
+    return bool(default)
+
+
+def _trade_rule_get(trade_rules: Mapping[str, Any], *keys: str) -> Any:
+    """Best-effort getter supporting flat keys and valuation.* namespaces."""
+    if not isinstance(trade_rules, Mapping):
+        return None
+
+    valuation = trade_rules.get("valuation")
+    valuation_dict = valuation if isinstance(valuation, Mapping) else {}
+
+    for k in keys:
+        if k in trade_rules:
+            return trade_rules.get(k)
+        if k in valuation_dict:
+            return valuation_dict.get(k)
+    return None
+
+
+def _build_team_config(*, salary_cap: Optional[float], trade_rules: Mapping[str, Any]) -> TeamUtilityConfig:
+    base = TeamUtilityConfig(salary_cap=salary_cap) if salary_cap is not None else TeamUtilityConfig()
+
+    fit_cfg = base.fit
+    fit_cfg = replace(
+        fit_cfg,
+        supply_gate_enabled=_safe_bool(
+            _trade_rule_get(trade_rules, "fit_supply_gate_enabled", "supply_gate_enabled"),
+            fit_cfg.supply_gate_enabled,
+        ),
+        supply_gate_threshold_min=_safe_float(
+            _trade_rule_get(trade_rules, "fit_supply_gate_threshold_min", "supply_gate_threshold_min"),
+            fit_cfg.supply_gate_threshold_min,
+        ),
+        supply_gate_threshold_max=_safe_float(
+            _trade_rule_get(trade_rules, "fit_supply_gate_threshold_max", "supply_gate_threshold_max"),
+            fit_cfg.supply_gate_threshold_max,
+        ),
+        supply_gate_hard_floor_cap=_safe_float(
+            _trade_rule_get(trade_rules, "fit_supply_gate_hard_floor_cap", "supply_gate_hard_floor_cap"),
+            fit_cfg.supply_gate_hard_floor_cap,
+        ),
+        supply_gate_soft_width=_safe_float(
+            _trade_rule_get(trade_rules, "fit_supply_gate_soft_width", "supply_gate_soft_width"),
+            fit_cfg.supply_gate_soft_width,
+        ),
+    )
+    return replace(base, fit=fit_cfg)
+
+
+def _build_package_config(*, trade_rules: Mapping[str, Any]) -> PackageEffectsConfig:
+    base = PackageEffectsConfig()
+    return replace(
+        base,
+        need_supply_gate_enabled=_safe_bool(
+            _trade_rule_get(trade_rules, "need_supply_gate_enabled", "package_need_supply_gate_enabled"),
+            base.need_supply_gate_enabled,
+        ),
+        need_supply_gate_threshold_min=_safe_float(
+            _trade_rule_get(trade_rules, "need_supply_gate_threshold_min", "package_need_supply_gate_threshold_min"),
+            base.need_supply_gate_threshold_min,
+        ),
+        need_supply_gate_threshold_max=_safe_float(
+            _trade_rule_get(trade_rules, "need_supply_gate_threshold_max", "package_need_supply_gate_threshold_max"),
+            base.need_supply_gate_threshold_max,
+        ),
+        need_supply_gate_hard_floor_cap=_safe_float(
+            _trade_rule_get(trade_rules, "need_supply_gate_hard_floor_cap", "package_need_supply_gate_hard_floor_cap"),
+            base.need_supply_gate_hard_floor_cap,
+        ),
+        need_supply_gate_soft_width=_safe_float(
+            _trade_rule_get(trade_rules, "need_supply_gate_soft_width", "package_need_supply_gate_soft_width"),
+            base.need_supply_gate_soft_width,
+        ),
+    )
 
 
 def _strip_breakdown(side: TeamSideValuation, evaluation: TeamDealEvaluation) -> Tuple[TeamSideValuation, TeamDealEvaluation]:
@@ -447,7 +544,8 @@ def evaluate_deal_for_team(
             salary_cap = None
             
     market_cfg = MarketPricingConfig(salary_cap=salary_cap) if salary_cap is not None else MarketPricingConfig()
-    team_cfg = TeamUtilityConfig(salary_cap=salary_cap) if salary_cap is not None else TeamUtilityConfig()
+    team_cfg = _build_team_config(salary_cap=salary_cap, trade_rules=trade_rules)
+    package_cfg = _build_package_config(trade_rules=trade_rules)
     side, evaluation = _evaluate_deal_for_team(
         deal=deal,
         team_id=tid,
@@ -458,6 +556,7 @@ def evaluate_deal_for_team(
         attach_leg_metadata=True,
         market_config=market_cfg,
         team_config=team_cfg,
+        package_config=package_cfg,
     )
 
     # 6) Decision

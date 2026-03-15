@@ -132,5 +132,75 @@ class BuyTargetContractValueTests(unittest.TestCase):
         self.assertGreater(spread_second, spread_below)
 
 
+    def test_contract_gap_signal_survives_percentile_mode(self):
+        refs = [
+            IncomingPlayerRef(
+                "plus_gap", "LAL", "WING", 0.80, 24.0, 18.0, 3.0, 26.0,
+                basketball_total=22.0,
+                contract_gap_cap_share=0.07,
+            ),
+            IncomingPlayerRef(
+                "minus_gap", "NYK", "WING", 0.80, 24.0, 18.0, 3.0, 26.0,
+                basketball_total=22.0,
+                contract_gap_cap_share=-0.07,
+            ),
+        ]
+
+        cfg = DealGeneratorConfig(
+            buy_target_listed_min_quota=0,
+            buy_target_non_listed_base_quota=2,
+            buy_target_basketball_norm_mode="PERCENTILE",
+            buy_target_contract_base_weight=0.35,
+            buy_target_pre_score_contract_weight=0.20,
+        )
+
+        out = select_targets_buy(
+            "BOS",
+            _TickCtxContractStub(apron_status="OVER_CAP", posture="BUY", deadline_pressure=0.2),
+            self._catalog(refs),
+            cfg,
+            budget=self._budget(max_targets=2),
+            rng=random.Random(17),
+            banned_players=set(),
+        )
+
+        self.assertEqual(out[0].player_id, "plus_gap")
+
+    def test_contract_gap_signal_survives_hybrid_mode(self):
+        refs = [
+            IncomingPlayerRef(
+                "plus_gap_small", "LAL", "WING", 0.78, 20.0, 16.0, 3.0, 27.0,
+                basketball_total=21.0,
+                contract_gap_cap_share=0.06,
+            ),
+            IncomingPlayerRef(
+                "minus_gap_small", "NYK", "WING", 0.78, 20.0, 16.0, 3.0, 27.0,
+                basketball_total=21.0,
+                contract_gap_cap_share=-0.06,
+            ),
+        ]
+
+        cfg = DealGeneratorConfig(
+            buy_target_listed_min_quota=0,
+            buy_target_non_listed_base_quota=2,
+            buy_target_basketball_norm_mode="HYBRID",
+            buy_target_basketball_norm_min_samples=50,
+            buy_target_contract_base_weight=0.35,
+            buy_target_pre_score_contract_weight=0.20,
+        )
+
+        out = select_targets_buy(
+            "BOS",
+            _TickCtxContractStub(apron_status="ABOVE_1ST_APRON", posture="BUY", deadline_pressure=0.1),
+            self._catalog(refs),
+            cfg,
+            budget=self._budget(max_targets=2),
+            rng=random.Random(29),
+            banned_players=set(),
+        )
+
+        self.assertEqual(out[0].player_id, "plus_gap_small")
+
+
 if __name__ == "__main__":
     unittest.main()

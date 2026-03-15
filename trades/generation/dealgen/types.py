@@ -36,17 +36,17 @@ class DealGeneratorConfig:
     """
 
     # --- hard upper bounds (absolute safety)
-    max_targets_hard: int = 28
-    max_attempts_per_target_hard: int = 80
-    max_validations_hard: int = 900
-    max_evaluations_hard: int = 450
+    max_targets_hard: int = 40
+    max_attempts_per_target_hard: int = 120
+    max_validations_hard: int = 1400
+    max_evaluations_hard: int = 700
 
     # --- base budgets (scaled)
-    base_max_targets: int = 14
+    base_max_targets: int = 20
     base_beam_width: int = 12
-    base_max_attempts_per_target: int = 45
-    base_max_validations: int = 360
-    base_max_evaluations: int = 180
+    base_max_attempts_per_target: int = 60
+    base_max_validations: int = 520
+    base_max_evaluations: int = 260
     base_max_repairs: int = 2
 
     # --- "young + pick" heuristic
@@ -284,6 +284,24 @@ class DealGeneratorConfig:
 
     buy_target_pre_score_contract_weight: float = 0.18
 
+    # --- buy ranking: basketball_total normalization mode
+    # Replace hard-coded linear scaling with distribution-aware normalization.
+    # Modes:
+    # - FIXED: legacy (basketball_total + 15) / 45 for rollback compatibility
+    # - PERCENTILE: ECDF percentile on current candidate pool
+    # - HYBRID: percentile + sigmoid fallback blend for small sample sizes
+    buy_target_basketball_norm_mode: str = "PERCENTILE"  # FIXED | PERCENTILE | HYBRID
+    buy_target_basketball_norm_eps: float = 0.01
+    buy_target_basketball_norm_min_samples: int = 40
+
+    # HYBRID fallback sigmoid params: sigmoid((x - center) / scale)
+    buy_target_basketball_norm_fallback_center: float = 10.0
+    buy_target_basketball_norm_fallback_scale: float = 12.0
+
+    # Optional role/tag percentile blend: (1-beta)*league + beta*role
+    buy_target_basketball_norm_role_blend_alpha: float = 0.0
+    buy_target_basketball_norm_role_min_samples: int = 20
+
     # --- proactive listing controls (AI)
     ai_proactive_listing_enabled: bool = True
     ai_proactive_listing_team_daily_cap: int = 2
@@ -359,14 +377,14 @@ class DealGeneratorConfig:
     penalty_opponent_overpay_weight: float = 0.85
 
     # REJECT를 강하게 벌점(유저 체감상 "말도 안 되는 오퍼" 상위 노출 방지)
-    reject_penalty_base: float = 0.35
-    reject_penalty_scale: float = 0.06
+    reject_penalty_base: float = 0.26
+    reject_penalty_scale: float = 0.04
 
     # discard gate: 평가 결과가 너무 나쁘면 후보에서 제거
     discard_if_overpay_below: float = -18.0  # buyer margin이 이보다 더 나쁘면 후보 폐기
     discard_if_any_margin_below: float = -22.0  # 어느 한쪽이 이보다 나쁘면 폐기
-    discard_if_reject_margin_below: float = -14.0  # REJECT인 팀 margin이 이보다 나쁘면 폐기
-    discard_if_both_margins_below: float = -10.0
+    discard_if_reject_margin_below: float = -18.0  # REJECT인 팀 margin이 이보다 나쁘면 폐기
+    discard_if_both_margins_below: float = -13.0
 
     # --- RNG determinism
     deterministic_seed_salt: str = "deal_generator_v2"

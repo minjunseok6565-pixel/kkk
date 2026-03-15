@@ -167,9 +167,6 @@ class DealGenerator:
             return []
 
         posture = str(getattr(ts, "trade_posture", "STAND_PAT") or "STAND_PAT").upper()
-        if posture == "STAND_PAT" and float(getattr(ts, "urgency", 0.0) or 0.0) < 0.35:
-            self.last_stats = DealGeneratorStats(mode="SKIP")
-            return []
 
         budget = _scale_budget(self.config, ts)
         rng = random.Random(_compute_seed(self.config, tick_ctx, tid))
@@ -1330,16 +1327,9 @@ def _prescore_candidate(
     seller_out = catalog.outgoing_by_team.get(seller)
 
     d = cand.deal
-    n_assets = sum(len(v) for v in d.legs.values())
-    n_players = sum(1 for leg in d.legs.values() for a in leg if isinstance(a, PlayerAsset))
-
     score = 0.0
 
-    # 1) 복잡도: 단순할수록 우선
-    score -= 0.10 * max(0, int(n_assets) - 2)
-    score -= 0.08 * max(0, int(n_players) - 2)
-
-    # 2) salary plausibility (양쪽 모두 대충 체크)
+    # 1) salary plausibility (양쪽 모두 대충 체크)
     try:
         ts_buyer = tick_ctx.get_team_situation(buyer)
     except Exception:

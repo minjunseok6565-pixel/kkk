@@ -101,9 +101,9 @@ def _state_season_year_ssot() -> int:
         if y is None:
             raise KeyError("season_year missing")
         return int(y)
-    except Exception:
-        # Excel bootstrap fallback when state is unavailable (CLI import path).
-        return int(_dt.date.today().year)
+    except Exception as exc:
+        # Hard rule: never use host OS clock fallback.
+        raise RuntimeError("season_year is required from in-game state; OS date fallback is disabled") from exc
 
 def _json_dumps(obj: Any) -> str:
     return json.dumps(
