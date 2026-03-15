@@ -34,6 +34,18 @@ class _TickCtxStub:
         )
 
 
+
+
+class _SequenceRng:
+    def __init__(self, values):
+        self._values = list(values)
+
+    def random(self):
+        if not self._values:
+            return 0.0
+        return float(self._values.pop(0))
+
+
 class BuyTieredRetrievalTests(unittest.TestCase):
     def _budget(self, max_targets: int = 8):
         return DealGeneratorBudget(
@@ -298,6 +310,82 @@ class BuyTieredRetrievalTests(unittest.TestCase):
 
         self.assertEqual(out[0].player_id, "fit_need")
 
+
+    def test_tiebreak_prefers_younger_age_before_random(self):
+        refs = [
+            IncomingPlayerRef("older", "LAL", "WING", 0.6, 10.0, 6.0, 2.0, 31.0),
+            IncomingPlayerRef("younger", "NYK", "WING", 0.6, 10.0, 6.0, 2.0, 23.0),
+        ]
+
+        out = select_targets_buy(
+            "BOS",
+            _TickCtxStub(deadline_pressure=0.0, urgency=0.0, need_map={"WING": 1.0}),
+            self._catalog(refs),
+            DealGeneratorConfig(buy_target_listed_min_quota=0, buy_target_non_listed_base_quota=2),
+            budget=self._budget(max_targets=2),
+            rng=_SequenceRng([0.99, 0.01]),
+            banned_players=set(),
+        )
+
+        self.assertEqual(out[0].player_id, "younger")
+
+    def test_tiebreak_prefers_need_priority_after_age(self):
+        refs = [
+            IncomingPlayerRef(
+                "need_low", "LAL", "WING", 0.6, 10.0, 6.0, 2.0, 25.0,
+                supply_items=(("BIG", 0.8),),
+            ),
+            IncomingPlayerRef(
+                "need_high", "NYK", "WING", 0.6, 10.0, 6.0, 2.0, 25.0,
+                supply_items=(("WING", 0.4), ("BIG", 0.0)),
+            ),
+        ]
+
+        out = select_targets_buy(
+            "BOS",
+            _TickCtxStub(deadline_pressure=0.0, urgency=0.0, need_map={"WING": 1.0, "BIG": 0.5}),
+            self._catalog(refs),
+            DealGeneratorConfig(buy_target_listed_min_quota=0, buy_target_non_listed_base_quota=2),
+            budget=self._budget(max_targets=2),
+            rng=_SequenceRng([0.99, 0.01]),
+            banned_players=set(),
+        )
+
+        self.assertEqual(out[0].player_id, "need_high")
+
+    def test_tiebreak_uses_random_only_after_age_and_need_priority(self):
+        refs = [
+            IncomingPlayerRef(
+                "p1", "LAL", "WING", 0.6, 10.0, 6.0, 2.0, 25.0,
+                supply_items=(("WING", 0.5),),
+            ),
+            IncomingPlayerRef(
+                "p2", "NYK", "WING", 0.6, 10.0, 6.0, 2.0, 25.0,
+                supply_items=(("WING", 0.5),),
+            ),
+        ]
+
+        first = select_targets_buy(
+            "BOS",
+            _TickCtxStub(deadline_pressure=0.0, urgency=0.0, need_map={"WING": 1.0}),
+            self._catalog(refs),
+            DealGeneratorConfig(buy_target_listed_min_quota=0, buy_target_non_listed_base_quota=2),
+            budget=self._budget(max_targets=2),
+            rng=_SequenceRng([0.9, 0.1]),
+            banned_players=set(),
+        )
+        second = select_targets_buy(
+            "BOS",
+            _TickCtxStub(deadline_pressure=0.0, urgency=0.0, need_map={"WING": 1.0}),
+            self._catalog(refs),
+            DealGeneratorConfig(buy_target_listed_min_quota=0, buy_target_non_listed_base_quota=2),
+            budget=self._budget(max_targets=2),
+            rng=_SequenceRng([0.1, 0.9]),
+            banned_players=set(),
+        )
+
+        self.assertEqual(first[0].player_id, "p1")
+        self.assertEqual(second[0].player_id, "p2")
 
     def test_contract_gap_affects_rank_without_direct_salary_term(self):
         refs = [

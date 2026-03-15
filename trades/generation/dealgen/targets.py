@@ -133,6 +133,32 @@ def _need_similarity_for_ref(ref: IncomingPlayerRef, need_map: Dict[str, float])
     return _clamp01(weighted / total_need)
 
 
+def _need_priority_for_ref(ref: IncomingPlayerRef, need_map: Dict[str, float]) -> float:
+    """Deterministic need priority used for rank tie-breaks."""
+    items = tuple(getattr(ref, "supply_items", tuple()) or tuple())
+    if items:
+        best = 0.0
+        for tag, _ in items:
+            t = str(tag or "")
+            if not t:
+                continue
+            best = max(best, max(0.0, float(need_map.get(t, 0.0) or 0.0)))
+        return float(best)
+
+    tag = str(getattr(ref, "tag", "") or "")
+    if not tag:
+        return 0.0
+    return float(max(0.0, float(need_map.get(tag, 0.0) or 0.0)))
+
+
+def _age_tiebreak_value(age: Any) -> float:
+    """Younger first; unknown ages are treated as oldest for tie-breaks."""
+    age_v = _safe_float(age, 999.0)
+    if age_v < 0.0:
+        return 999.0
+    return float(age_v)
+
+
 def _listing_interest_boost(
     *,
     config: DealGeneratorConfig,
@@ -235,7 +261,6 @@ def _final_rank(
     listing_boost: float,
     buyer_ts: Any,
     config: DealGeneratorConfig,
-    rng: random.Random,
 ) -> float:
     player_core = _player_core_score(ref, need_similarity, config)
 
@@ -245,9 +270,7 @@ def _final_rank(
     contract_base_w = float(getattr(config, "buy_target_contract_base_weight", 0.30) or 0.30)
     contract_term = contract_base_w * contract_score * team_sens
 
-    rank = player_core + contract_term + max(0.0, float(listing_boost or 0.0))
-    rank += rng.random() * 0.01
-    return float(rank)
+    return float(player_core + contract_term + max(0.0, float(listing_boost or 0.0)))
 
 
 def _merge_tier_candidates(
@@ -415,6 +438,7 @@ def select_targets_buy(
             "is_listed": is_public_listing,
             "listed_meta": listed,
             "need_similarity": need_similarity,
+            "need_priority": _need_priority_for_ref(r, need_map),
             "listing_boost": listing_boost,
             "pre_score": _cheap_pre_score(r, need_similarity, config),
         }
@@ -464,7 +488,7 @@ def select_targets_buy(
         listed_max_share=listed_max_share,
     )
 
-    out: List[TargetCandidate] = []
+    out_rows: List[Tuple[TargetCandidate, float, float, float]] = []
     for row in merged:
         ref = row.get("ref")
         if not isinstance(ref, IncomingPlayerRef):
@@ -475,23 +499,27 @@ def select_targets_buy(
             listing_boost=float(row.get("listing_boost", 0.0) or 0.0),
             buyer_ts=buyer_ts,
             config=config,
-            rng=rng,
         )
-        out.append(
-            TargetCandidate(
-                player_id=ref.player_id,
-                from_team=str(ref.from_team).upper(),
-                need_tag=str(ref.tag or ""),
-                tag_strength=float(rank),
-                market_total=float(ref.market_total),
-                salary_m=float(ref.salary_m),
-                remaining_years=float(ref.remaining_years),
-                age=ref.age,
+        out_rows.append(
+            (
+                TargetCandidate(
+                    player_id=ref.player_id,
+                    from_team=str(ref.from_team).upper(),
+                    need_tag=str(ref.tag or ""),
+                    tag_strength=float(rank),
+                    market_total=float(ref.market_total),
+                    salary_m=float(ref.salary_m),
+                    remaining_years=float(ref.remaining_years),
+                    age=ref.age,
+                ),
+                _age_tiebreak_value(ref.age),
+                float(row.get("need_priority", 0.0) or 0.0),
+                float(rng.random()),
             )
         )
 
-    out.sort(key=lambda t: (-t.tag_strength, -t.market_total, t.salary_m, t.player_id))
-    return out[:max_targets]
+    out_rows.sort(key=lambda x: (-x[0].tag_strength, x[1], -x[2], -x[3], -x[0].market_total, x[0].salary_m, x[0].player_id))
+    return [row[0] for row in out_rows[:max_targets]]
 
 
 def select_targets_sell(
