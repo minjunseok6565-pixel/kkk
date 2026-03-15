@@ -222,6 +222,10 @@ class InjuryCurrentPayload(TypedDict):
 
 
 class InjuryHistoryPayload(TypedDict):
+    # NOTE:
+    # *_365d suffix is a schema compatibility name. 실제 계산 window는
+    # history.window_days 설정(예: injury_lookback_days)과 함께 해석되어야 한다.
+    # 즉, 필드명은 365d를 유지하되 "관측 윈도우 내 집계값"으로 간주한다.
     window_days: int
     recent_count_30d: int
     recent_count_180d: int
@@ -256,6 +260,47 @@ class InjuryPayload(TypedDict):
     history: InjuryHistoryPayload
     health_credit_inputs: InjuryHealthCreditInputs
     flags: InjuryFlagsPayload
+
+
+class TeamRiskInjuryMeta(TypedDict, total=False):
+    """Optional meta keys emitted by TEAM:RISK_DISCOUNT for injury-aware explainability."""
+
+    injury_payload_present: bool
+    injury_fallback_used: bool
+    age_term_risk: float
+    injury_hist_risk: float
+    injury_current_risk: float
+    health_relief: float
+    risk_raw: float
+    risk_squash_center: float
+    risk_squash_scale: float
+
+    inj_hist_recent_180: float
+    inj_hist_critical_365: float
+    inj_hist_repeat_same: float
+    inj_hist_weighted_severity_365d: float
+    inj_hist_fr: float
+    inj_hist_fc: float
+    inj_hist_fp: float
+    inj_hist_fs: float
+
+    inj_cur_status: str
+    inj_cur_is_out: bool
+    inj_cur_is_returning: bool
+    inj_cur_body_part: Optional[str]
+    inj_cur_is_critical_part: bool
+    inj_cur_severity: float
+    inj_cur_sev_norm: float
+    inj_cur_days_to_return: float
+    inj_cur_day_gate: float
+    inj_cur_status_mult: float
+
+    health_availability_rate: float
+    health_availability_gate: float
+    health_critical_365: float
+    health_repeat_same: float
+    health_clean_mix: float
+    health_relief_cap: float
 
 # -----------------------------------------------------------------------------
 # 3) Asset snapshots (DB/Repo에서 읽은 값을 "평가 가능한 형태"로 표준화)
@@ -561,4 +606,3 @@ def pick_protection_signature(protection: Optional[Dict[str, Any]]) -> str:
         blob = str(protection)
 
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
-

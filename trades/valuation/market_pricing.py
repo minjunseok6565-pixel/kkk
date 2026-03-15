@@ -193,6 +193,7 @@ class MarketPricingConfig:
     inj_current_s180_days: float = 24.0
     inj_current_weight_30: float = 0.08
     inj_current_weight_180: float = 0.16
+    inj_current_returning_multiplier: float = 0.50
     inj_current_factor_floor: float = 0.82
 
     # B) injury history discount (soft-count saturating signals)
@@ -796,14 +797,16 @@ class MarketPricer:
 
         status = str(cur.get("status") or "UNKNOWN").upper()
         is_out = bool(cur.get("is_out", status == "OUT"))
+        is_returning = bool(cur.get("is_returning", status == "RETURNING"))
         days_to_return = max(_safe_float(cur.get("days_to_return"), 0.0), 0.0)
         body_part = cur.get("body_part")
         severity = _safe_int(cur.get("severity"), 0)
 
-        if not is_out:
+        if not (is_out or is_returning):
             return 1.0, {
                 "status": status,
                 "is_out": bool(is_out),
+                "is_returning": bool(is_returning),
                 "days_to_return": float(days_to_return),
                 "body_part": body_part,
                 "severity": int(severity),
@@ -823,11 +826,13 @@ class MarketPricer:
         mid = _clamp((days_to_return - t30) / max(t180 - t30, cfg.eps), 0.0, 1.0)
 
         penalty = (w30 * g30 * mid) + (w180 * g180)
-        penalty = _clamp(penalty, 0.0, 0.95)
+        status_mult = 1.0 if is_out else _clamp(_safe_float(cfg.inj_current_returning_multiplier, 0.50), 0.0, 1.0)
+        penalty = _clamp(penalty * status_mult, 0.0, 0.95)
         factor = _clamp(1.0 - penalty, _clamp(cfg.inj_current_factor_floor, 0.0, 1.0), 1.0)
         return factor, {
             "status": status,
             "is_out": bool(is_out),
+            "is_returning": bool(is_returning),
             "days_to_return": float(days_to_return),
             "body_part": body_part,
             "severity": int(severity),
@@ -836,6 +841,7 @@ class MarketPricer:
             "mid": float(mid),
             "w30": float(w30),
             "w180": float(w180),
+            "status_mult": float(status_mult),
             "current_penalty": float(penalty),
             "current_factor": float(factor),
         }

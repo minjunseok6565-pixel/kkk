@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from typing import Any, Collection, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence
 
 DEFAULT_CRITICAL_BODY_PARTS: frozenset[str] = frozenset(
-    {"KNEE", "BACK", "SPINE", "ACHILLES", "FOOT", "HIP", "NECK"}
+    {"KNEE", "BACK", "HAMSTRING"}
 )
 
 
@@ -56,6 +56,30 @@ def _safe_int(x: Any, default: Optional[int] = None) -> Optional[int]:
         return int(x)
     except Exception:
         return default
+
+
+def _normalize_severity_raw(x: Any, *, default: int = 0) -> int:
+    """Normalize severity into deterministic bounded score [0, 5].
+
+    Notes
+    -----
+    - Keeps payload schema stable (still writes `severity` as integer),
+      while preventing outlier/malformed DB values from dominating downstream risk.
+    - 0 means unknown/non-severe fallback.
+    """
+    sev = _safe_int(x, default)
+    if sev is None:
+        return int(default)
+    if sev < 0:
+        return 0
+    if sev > 5:
+        return 5
+    return int(sev)
+
+
+def _normalize_severity_score(x: Any) -> float:
+    """Normalized severity score in [0,1] for internal feature engineering."""
+    return float(_normalize_severity_raw(x)) / 5.0
 
 
 def _normalize_status(status: Any) -> str:
@@ -109,6 +133,9 @@ def _default_payload(*, as_of_date_iso: str) -> Dict[str, Any]:
             "returning_until_date": None,
         },
         "history": {
+            # NOTE: *_365d naming is preserved for schema compatibility.
+            # The effective aggregation window is `window_days` and can differ
+            # from 365 when lookback overrides are supplied.
             "window_days": 365,
             "recent_count_30d": 0,
             "recent_count_180d": 0,
@@ -189,7 +216,7 @@ def _query_current_states(conn: Any, player_ids: Sequence[str]) -> Dict[str, _Cu
             out_until_date=_to_date_iso(r.get("out_until_date")),
             returning_until_date=_to_date_iso(r.get("returning_until_date")),
             body_part=_normalize_body_part(r.get("body_part")),
-            severity=_safe_int(r.get("severity"), None),
+            severity=_normalize_severity_raw(r.get("severity"), default=0),
         )
     return out
 
@@ -240,7 +267,7 @@ def _query_history_events(
                 player_id=pid,
                 date_iso=d,
                 body_part=_normalize_body_part(r.get("body_part")),
-                severity=_safe_int(r.get("severity"), None),
+                severity=_normalize_severity_raw(r.get("severity"), default=0),
                 out_until_date=_to_date_iso(r.get("out_until_date")),
                 returning_until_date=_to_date_iso(r.get("returning_until_date")),
             )
@@ -263,7 +290,8 @@ def _apply_current_payload(payload: MutableMapping[str, Any], row: _CurrentState
         "is_returning": status == "RETURNING",
         "days_to_return": int(days_to_return),
         "body_part": row.body_part,
-        "severity": row.severity,
+        "severity": _normalize_severity_raw(row.severity, default=0),
+        "severity_norm": _normalize_severity_score(row.severity),
         "out_until_date": out_until,
         "returning_until_date": returning_until,
     }
@@ -300,6 +328,7 @@ def _apply_history_payload(
     sev_cnt = 0
     weighted_num = 0.0
     weighted_den = 0.0
+    recent_weighted_180 = 0.0
     last_date: Optional[date] = None
 
     window_start = (_date_or_raise(as_of_date_iso) - timedelta(days=window_days)).isoformat()
@@ -322,12 +351,14 @@ def _apply_history_payload(
                 if bp in critical_body_parts:
                     critical_365 += 1
 
-            sev = float(ev.severity) if ev.severity is not None else 0.0
+            sev = float(_normalize_severity_raw(ev.severity, default=0))
             sev_sum += sev
             sev_cnt += 1
             w = _severity_recency_weight(as_of_date_iso=as_of_date_iso, event_date_iso=ev.date_iso)
             weighted_num += (sev * w)
             weighted_den += w
+            if d >= p180:
+                recent_weighted_180 += w
 
             if last_date is None or d > last_date:
                 last_date = d
@@ -374,6 +405,7 @@ def _apply_history_payload(
         "same_part_counts_365d": {k: int(v) for k, v in sorted(counts_part.items())},
         "avg_severity_365d": float(avg_sev),
         "weighted_severity_365d": float(weighted_sev),
+        "recent_weighted_count_180d": float(recent_weighted_180),
         "last_injury_date": last_date_iso,
         "days_since_last_injury": days_since_last,
     }
@@ -416,7 +448,7 @@ def build_injury_payload_for_player(
             out_until_date=_to_date_iso(current_row.get("out_until_date")),
             returning_until_date=_to_date_iso(current_row.get("returning_until_date")),
             body_part=_normalize_body_part(current_row.get("body_part")),
-            severity=_safe_int(current_row.get("severity"), None),
+            severity=_normalize_severity_raw(current_row.get("severity"), default=0),
         )
         _apply_current_payload(payload, row, as_of_date_iso=as_of)
 
@@ -430,7 +462,7 @@ def build_injury_payload_for_player(
                 player_id=str(r.get("player_id") or ""),
                 date_iso=d,
                 body_part=_normalize_body_part(r.get("body_part")),
-                severity=_safe_int(r.get("severity"), None),
+                severity=_normalize_severity_raw(r.get("severity"), default=0),
                 out_until_date=_to_date_iso(r.get("out_until_date")),
                 returning_until_date=_to_date_iso(r.get("returning_until_date")),
             )
