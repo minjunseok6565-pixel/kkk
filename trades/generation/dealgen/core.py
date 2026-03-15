@@ -1327,16 +1327,9 @@ def _prescore_candidate(
     seller_out = catalog.outgoing_by_team.get(seller)
 
     d = cand.deal
-    n_assets = sum(len(v) for v in d.legs.values())
-    n_players = sum(1 for leg in d.legs.values() for a in leg if isinstance(a, PlayerAsset))
-
     score = 0.0
 
-    # 1) 복잡도: 단순할수록 우선
-    score -= 0.10 * max(0, int(n_assets) - 2)
-    score -= 0.08 * max(0, int(n_players) - 2)
-
-    # 2) salary plausibility (양쪽 모두 대충 체크)
+    # 1) salary plausibility (양쪽 모두 대충 체크)
     try:
         ts_buyer = tick_ctx.get_team_situation(buyer)
     except Exception:
