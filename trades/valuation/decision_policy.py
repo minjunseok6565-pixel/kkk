@@ -123,6 +123,13 @@ class DecisionPolicyConfig:
     # If false, counter_rate is interpreted deterministically.
     stochastic_counter: bool = False
 
+    # Soft counter score (deterministic/stochastic shared)
+    counter_bias: float = -0.70
+    counter_rate_weight: float = 1.8
+    counter_near_weight: float = 0.65
+    counter_overpay_weight: float = 0.7
+    counter_depth_weight: float = 1.0
+
 
 # -----------------------------------------------------------------------------
 # Policy engine
@@ -173,6 +180,7 @@ class DecisionPolicy:
         # ---- Decide verdict (no hard rule checks)
         verdict: DealVerdict
         reasons: List[DecisionReason] = []
+        counter_score: Optional[float] = None
 
         # baseline reasons: net vs thresholds
         reasons.append(
@@ -238,16 +246,40 @@ class DecisionPolicy:
             in_corridor = (accept_threshold - corridor) <= net < accept_threshold
             within_overpay = net >= overpay_floor
 
-            if allow_counter and (in_corridor or (within_overpay and net < 0 and abs(net) <= cfg.counter_overpay_fraction * overpay_allowed)):
+            if allow_counter and (
+                in_corridor
+                or (within_overpay and net < 0 and abs(net) <= cfg.counter_overpay_fraction * overpay_allowed)
+            ):
                 # determine counter vs reject/accept in gray zone
-                if self._choose_counter(counter_rate=counter_rate, rng=rng):
+                counter_score = self._counter_probability(
+                    counter_rate=counter_rate,
+                    net=net,
+                    accept_threshold=accept_threshold,
+                    overpay_allowed=overpay_allowed,
+                    scale=scale,
+                    corridor=corridor,
+                )
+                if self._choose_counter(
+                    counter_rate=counter_rate,
+                    net=net,
+                    accept_threshold=accept_threshold,
+                    overpay_allowed=overpay_allowed,
+                    scale=scale,
+                    corridor=corridor,
+                    counter_probability=counter_score,
+                    rng=rng,
+                ):
                     verdict = DealVerdict.COUNTER
                     reasons.append(
                         DecisionReason(
                             code="COUNTER_IN_GRAY_ZONE",
                             message="near threshold / within overpay window -> counter tendency applied",
                             impact=accept_threshold - net,
-                            meta={"counter_rate": counter_rate, "corridor": corridor},
+                            meta={
+                                "counter_rate": counter_rate,
+                                "counter_score": counter_score,
+                                "corridor": corridor,
+                            },
                         )
                     )
                 else:
@@ -317,6 +349,7 @@ class DecisionPolicy:
                 "team_id": evaluation.team_id,
                 "surplus_ratio": float(evaluation.surplus_ratio),
                 "counter_rate": float(counter_rate),
+                "counter_score": None if counter_score is None else float(counter_score),
                 "accept_threshold": float(accept_threshold),
                 "overpay_floor": float(overpay_floor),
                 "corridor": float(corridor),
@@ -326,17 +359,73 @@ class DecisionPolicy:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
-    def _choose_counter(self, *, counter_rate: float, rng: random.Random) -> bool:
-        """Counter decision: deterministic or stochastic."""
+    def _choose_counter(
+        self,
+        *,
+        counter_rate: float,
+        net: float,
+        accept_threshold: float,
+        overpay_allowed: float,
+        scale: float,
+        corridor: float,
+        counter_probability: Optional[float] = None,
+        rng: random.Random,
+    ) -> bool:
+        """Counter decision: deterministic or stochastic based on a soft score."""
         cfg = self.config
-        r = _clamp(_safe_float(counter_rate, 0.0), 0.0, 1.0)
-        if r <= cfg.eps:
+        if counter_probability is not None:
+            p = _clamp(_safe_float(counter_probability, -1.0), 0.0, 1.0)
+        else:
+            p = self._counter_probability(
+                counter_rate=counter_rate,
+                net=net,
+                accept_threshold=accept_threshold,
+                overpay_allowed=overpay_allowed,
+                scale=scale,
+                corridor=corridor,
+            )
+        if p <= cfg.eps:
             return False
         if cfg.stochastic_counter:
-            return rng.random() < r
-        # deterministic: treat counter_rate as aggressiveness threshold
-        # >0.5 => generally counter in gray zones, <=0.5 => generally do not
-        return r > 0.5
+            return rng.random() < p
+        return p >= 0.5
+
+    def _counter_probability(
+        self,
+        *,
+        counter_rate: float,
+        net: float,
+        accept_threshold: float,
+        overpay_allowed: float,
+        scale: float,
+        corridor: float,
+    ) -> float:
+        cfg = self.config
+        r = _clamp(_safe_float(counter_rate, 0.0), 0.0, 1.0)
+        rate_centered = _clamp((2.0 * r) - 1.0, -1.0, 1.0)
+
+        s = max(_safe_float(scale, 0.0), cfg.eps)
+        d = max(0.0, (accept_threshold - net) / s)
+        corr_norm = max(_safe_float(corridor, 0.0) / s, cfg.eps)
+
+        # 0..1 features
+        f_rate = rate_centered
+        f_near = _clamp(1.0 - (d / corr_norm), 0.0, 1.0)
+        f_overpay = _clamp(
+            (0.0 - net) / max(_safe_float(overpay_allowed, 0.0), cfg.eps),
+            0.0,
+            1.0,
+        )
+        f_depth = _clamp(d, 0.0, 1.0)
+
+        z = (
+            cfg.counter_bias
+            + cfg.counter_rate_weight * f_rate
+            + cfg.counter_near_weight * f_near
+            + cfg.counter_overpay_weight * f_overpay
+            - cfg.counter_depth_weight * f_depth
+        )
+        return _clamp(_sigmoid(z), 0.0, 1.0)
 
     def _compute_confidence(
         self,
