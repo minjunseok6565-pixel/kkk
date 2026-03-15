@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 import math
 import random
+from bisect import bisect_left, bisect_right
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from ..generation_tick import TradeGenerationTickContext
@@ -190,6 +192,96 @@ def _listing_interest_boost(
     return min(max(0.0, interest_boost), max(0.0, cap))
 
 
+@dataclass(frozen=True, slots=True)
+class _BasketballNormContext:
+    values_sorted: Tuple[float, ...]
+    by_tag_sorted: Dict[str, Tuple[float, ...]]
+    eps: float
+    min_samples: int
+    role_min_samples: int
+    mode: str
+    fallback_center: float
+    fallback_scale: float
+    role_blend_alpha: float
+
+
+def _percentile_from_sorted(values_sorted: Sequence[float], x: float, eps: float) -> float:
+    n = len(values_sorted)
+    if n <= 0:
+        return 0.5
+    lo = bisect_left(values_sorted, x)
+    hi = bisect_right(values_sorted, x)
+    p = (float(lo) + 0.5 * float(hi - lo)) / float(n)
+    e = _clamp(eps, 0.0, 0.49)
+    return _clamp(p, e, 1.0 - e)
+
+
+def _sigmoid_fallback(x: float, center: float, scale: float) -> float:
+    denom = max(1e-6, abs(float(scale)))
+    z = (float(x) - float(center)) / denom
+    if z >= 0.0:
+        ez = math.exp(-z)
+        return 1.0 / (1.0 + ez)
+    ez = math.exp(z)
+    return ez / (1.0 + ez)
+
+
+def _build_basketball_norm_context(
+    refs: Sequence[IncomingPlayerRef],
+    config: DealGeneratorConfig,
+) -> _BasketballNormContext:
+    vals: List[float] = []
+    by_tag: Dict[str, List[float]] = {}
+    for ref in refs:
+        x = float(getattr(ref, "basketball_total", 0.0) or 0.0)
+        vals.append(x)
+        tag = str(getattr(ref, "tag", "") or "").upper()
+        if tag:
+            by_tag.setdefault(tag, []).append(x)
+
+    values_sorted = tuple(sorted(vals))
+    by_tag_sorted = {k: tuple(sorted(v)) for k, v in by_tag.items()}
+
+    mode = str(getattr(config, "buy_target_basketball_norm_mode", "PERCENTILE") or "PERCENTILE").upper()
+    if mode not in {"PERCENTILE", "HYBRID"}:
+        mode = "PERCENTILE"
+
+    return _BasketballNormContext(
+        values_sorted=values_sorted,
+        by_tag_sorted=by_tag_sorted,
+        eps=float(getattr(config, "buy_target_basketball_norm_eps", 0.01) or 0.01),
+        min_samples=max(1, int(getattr(config, "buy_target_basketball_norm_min_samples", 40) or 40)),
+        role_min_samples=max(1, int(getattr(config, "buy_target_basketball_norm_role_min_samples", 20) or 20)),
+        mode=mode,
+        fallback_center=float(getattr(config, "buy_target_basketball_norm_fallback_center", 10.0) or 10.0),
+        fallback_scale=float(getattr(config, "buy_target_basketball_norm_fallback_scale", 12.0) or 12.0),
+        role_blend_alpha=_clamp01(getattr(config, "buy_target_basketball_norm_role_blend_alpha", 0.0)),
+    )
+
+
+def _resolve_basketball_norm(ref: IncomingPlayerRef, ctx: _BasketballNormContext) -> float:
+    x = float(getattr(ref, "basketball_total", 0.0) or 0.0)
+    league = _percentile_from_sorted(ctx.values_sorted, x, ctx.eps)
+
+    tag = str(getattr(ref, "tag", "") or "").upper()
+    role_sorted = ctx.by_tag_sorted.get(tag, tuple()) if tag else tuple()
+    if len(role_sorted) >= ctx.role_min_samples and ctx.role_blend_alpha > 0.0:
+        role = _percentile_from_sorted(role_sorted, x, ctx.eps)
+        base = (1.0 - ctx.role_blend_alpha) * league + ctx.role_blend_alpha * role
+    else:
+        base = league
+
+    if ctx.mode == "HYBRID":
+        n = len(ctx.values_sorted)
+        n0 = max(1.0, 0.5 * float(ctx.min_samples))
+        n1 = max(n0 + 1e-6, float(ctx.min_samples))
+        alpha = _clamp((float(n) - n0) / (n1 - n0), 0.0, 1.0)
+        fallback = _sigmoid_fallback(x, ctx.fallback_center, ctx.fallback_scale)
+        return _clamp01(alpha * base + (1.0 - alpha) * fallback)
+
+    return _clamp01(base)
+
+
 def _contract_gap_score(gap_cap_share: float, config: DealGeneratorConfig) -> float:
     soft = max(0.005, float(getattr(config, "buy_target_contract_gap_softness_cap_share", 0.060) or 0.060))
     return float(math.tanh(float(gap_cap_share) / soft))
@@ -226,10 +318,14 @@ def _team_contract_sensitivity(team_situation: Any, config: DealGeneratorConfig)
     return _clamp(sens, s_min, s_max)
 
 
-def _player_core_score(ref: IncomingPlayerRef, need_similarity: float, config: DealGeneratorConfig) -> float:
+def _player_core_score(
+    ref: IncomingPlayerRef,
+    need_similarity: float,
+    config: DealGeneratorConfig,
+    norm_ctx: _BasketballNormContext,
+) -> float:
     fit = _clamp01(getattr(ref, "tag_strength", 0.0))
-    basketball_total = float(getattr(ref, "basketball_total", 0.0) or 0.0)
-    basketball_norm = _clamp01((basketball_total + 15.0) / 45.0)
+    basketball_norm = _resolve_basketball_norm(ref, norm_ctx)
 
     w_fit = max(0.0, float(getattr(config, "buy_target_player_core_weight_fit", 0.50) or 0.50))
     w_market = max(0.0, float(getattr(config, "buy_target_player_core_weight_market", 0.35) or 0.35))
@@ -243,9 +339,13 @@ def _player_core_score(ref: IncomingPlayerRef, need_similarity: float, config: D
     return float((w_fit * fit) + (w_market * basketball_norm) + need_term)
 
 
-def _cheap_pre_score(ref: IncomingPlayerRef, need_similarity: float, config: DealGeneratorConfig) -> float:
-    basketball_total = float(getattr(ref, "basketball_total", 0.0) or 0.0)
-    basketball_norm = _clamp01((basketball_total + 15.0) / 45.0)
+def _cheap_pre_score(
+    ref: IncomingPlayerRef,
+    need_similarity: float,
+    config: DealGeneratorConfig,
+    norm_ctx: _BasketballNormContext,
+) -> float:
+    basketball_norm = _resolve_basketball_norm(ref, norm_ctx)
     core_pre = 0.62 * basketball_norm + 0.38 * _clamp01(need_similarity)
 
     gap = float(getattr(ref, "contract_gap_cap_share", 0.0) or 0.0)
@@ -261,8 +361,9 @@ def _final_rank(
     listing_boost: float,
     buyer_ts: Any,
     config: DealGeneratorConfig,
+    norm_ctx: _BasketballNormContext,
 ) -> float:
-    player_core = _player_core_score(ref, need_similarity, config)
+    player_core = _player_core_score(ref, need_similarity, config, norm_ctx)
 
     contract_gap = float(getattr(ref, "contract_gap_cap_share", 0.0) or 0.0)
     contract_score = _contract_gap_score(contract_gap, config)
@@ -391,6 +492,7 @@ def select_targets_buy(
         listing_meta_by_player = _active_public_listing_meta_by_player(tick_ctx)
 
     refs: Sequence[IncomingPlayerRef] = tuple(getattr(catalog, "incoming_all_players", tuple()) or tuple())
+    norm_ctx = _build_basketball_norm_context(refs, config)
 
     listed_rows: List[Dict[str, Any]] = []
     non_listed_rows_all: List[Dict[str, Any]] = []
@@ -440,7 +542,7 @@ def select_targets_buy(
             "need_similarity": need_similarity,
             "need_priority": _need_priority_for_ref(r, need_map),
             "listing_boost": listing_boost,
-            "pre_score": _cheap_pre_score(r, need_similarity, config),
+            "pre_score": _cheap_pre_score(r, need_similarity, config, norm_ctx),
         }
 
         if is_public_listing:
@@ -499,6 +601,7 @@ def select_targets_buy(
             listing_boost=float(row.get("listing_boost", 0.0) or 0.0),
             buyer_ts=buyer_ts,
             config=config,
+            norm_ctx=norm_ctx,
         )
         out_rows.append(
             (

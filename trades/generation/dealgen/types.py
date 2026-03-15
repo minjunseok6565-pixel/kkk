@@ -284,6 +284,24 @@ class DealGeneratorConfig:
 
     buy_target_pre_score_contract_weight: float = 0.18
 
+    # --- buy ranking: basketball_total normalization mode
+    # Replace hard-coded linear scaling with distribution-aware normalization.
+    # Modes:
+    # - FIXED: legacy (basketball_total + 15) / 45 for rollback compatibility
+    # - PERCENTILE: ECDF percentile on current candidate pool
+    # - HYBRID: percentile + sigmoid fallback blend for small sample sizes
+    buy_target_basketball_norm_mode: str = "PERCENTILE"  # FIXED | PERCENTILE | HYBRID
+    buy_target_basketball_norm_eps: float = 0.01
+    buy_target_basketball_norm_min_samples: int = 40
+
+    # HYBRID fallback sigmoid params: sigmoid((x - center) / scale)
+    buy_target_basketball_norm_fallback_center: float = 10.0
+    buy_target_basketball_norm_fallback_scale: float = 12.0
+
+    # Optional role/tag percentile blend: (1-beta)*league + beta*role
+    buy_target_basketball_norm_role_blend_alpha: float = 0.0
+    buy_target_basketball_norm_role_min_samples: int = 20
+
     # --- proactive listing controls (AI)
     ai_proactive_listing_enabled: bool = True
     ai_proactive_listing_team_daily_cap: int = 2

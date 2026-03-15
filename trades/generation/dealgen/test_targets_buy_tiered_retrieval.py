@@ -421,5 +421,101 @@ class BuyTieredRetrievalTests(unittest.TestCase):
         self.assertEqual(out[0].player_id, "good_contract")
 
 
+    def test_pre_score_and_final_rank_use_consistent_norm_axis(self):
+        refs = [
+            IncomingPlayerRef("low", "LAL", "WING", 0.75, 12.0, 8.0, 2.0, 26.0, basketball_total=8.0, contract_gap_cap_share=0.00),
+            IncomingPlayerRef("mid", "NYK", "WING", 0.75, 12.0, 8.0, 2.0, 26.0, basketball_total=18.0, contract_gap_cap_share=0.00),
+            IncomingPlayerRef("high", "MIA", "WING", 0.75, 12.0, 8.0, 2.0, 26.0, basketball_total=28.0, contract_gap_cap_share=0.00),
+        ]
+
+        cfg = DealGeneratorConfig(
+            buy_target_listed_min_quota=0,
+            buy_target_non_listed_base_quota=3,
+            buy_target_basketball_norm_mode="PERCENTILE",
+            buy_target_contract_base_weight=0.0,
+            buy_target_pre_score_contract_weight=0.0,
+        )
+
+        out = select_targets_buy(
+            "BOS",
+            _TickCtxStub(deadline_pressure=0.0, urgency=0.0, need_map={"WING": 1.0}),
+            self._catalog(refs),
+            cfg,
+            budget=self._budget(max_targets=3),
+            rng=random.Random(33),
+            banned_players=set(),
+        )
+
+        self.assertEqual([t.player_id for t in out], ["high", "mid", "low"])
+
+
+    def test_percentile_normalization_uses_relative_order_not_absolute_scale(self):
+        refs_a = [
+            IncomingPlayerRef("a_low", "LAL", "WING", 0.7, 10.0, 6.0, 2.0, 25.0, basketball_total=10.0),
+            IncomingPlayerRef("a_mid", "NYK", "WING", 0.7, 10.0, 6.0, 2.0, 25.0, basketball_total=20.0),
+            IncomingPlayerRef("a_high", "MIA", "WING", 0.7, 10.0, 6.0, 2.0, 25.0, basketball_total=30.0),
+        ]
+        refs_b = [
+            IncomingPlayerRef("b_low", "LAL", "WING", 0.7, 10.0, 6.0, 2.0, 25.0, basketball_total=100.0),
+            IncomingPlayerRef("b_mid", "NYK", "WING", 0.7, 10.0, 6.0, 2.0, 25.0, basketball_total=200.0),
+            IncomingPlayerRef("b_high", "MIA", "WING", 0.7, 10.0, 6.0, 2.0, 25.0, basketball_total=300.0),
+        ]
+
+        cfg = DealGeneratorConfig(
+            buy_target_listed_min_quota=0,
+            buy_target_non_listed_base_quota=3,
+            buy_target_basketball_norm_mode="PERCENTILE",
+        )
+
+        out_a = select_targets_buy(
+            "BOS",
+            _TickCtxStub(deadline_pressure=0.0, urgency=0.0, need_map={"WING": 1.0}),
+            self._catalog(refs_a),
+            cfg,
+            budget=self._budget(max_targets=3),
+            rng=random.Random(21),
+            banned_players=set(),
+        )
+        out_b = select_targets_buy(
+            "BOS",
+            _TickCtxStub(deadline_pressure=0.0, urgency=0.0, need_map={"WING": 1.0}),
+            self._catalog(refs_b),
+            cfg,
+            budget=self._budget(max_targets=3),
+            rng=random.Random(21),
+            banned_players=set(),
+        )
+
+        self.assertEqual([t.player_id for t in out_a], ["a_high", "a_mid", "a_low"])
+        self.assertEqual([t.player_id for t in out_b], ["b_high", "b_mid", "b_low"])
+
+    def test_hybrid_fallback_behaves_on_small_sample(self):
+        refs = [
+            IncomingPlayerRef("small_low", "LAL", "WING", 0.7, 10.0, 6.0, 2.0, 25.0, basketball_total=-5.0),
+            IncomingPlayerRef("small_high", "NYK", "WING", 0.7, 10.0, 6.0, 2.0, 25.0, basketball_total=25.0),
+        ]
+
+        cfg = DealGeneratorConfig(
+            buy_target_listed_min_quota=0,
+            buy_target_non_listed_base_quota=2,
+            buy_target_basketball_norm_mode="HYBRID",
+            buy_target_basketball_norm_min_samples=50,
+            buy_target_basketball_norm_fallback_center=10.0,
+            buy_target_basketball_norm_fallback_scale=8.0,
+        )
+
+        out = select_targets_buy(
+            "BOS",
+            _TickCtxStub(deadline_pressure=0.0, urgency=0.0, need_map={"WING": 1.0}),
+            self._catalog(refs),
+            cfg,
+            budget=self._budget(max_targets=2),
+            rng=random.Random(99),
+            banned_players=set(),
+        )
+
+        self.assertEqual(out[0].player_id, "small_high")
+
+
 if __name__ == "__main__":
     unittest.main()
