@@ -95,6 +95,44 @@ def _extract_package_delta_total(e: TeamDealEvaluation) -> float:
     return 0.0
 
 
+def _deal_scale_components(e: TeamDealEvaluation, *, eps: float) -> Tuple[float, float, float, float]:
+    """Return multi-axis scale and its component axes.
+
+    scale axes:
+    - outgoing_total
+    - incoming_total
+    - mass_scale=max(in_abs_mass, out_abs_mass)
+      * in_abs_mass = abs(in_now) + abs(in_future)
+      * out_abs_mass = abs(out_now) + abs(out_future)
+
+    final scale = max(outgoing, incoming, mass_scale, eps)
+    """
+    outgoing = _safe_float(getattr(e, "outgoing_total", 0.0), 0.0)
+    incoming = _safe_float(getattr(e, "incoming_total", 0.0), 0.0)
+
+    in_now = 0.0
+    in_future = 0.0
+    out_now = 0.0
+    out_future = 0.0
+    try:
+        in_val = e.side.incoming_totals.value
+        out_val = e.side.outgoing_totals.value
+        in_now = _safe_float(getattr(in_val, "now", 0.0), 0.0)
+        in_future = _safe_float(getattr(in_val, "future", 0.0), 0.0)
+        out_now = _safe_float(getattr(out_val, "now", 0.0), 0.0)
+        out_future = _safe_float(getattr(out_val, "future", 0.0), 0.0)
+    except Exception:
+        # Keep this layer robust against partially populated test doubles.
+        pass
+
+    in_abs_mass = abs(in_now) + abs(in_future)
+    out_abs_mass = abs(out_now) + abs(out_future)
+    mass_scale = max(in_abs_mass, out_abs_mass)
+
+    scale = max(outgoing, incoming, mass_scale, _safe_float(eps, 1e-9))
+    return float(scale), float(outgoing), float(incoming), float(mass_scale)
+
+
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
@@ -102,11 +140,8 @@ def _extract_package_delta_total(e: TeamDealEvaluation) -> float:
 class DecisionPolicyConfig:
     eps: float = 1e-9
 
-    # If outgoing_total is ~0 (e.g., receive something for free), use this as scale
-    min_outgoing_scale: float = 6.0
-
     # How wide is the "counter corridor" around the acceptance boundary
-    # corridor = required_surplus ± corridor_ratio*outgoing_total
+    # corridor = required_surplus ± corridor_ratio*deal_scale
     counter_corridor_ratio: float = 0.04
 
     # If net is negative but within this fraction of overpay_allowed,
@@ -159,10 +194,13 @@ class DecisionPolicy:
         incoming = _safe_float(evaluation.incoming_total, 0.0)
         net = _safe_float(evaluation.net_surplus, incoming - outgoing)
 
-        # scale baseline (avoid weirdness when outgoing ~ 0)
-        scale = max(outgoing, cfg.min_outgoing_scale)
+        # deal scale (multi-axis): outgoing/incoming/abs-mass
+        scale, scale_outgoing, scale_incoming, scale_mass = _deal_scale_components(
+            evaluation,
+            eps=cfg.eps,
+        )
 
-        # Required surplus and overpay allowance are both proportional to outgoing scale
+        # Required surplus and overpay allowance are both proportional to deal scale
         min_surplus_ratio = _safe_float(getattr(knobs, "min_surplus_required", 0.0), 0.0)
         overpay_ratio = max(0.0, _safe_float(getattr(knobs, "overpay_budget", 0.0), 0.0))
         counter_rate = _clamp(_safe_float(getattr(knobs, "counter_rate", 0.0), 0.0), 0.0, 1.0)
@@ -199,7 +237,10 @@ class DecisionPolicy:
                 meta={
                     "min_surplus_required_ratio": min_surplus_ratio,
                     "overpay_budget_ratio": overpay_ratio,
-                    "scale_outgoing": scale,
+                    "scale": scale,
+                    "scale_outgoing": scale_outgoing,
+                    "scale_incoming": scale_incoming,
+                    "scale_mass": scale_mass,
                 },
             )
         )

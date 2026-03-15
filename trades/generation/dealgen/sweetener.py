@@ -21,11 +21,58 @@ from .pick_protection_decorator import default_sweetener_protection
 # =============================================================================
 
 
+
+
+def _safe_float(x: object, default: float = 0.0) -> float:
+    try:
+        if x is None:
+            return float(default)
+        return float(x)
+    except Exception:
+        return float(default)
+
+
+def _sweetener_scale_components(team_eval: TeamDealEvaluation, *, eps: float = 1e-9) -> Tuple[float, float, float, float]:
+    """Sweetener close-corridor scale aligned with decision-policy A안.
+
+    scale axes:
+    - outgoing_total
+    - incoming_total
+    - mass_scale=max(in_abs_mass, out_abs_mass)
+      * in_abs_mass = abs(in_now) + abs(in_future)
+      * out_abs_mass = abs(out_now) + abs(out_future)
+
+    final scale = max(outgoing, incoming, mass_scale, eps)
+    """
+    outgoing = _safe_float(getattr(team_eval, "outgoing_total", 0.0), 0.0)
+    incoming = _safe_float(getattr(team_eval, "incoming_total", 0.0), 0.0)
+
+    in_now = 0.0
+    in_future = 0.0
+    out_now = 0.0
+    out_future = 0.0
+    try:
+        in_val = team_eval.side.incoming_totals.value
+        out_val = team_eval.side.outgoing_totals.value
+        in_now = _safe_float(getattr(in_val, "now", 0.0), 0.0)
+        in_future = _safe_float(getattr(in_val, "future", 0.0), 0.0)
+        out_now = _safe_float(getattr(out_val, "now", 0.0), 0.0)
+        out_future = _safe_float(getattr(out_val, "future", 0.0), 0.0)
+    except Exception:
+        pass
+
+    in_abs_mass = abs(in_now) + abs(in_future)
+    out_abs_mass = abs(out_now) + abs(out_future)
+    mass_scale = max(in_abs_mass, out_abs_mass)
+
+    scale = max(outgoing, incoming, mass_scale, _safe_float(eps, 1e-9))
+    return float(scale), float(outgoing), float(incoming), float(mass_scale)
+
 def _sweetener_close_corridor(team_eval: TeamDealEvaluation, cfg: DealGeneratorConfig) -> float:
     """Sweetener attempt window scaled by deal size (v2 absorption).
 
-    v2 공식:
-      scale = max(team_eval.outgoing_total, 6.0)
+    v2 공식(A안 정렬):
+      scale = max(outgoing_total, incoming_total, mass_scale, eps)
       close = min(cap, max(floor, ratio * scale))
       eligible if margin >= -close
 
@@ -43,8 +90,7 @@ def _sweetener_close_corridor(team_eval: TeamDealEvaluation, cfg: DealGeneratorC
     if ratio <= 0.0 and cap <= 0.0 and floor <= 0.0:
         return base_max if base_max > 0.0 else 0.0
 
-    scale = float(getattr(team_eval, "outgoing_total", 0.0) or 0.0)
-    scale = max(scale, 6.0)
+    scale, _, _, _ = _sweetener_scale_components(team_eval)
 
     close = max(floor, ratio * scale)
     if cap > 0.0:
@@ -104,7 +150,7 @@ def maybe_apply_sweeteners(
     receiver: Optional[str] = None
     deficit = 0.0
 
-    # v2-style "close corridor": scale by the *receiver* side outgoing_total
+    # v2-style "close corridor": scale by receiver-side multi-axis deal scale
     close_seller = _sweetener_close_corridor(base.seller_eval, config)
     close_buyer = _sweetener_close_corridor(base.buyer_eval, config)
 
