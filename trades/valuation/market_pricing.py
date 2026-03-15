@@ -108,6 +108,14 @@ def _vc(now: float = 0.0, future: float = 0.0) -> ValueComponents:
     return ValueComponents(float(now), float(future))
 
 
+def _soft_count(x: float, k: float) -> float:
+    xv = max(_safe_float(x, 0.0), 0.0)
+    kv = max(_safe_float(k, 0.0), 0.0)
+    if kv <= 0.0:
+        return 0.0
+    return 1.0 - math.exp(-kv * xv)
+
+
 # =============================================================================
 # Config: curves & weights (tunable, deterministic)
 # =============================================================================
@@ -176,6 +184,35 @@ class MarketPricingConfig:
     contract_efficiency_factor_floor: float = 0.70
     contract_efficiency_factor_cap: float = 1.35
     contract_years_penalty_per_year: float = 0.03  # 긴 계약은 market에서 살짝 할인
+
+    # --- Injury-aware market adjustments (players)
+    # A) current injury discount (soft gates around 30/180 days)
+    inj_current_t30_days: float = 30.0
+    inj_current_t180_days: float = 180.0
+    inj_current_s30_days: float = 10.0
+    inj_current_s180_days: float = 24.0
+    inj_current_weight_30: float = 0.08
+    inj_current_weight_180: float = 0.16
+    inj_current_factor_floor: float = 0.82
+
+    # B) injury history discount (soft-count saturating signals)
+    inj_hist_recent_kr: float = 0.28
+    inj_hist_critical_kc: float = 0.65
+    inj_hist_repeat_kp: float = 0.72
+    inj_hist_severity_ks: float = 0.45
+    inj_hist_weight_recent: float = 0.26
+    inj_hist_weight_critical: float = 0.36
+    inj_hist_weight_repeat: float = 0.28
+    inj_hist_weight_severity: float = 0.10
+    inj_hist_penalty_cap: float = 0.22
+    inj_hist_factor_floor: float = 0.78
+
+    # C) health credit (counterbalance; intentionally smaller than discounts)
+    health_credit_availability_ref: float = 0.90
+    health_credit_availability_scale: float = 0.06
+    health_credit_base_scale: float = 0.020
+    health_credit_no_critical_bonus: float = 1.20
+    health_credit_cap: float = 0.06
 
     # --- Pick base pricing
     pick_round1_base_future: float = 14.0
@@ -406,6 +443,54 @@ class MarketPricer:
             basketball_value = basketball_value.scale(pos_factor)
 
         # -----------------------------------------------------------------
+        # Injury-aware market adjustments on basketball component.
+        # - CURRENT injury discount (soft-gated around 30/180 days): MUL
+        # - HISTORY injury discount (recent/critical/repeat/severity): MUL
+        # - HEALTH credit bonus (availability upside): ADD
+        # -----------------------------------------------------------------
+        injury_payload, injury_payload_meta = self._safe_injury_payload(snap)
+
+        current_factor, current_meta = self._inj_current_penalty_factor(injury_payload)
+        steps.append(
+            ValuationStep(
+                stage=ValuationStage.MARKET,
+                mode=StepMode.MUL,
+                code="INJURY_CURRENT_DISCOUNT",
+                label="현재 부상 할인(소프트 게이트)",
+                factor=current_factor,
+                meta={**injury_payload_meta, **current_meta},
+            )
+        )
+        basketball_value = basketball_value.scale(current_factor)
+
+        history_factor, history_meta = self._inj_history_penalty_factor(injury_payload)
+        steps.append(
+            ValuationStep(
+                stage=ValuationStage.MARKET,
+                mode=StepMode.MUL,
+                code="INJURY_HISTORY_DISCOUNT",
+                label="부상 이력 할인(최근/치명/반복)",
+                factor=history_factor,
+                meta={**injury_payload_meta, **history_meta},
+            )
+        )
+        basketball_value = basketball_value.scale(history_factor)
+
+        health_credit_delta, health_meta = self._health_credit_bonus(injury_payload, basketball_value)
+        if abs(health_credit_delta.now) + abs(health_credit_delta.future) > cfg.eps:
+            steps.append(
+                ValuationStep(
+                    stage=ValuationStage.MARKET,
+                    mode=StepMode.ADD,
+                    code="HEALTH_CREDIT",
+                    label="건강 보너스(가용성 반대급부)",
+                    delta=health_credit_delta,
+                    meta={**injury_payload_meta, **health_meta},
+                )
+            )
+            basketball_value = basketball_value + health_credit_delta
+
+        # -----------------------------------------------------------------
         # Contract value (fair salary - actual salary), ADDED as a separate component.
         # This allows bad contracts to become negative assets and fixes superstar max bias.
         # -----------------------------------------------------------------
@@ -433,6 +518,13 @@ class MarketPricer:
                     "now": basketball_value.now,
                     "future": basketball_value.future,
                     "total": basketball_value.total,
+                },
+                "injury": {
+                    "current_factor": float(current_factor),
+                    "history_factor": float(history_factor),
+                    "health_credit_now": float(health_credit_delta.now),
+                    "health_credit_future": float(health_credit_delta.future),
+                    "health_credit_total": float(health_credit_delta.total),
                 },
                 "contract": {
                     "now": contract_delta.now,
@@ -686,6 +778,146 @@ class MarketPricer:
         if "SF" in pos and "SG" in pos:
             return 1.02, {"pos": pos, "bucket": "wing_combo"}
         return 1.0, {"pos": pos, "bucket": "neutral"}
+
+    def _safe_injury_payload(self, snap: PlayerSnapshot) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        meta = snap.meta if isinstance(snap.meta, dict) else {}
+        payload = meta.get("injury") if isinstance(meta, dict) else None
+        if not isinstance(payload, dict):
+            return {}, {"injury_payload_present": False, "fallback_used": True}
+        flags = payload.get("flags") if isinstance(payload.get("flags"), dict) else {}
+        return payload, {
+            "injury_payload_present": True,
+            "fallback_used": bool(flags.get("fallback_used", False)),
+        }
+
+    def _inj_current_penalty_factor(self, injury_payload: Mapping[str, Any]) -> Tuple[float, Dict[str, Any]]:
+        cfg = self.config
+        cur = injury_payload.get("current") if isinstance(injury_payload.get("current"), Mapping) else {}
+
+        status = str(cur.get("status") or "UNKNOWN").upper()
+        is_out = bool(cur.get("is_out", status == "OUT"))
+        days_to_return = max(_safe_float(cur.get("days_to_return"), 0.0), 0.0)
+        body_part = cur.get("body_part")
+        severity = _safe_int(cur.get("severity"), 0)
+
+        if not is_out:
+            return 1.0, {
+                "status": status,
+                "is_out": bool(is_out),
+                "days_to_return": float(days_to_return),
+                "body_part": body_part,
+                "severity": int(severity),
+                "current_penalty": 0.0,
+                "current_factor": 1.0,
+            }
+
+        t30 = max(_safe_float(cfg.inj_current_t30_days, 30.0), 1.0)
+        t180 = max(_safe_float(cfg.inj_current_t180_days, 180.0), t30 + 1.0)
+        s30 = max(_safe_float(cfg.inj_current_s30_days, 10.0), cfg.eps)
+        s180 = max(_safe_float(cfg.inj_current_s180_days, 24.0), cfg.eps)
+        w30 = _clamp(_safe_float(cfg.inj_current_weight_30, 0.08), 0.0, 1.0)
+        w180 = _clamp(_safe_float(cfg.inj_current_weight_180, 0.16), 0.0, 1.0)
+
+        g30 = _sigmoid((days_to_return - t30) / s30)
+        g180 = _sigmoid((days_to_return - t180) / s180)
+        mid = _clamp((days_to_return - t30) / max(t180 - t30, cfg.eps), 0.0, 1.0)
+
+        penalty = (w30 * g30 * mid) + (w180 * g180)
+        penalty = _clamp(penalty, 0.0, 0.95)
+        factor = _clamp(1.0 - penalty, _clamp(cfg.inj_current_factor_floor, 0.0, 1.0), 1.0)
+        return factor, {
+            "status": status,
+            "is_out": bool(is_out),
+            "days_to_return": float(days_to_return),
+            "body_part": body_part,
+            "severity": int(severity),
+            "g30": float(g30),
+            "g180": float(g180),
+            "mid": float(mid),
+            "w30": float(w30),
+            "w180": float(w180),
+            "current_penalty": float(penalty),
+            "current_factor": float(factor),
+        }
+
+    def _inj_history_penalty_factor(self, injury_payload: Mapping[str, Any]) -> Tuple[float, Dict[str, Any]]:
+        cfg = self.config
+        hist = injury_payload.get("history") if isinstance(injury_payload.get("history"), Mapping) else {}
+
+        recent_180 = max(_safe_float(hist.get("recent_count_180d"), 0.0), 0.0)
+        critical_365 = max(_safe_float(hist.get("critical_count_365d"), 0.0), 0.0)
+        repeat_same = max(_safe_float(hist.get("same_part_repeat_365d_max"), 0.0) - 1.0, 0.0)
+        weighted_severity = max(_safe_float(hist.get("weighted_severity_365d"), 0.0), 0.0)
+        sev_signal = max(weighted_severity - 1.0, 0.0)
+
+        fr = _soft_count(recent_180, cfg.inj_hist_recent_kr)
+        fc = _soft_count(critical_365, cfg.inj_hist_critical_kc)
+        fp = _soft_count(repeat_same, cfg.inj_hist_repeat_kp)
+        fs = _soft_count(sev_signal, cfg.inj_hist_severity_ks)
+
+        ar = _clamp(_safe_float(cfg.inj_hist_weight_recent, 0.26), 0.0, 1.0)
+        ac = _clamp(_safe_float(cfg.inj_hist_weight_critical, 0.36), 0.0, 1.0)
+        ap = _clamp(_safe_float(cfg.inj_hist_weight_repeat, 0.28), 0.0, 1.0)
+        asv = _clamp(_safe_float(cfg.inj_hist_weight_severity, 0.10), 0.0, 1.0)
+        weight_sum = max(ar + ac + ap + asv, cfg.eps)
+
+        mix = (ar * fr + ac * fc + ap * fp + asv * fs) / weight_sum
+        penalty_cap = _clamp(_safe_float(cfg.inj_hist_penalty_cap, 0.22), 0.0, 0.95)
+        penalty = _clamp(penalty_cap * mix, 0.0, 0.95)
+        factor = _clamp(1.0 - penalty, _clamp(cfg.inj_hist_factor_floor, 0.0, 1.0), 1.0)
+
+        return factor, {
+            "recent_180": float(recent_180),
+            "critical_365": float(critical_365),
+            "repeat_same": float(repeat_same),
+            "weighted_severity_365d": float(weighted_severity),
+            "fr": float(fr),
+            "fc": float(fc),
+            "fp": float(fp),
+            "fs": float(fs),
+            "history_penalty": float(penalty),
+            "history_factor": float(factor),
+        }
+
+    def _health_credit_bonus(
+        self,
+        injury_payload: Mapping[str, Any],
+        basketball_value: ValueComponents,
+    ) -> Tuple[ValueComponents, Dict[str, Any]]:
+        cfg = self.config
+        hist = injury_payload.get("history") if isinstance(injury_payload.get("history"), Mapping) else {}
+        health = (
+            injury_payload.get("health_credit_inputs")
+            if isinstance(injury_payload.get("health_credit_inputs"), Mapping)
+            else {}
+        )
+
+        availability_rate = _clamp(_safe_float(health.get("availability_rate_365d"), 1.0), 0.0, 1.0)
+        critical_365 = max(_safe_float(hist.get("critical_count_365d"), 0.0), 0.0)
+
+        ref = _clamp(_safe_float(cfg.health_credit_availability_ref, 0.90), 0.0, 1.0)
+        scale = max(_safe_float(cfg.health_credit_availability_scale, 0.06), cfg.eps)
+        base_scale = max(_safe_float(cfg.health_credit_base_scale, 0.020), 0.0)
+        no_critical_bonus = max(_safe_float(cfg.health_credit_no_critical_bonus, 1.20), 0.0)
+        cap = _clamp(_safe_float(cfg.health_credit_cap, 0.06), 0.0, 0.30)
+
+        gate = _sigmoid((availability_rate - ref) / scale)
+        mult = no_critical_bonus if critical_365 <= 0.0 else 1.0
+        bonus_pct = _clamp(base_scale * gate * mult, 0.0, cap)
+
+        base_now = max(_safe_float(basketball_value.now, 0.0), 0.0)
+        base_future = max(_safe_float(basketball_value.future, 0.0), 0.0)
+        bonus = ValueComponents(base_now * bonus_pct, base_future * bonus_pct)
+
+        return bonus, {
+            "availability_rate": float(availability_rate),
+            "availability_ref": float(ref),
+            "availability_gate": float(gate),
+            "critical_365": float(critical_365),
+            "health_credit_pct": float(bonus_pct),
+            "health_credit_cap": float(cap),
+            "health_credit": float(bonus.total),
+        }
 
     # -------------------------------------------------------------------------
     # Pick pricing
