@@ -251,6 +251,32 @@ def _trade_rule_get(trade_rules: Mapping[str, Any], *keys: str) -> Any:
     return None
 
 
+
+
+def _extract_injury_injection_settings(trade_rules: Mapping[str, Any]) -> Tuple[int, Optional[Sequence[str]]]:
+    """Extract optional injury injection knobs for valuation data context.
+
+    Supported keys (flat or valuation.* namespace):
+    - injury_lookback_days
+    - critical_body_parts
+    """
+    lookback_raw = _trade_rule_get(trade_rules, "injury_lookback_days")
+    try:
+        lookback_days = int(lookback_raw) if lookback_raw is not None else 365
+    except Exception:
+        lookback_days = 365
+    lookback_days = max(1, lookback_days)
+
+    critical_raw = _trade_rule_get(trade_rules, "critical_body_parts")
+    critical_parts: Optional[Sequence[str]]
+    if isinstance(critical_raw, Sequence) and not isinstance(critical_raw, (str, bytes, bytearray)):
+        normalized = [str(x).strip().upper() for x in critical_raw if str(x).strip()]
+        critical_parts = normalized or None
+    else:
+        critical_parts = None
+
+    return lookback_days, critical_parts
+
 def _build_team_config(*, salary_cap: Optional[float], trade_rules: Mapping[str, Any]) -> TeamUtilityConfig:
     base = TeamUtilityConfig(salary_cap=salary_cap) if salary_cap is not None else TeamUtilityConfig()
 
@@ -497,6 +523,8 @@ def evaluate_deal_for_team(
         ctx = build_decision_context(team_situation=ts_eval, gm_traits=gm_traits, team_id=tid)
 
     # 4) Build valuation provider (trade assets + contract ledger + pick expectations)
+    trade_rules = _extract_trade_rules_from_league_ctx(ts_ctx) or {}
+    injury_lookback_days, injury_critical_body_parts = _extract_injury_injection_settings(trade_rules)
     if tick_ctx is not None:
         provider = getattr(tick_ctx, "provider", None)
         # Optional override path (debug/experiments): if caller provides expectations/order explicitly,
@@ -515,6 +543,8 @@ def evaluate_deal_for_team(
                 repo=repo_obj,
                 assets_snapshot=(assets_snap if isinstance(assets_snap, dict) else None),
                 contract_ledger=(ledger_snap if isinstance(ledger_snap, dict) else None),
+                injury_lookback_days=int(injury_lookback_days),
+                injury_critical_body_parts=injury_critical_body_parts,
             )
     else:
         order = standings_order_worst_to_best or _build_standings_order_worst_to_best(ts_ctx)
@@ -524,12 +554,13 @@ def evaluate_deal_for_team(
             current_date_iso=cd.isoformat(),
             standings_order_worst_to_best=order,
             pick_expectations=pick_expectations,
+            injury_lookback_days=int(injury_lookback_days),
+            injury_critical_body_parts=injury_critical_body_parts,
         )
 
     # 5) Pure valuation (market -> team utility -> package effects)
     #
     # SSOT: build valuation runtime env once and pass it down the pure pipeline.
-    trade_rules = _extract_trade_rules_from_league_ctx(ts_ctx) or {}
     env = ValuationEnv.from_trade_rules(trade_rules, current_season_year=int(season_year))
 
     # Cap-normalized valuation: keep config.salary_cap populated for legacy

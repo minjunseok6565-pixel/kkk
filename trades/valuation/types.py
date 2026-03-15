@@ -17,6 +17,7 @@ from typing import (
     Union,
     Literal,
     runtime_checkable,
+    TypedDict,
 )
 
 # NOTE:
@@ -198,6 +199,63 @@ class ValuationStep:
     factor: Optional[float] = None
     meta: Dict[str, Any] = field(default_factory=dict)
 
+
+
+
+# -----------------------------------------------------------------------------
+# 2.5) Injury payload typing (optional metadata schema for PlayerSnapshot.meta["injury"])
+# -----------------------------------------------------------------------------
+class InjurySourcePayload(TypedDict):
+    current: str
+    history: str
+
+
+class InjuryCurrentPayload(TypedDict):
+    status: str
+    is_out: bool
+    is_returning: bool
+    days_to_return: int
+    body_part: Optional[str]
+    severity: Optional[int]
+    out_until_date: Optional[str]
+    returning_until_date: Optional[str]
+
+
+class InjuryHistoryPayload(TypedDict):
+    window_days: int
+    recent_count_30d: int
+    recent_count_180d: int
+    recent_count_365d: int
+    critical_count_365d: int
+    same_part_repeat_365d_max: int
+    same_part_counts_365d: Dict[str, int]
+    avg_severity_365d: float
+    weighted_severity_365d: float
+    last_injury_date: Optional[str]
+    days_since_last_injury: Optional[int]
+
+
+class InjuryHealthCreditInputs(TypedDict):
+    availability_rate_365d: float
+    healthy_days_365d: int
+    out_days_365d: int
+    returning_days_365d: int
+
+
+class InjuryFlagsPayload(TypedDict):
+    current_missing: bool
+    history_missing: bool
+    fallback_used: bool
+
+
+class InjuryPayload(TypedDict):
+    version: int
+    as_of_date: str
+    source: InjurySourcePayload
+    current: InjuryCurrentPayload
+    history: InjuryHistoryPayload
+    health_credit_inputs: InjuryHealthCreditInputs
+    flags: InjuryFlagsPayload
 
 # -----------------------------------------------------------------------------
 # 3) Asset snapshots (DB/Repo에서 읽은 값을 "평가 가능한 형태"로 표준화)
