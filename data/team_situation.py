@@ -1329,7 +1329,11 @@ class TeamSituationEvaluator:
             w = _clamp((base + adj + eff_add) * eff_mult, 0.0, 1.0)
 
             effective_min_emit = max(0.0, float(cfg.min_emit_weight) - weak * relax_max)
-            if w < effective_min_emit:
+            tau = max(1e-6, float(cfg.soft_gate_tau))
+            z = _clamp((w - effective_min_emit) / tau, -60.0, 60.0)
+            gate = 1.0 / (1.0 + math.exp(-z))
+            w = _clamp(w * gate, 0.0, 1.0)
+            if w <= 1e-9:
                 return
             tag = _prefix_if_short(_role_key(role, phase), buckets)
             needs.append(
