@@ -593,7 +593,7 @@ class TeamUtilityAdjuster:
                 stage=ValuationStage.TEAM,
                 mode=StepMode.MUL,
                 code="RISK_DISCOUNT",
-                label="리스크 회피 할인(나이/계약 기반)",
+                label="리스크 회피 할인(나이/계약+부상 기반)",
                 factor=factor,
                 meta={
                     "risk_discount_scale": scale,
