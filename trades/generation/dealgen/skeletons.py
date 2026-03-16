@@ -87,7 +87,6 @@ def build_offer_skeletons_buy(
     if bool(getattr(config, "skeleton_overhaul_enabled", True)):
         registry = build_default_registry()
         target_profile = classify_target_profile(target=target, config=config)
-        target_tier = str(target_profile.get("tier") or "STARTER")
         ctx = BuildContext(
             mode="BUY",
             buyer_id=buyer_id,
@@ -390,7 +389,6 @@ def build_offer_skeletons_sell(
     if bool(getattr(config, "skeleton_overhaul_enabled", True)):
         registry = build_default_registry()
         target_profile = classify_target_profile(sale_asset=sale_asset, match_tag=match_tag, config=config)
-        target_tier = str(target_profile.get("tier") or "STARTER")
         ctx = BuildContext(
             mode="SELL",
             buyer_id=buyer_id,
