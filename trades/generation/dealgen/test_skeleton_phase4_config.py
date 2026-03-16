@@ -82,6 +82,11 @@ class SkeletonPhase4ConfigTests(unittest.TestCase):
         self.assertIn("player_swap.one_for_two_depth", cfg.skeleton_route_starter)
         self.assertIn("player_swap.one_for_two_depth", cfg.skeleton_route_high_starter)
 
+    def test_route_tables_expose_garbage_tier(self):
+        cfg = DealGeneratorConfig()
+        self.assertTrue(hasattr(cfg, "skeleton_route_garbage"))
+        self.assertIn("compat.picks_only", cfg.skeleton_route_garbage)
+
 
 if __name__ == "__main__":
     unittest.main()

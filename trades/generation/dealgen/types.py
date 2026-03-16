@@ -186,7 +186,7 @@ class DealGeneratorConfig:
         "pick_engineering.second_ladder_to_protected_first",
         "pick_engineering.swap_purchase",
     )
-    skeleton_route_garbege: Tuple[str, ...] = (
+    skeleton_route_garbage: Tuple[str, ...] = (
         "compat.picks_only",
         "player_swap.bench_bundle_for_role",
         "player_swap.change_of_scenery_young",

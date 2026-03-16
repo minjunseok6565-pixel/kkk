@@ -256,7 +256,7 @@ def _soft_tier_memberships(score: float, *, band: float) -> Dict[str, float]:
         ("STARTER", 0.45, 0.65),
         ("HIGH_ROTATION", 0.28, 0.45),
         ("ROTATION", 0.10, 0.28),
-        ("GARBEGE", 0.00, 0.10),
+        ("GARBAGE", 0.00, 0.10),
     )
     out: Dict[str, float] = {}
     for name, lo, hi in intervals:
@@ -357,7 +357,7 @@ def _apply_tier_hysteresis(
         "STARTER",
         "HIGH_ROTATION",
         "ROTATION",
-        "GARBEGE",
+        "GARBAGE",
     ]
     if prev not in memberships or prev not in order:
         return memberships
@@ -370,7 +370,7 @@ def _apply_tier_hysteresis(
         "STARTER": (0.45, 0.65),
         "HIGH_ROTATION": (0.28, 0.45),
         "ROTATION": (0.10, 0.28),
-        "GARBEGE": (0.00, 0.10),
+        "GARBAGE": (0.00, 0.10),
     }
     lo, hi = bounds[prev]
     s = _clamp01(score)
@@ -450,7 +450,7 @@ def classify_target_profile(
     """Classify focal asset into skill tier + contract value tag.
 
     Output keys:
-    - tier: MVP/ALL_NBA/ALL_STAR/HIGH_STARTER/STARTER/HIGH_ROTATION/ROTATION/GARBEGE
+    - tier: MVP/ALL_NBA/ALL_STAR/HIGH_STARTER/STARTER/HIGH_ROTATION/ROTATION/GARBAGE
     - contract_tag: overpay|fair|value
     - tier_confidence: high|medium|low (distance from nearest boundary)
     - contract_confidence: high|medium|low
