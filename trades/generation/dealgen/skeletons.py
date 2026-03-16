@@ -22,7 +22,7 @@ from .utils import (
     _pick_return_player_salaryish_with_need,
     _split_young_candidates,
     _shape_ok,
-    classify_target_tier,
+    classify_target_profile,
 )
 
 
@@ -86,7 +86,7 @@ def build_offer_skeletons_buy(
 
     if bool(getattr(config, "skeleton_overhaul_enabled", True)):
         registry = build_default_registry()
-        target_tier = classify_target_tier(target=target, config=config)
+        target_profile = classify_target_profile(target=target, config=config)
         ctx = BuildContext(
             mode="BUY",
             buyer_id=buyer_id,
@@ -388,7 +388,7 @@ def build_offer_skeletons_sell(
 
     if bool(getattr(config, "skeleton_overhaul_enabled", True)):
         registry = build_default_registry()
-        target_tier = classify_target_tier(sale_asset=sale_asset, match_tag=match_tag, config=config)
+        target_profile = classify_target_profile(sale_asset=sale_asset, match_tag=match_tag, config=config)
         ctx = BuildContext(
             mode="SELL",
             buyer_id=buyer_id,
