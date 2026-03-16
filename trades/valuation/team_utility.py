@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, Tuple, List, Mapping
+
+import math
 
 from decision_context import DecisionContext
 
@@ -84,6 +86,22 @@ def _vc(now: float = 0.0, future: float = 0.0) -> ValueComponents:
     return ValueComponents(float(now), float(future))
 
 
+def _sigmoid(x: float) -> float:
+    if x >= 0:
+        z = math.exp(-x)
+        return 1.0 / (1.0 + z)
+    z = math.exp(x)
+    return z / (1.0 + z)
+
+
+def _soft_count(x: float, k: float) -> float:
+    xv = max(_safe_float(x, 0.0), 0.0)
+    kv = max(_safe_float(k, 0.0), 0.0)
+    if kv <= 0.0:
+        return 0.0
+    return 1.0 - math.exp(-kv * xv)
+
+
 def _scale_components(v: ValueComponents, *, now_factor: float = 1.0, future_factor: float = 1.0) -> ValueComponents:
     return ValueComponents(v.now * float(now_factor), v.future * float(future_factor))
 
@@ -140,6 +158,50 @@ class TeamUtilityConfig:
     risk_age_end: float = 36.0
     risk_contract_years_start: float = 2.0
     risk_contract_years_end: float = 5.0
+    risk_base_weight_age_term: float = 1.00
+    risk_injury_hist_weight: float = 0.85
+    risk_injury_current_weight: float = 1.00
+    risk_squash_center: float = 0.55
+    risk_squash_scale: float = 0.18
+    risk_scale_multiplier: float = 0.35
+
+    # Injury history signals (soft-count)
+    risk_injury_soft_k_recent: float = 0.28
+    risk_injury_soft_k_critical: float = 0.65
+    risk_injury_soft_k_repeat: float = 0.72
+    risk_injury_soft_k_severity: float = 0.45
+    risk_injury_hist_weight_recent: float = 0.22
+    risk_injury_hist_weight_critical: float = 0.36
+    risk_injury_hist_weight_repeat: float = 0.30
+    risk_injury_hist_weight_severity: float = 0.12
+
+    # Current injury signals
+    risk_current_status_weight: float = 0.55
+    risk_current_critical_part_bonus: float = 0.25
+    risk_current_severity_scale: float = 0.20
+    risk_current_days_weight: float = 0.35
+    risk_current_days_t30: float = 30.0
+    risk_current_days_t180: float = 180.0
+    risk_current_days_s30: float = 10.0
+    risk_current_days_s180: float = 24.0
+    risk_current_out_multiplier: float = 1.00
+    risk_current_returning_multiplier: float = 0.55
+    risk_current_severity_max: float = 5.0
+
+    # Healthy relief (risk reduction, never inversion)
+    risk_health_relief_weight: float = 0.22
+    risk_health_relief_availability_ref: float = 0.90
+    risk_health_relief_availability_scale: float = 0.06
+    risk_health_relief_low_critical_ref: float = 0.25
+    risk_health_relief_low_repeat_ref: float = 0.25
+    risk_health_relief_cap: float = 0.30
+
+    # Critical body parts used for current injury risk uplift
+    risk_critical_body_parts: Tuple[str, ...] = (
+        "KNEE",
+        "BACK",
+        "HAMSTRING",
+    )
 
     # --- Finance penalty (team preference)
     # IMPORTANT (cap-normalized salary scale)
@@ -505,11 +567,25 @@ class TeamUtilityAdjuster:
             years = _safe_float(snap.contract.years, 0.0)
         term_risk = _normalize_0_1(years, lo=cfg.risk_contract_years_start, hi=cfg.risk_contract_years_end)
 
-        # 단순 합성(0..1)
-        risk_score = _clamp(0.65 * age_risk + 0.35 * term_risk, 0.0, 1.0)
+        age_term_risk = _clamp(0.65 * age_risk + 0.35 * term_risk, 0.0, 1.0)
+
+        injury_inputs = self._extract_injury_inputs(snap)
+        injury_hist_risk, injury_hist_meta = self._injury_history_risk(injury_inputs)
+        injury_current_risk, injury_current_meta = self._injury_current_risk(injury_inputs)
+        health_relief, health_relief_meta = self._health_relief(injury_inputs)
+
+        raw = (
+            _safe_float(cfg.risk_base_weight_age_term, 1.0) * age_term_risk
+            + _safe_float(cfg.risk_injury_hist_weight, 0.85) * injury_hist_risk
+            + _safe_float(cfg.risk_injury_current_weight, 1.0) * injury_current_risk
+            - _safe_float(cfg.risk_health_relief_weight, 0.22) * health_relief
+        )
+        center = _safe_float(cfg.risk_squash_center, 0.55)
+        squash_scale = max(_safe_float(cfg.risk_squash_scale, 0.18), self.config.fit.eps)
+        risk_score = _sigmoid((raw - center) / squash_scale)
 
         # scale이 클수록 더 할인
-        factor = 1.0 - scale * 0.35 * risk_score
+        factor = 1.0 - scale * _safe_float(cfg.risk_scale_multiplier, 0.35) * risk_score
         factor = _clamp(factor, cfg.risk_factor_floor, cfg.risk_factor_cap)
 
         steps.append(
@@ -525,11 +601,166 @@ class TeamUtilityAdjuster:
                     "contract_years": years,
                     "age_risk": age_risk,
                     "term_risk": term_risk,
+                    "age_term_risk": age_term_risk,
+                    "injury_payload_present": bool(injury_inputs.get("injury_payload_present", False)),
+                    "injury_fallback_used": bool(injury_inputs.get("fallback_used", False)),
+                    "injury_hist_risk": injury_hist_risk,
+                    "injury_current_risk": injury_current_risk,
+                    "health_relief": health_relief,
+                    "risk_raw": raw,
+                    "risk_squash_center": center,
+                    "risk_squash_scale": squash_scale,
                     "risk_score": risk_score,
+                    **injury_hist_meta,
+                    **injury_current_meta,
+                    **health_relief_meta,
                 },
             )
         )
         return v.scale(factor)
+
+    def _extract_injury_inputs(self, snap: PlayerSnapshot) -> Dict[str, Any]:
+        meta = snap.meta if isinstance(snap.meta, dict) else {}
+        payload = meta.get("injury") if isinstance(meta.get("injury"), Mapping) else {}
+        flags = payload.get("flags") if isinstance(payload.get("flags"), Mapping) else {}
+        current = payload.get("current") if isinstance(payload.get("current"), Mapping) else {}
+        history = payload.get("history") if isinstance(payload.get("history"), Mapping) else {}
+        health = payload.get("health_credit_inputs") if isinstance(payload.get("health_credit_inputs"), Mapping) else {}
+
+        return {
+            "injury_payload_present": isinstance(payload, Mapping) and bool(payload),
+            "fallback_used": bool(flags.get("fallback_used", False)),
+            "current": dict(current),
+            "history": dict(history),
+            "health": dict(health),
+        }
+
+    def _injury_history_risk(self, inputs: Mapping[str, Any]) -> Tuple[float, Dict[str, Any]]:
+        cfg = self.config
+        history = inputs.get("history") if isinstance(inputs.get("history"), Mapping) else {}
+
+        recent_180 = max(_safe_float(history.get("recent_count_180d"), 0.0), 0.0)
+        critical_365 = max(_safe_float(history.get("critical_count_365d"), 0.0), 0.0)
+        repeat_same = max(_safe_float(history.get("same_part_repeat_365d_max"), 0.0) - 1.0, 0.0)
+        weighted_severity = max(_safe_float(history.get("weighted_severity_365d"), 0.0), 0.0)
+        sev_signal = max(weighted_severity - 1.0, 0.0)
+
+        fr = _soft_count(recent_180, cfg.risk_injury_soft_k_recent)
+        fc = _soft_count(critical_365, cfg.risk_injury_soft_k_critical)
+        fp = _soft_count(repeat_same, cfg.risk_injury_soft_k_repeat)
+        fs = _soft_count(sev_signal, cfg.risk_injury_soft_k_severity)
+
+        wr = _clamp(_safe_float(cfg.risk_injury_hist_weight_recent, 0.22), 0.0, 1.0)
+        wc = _clamp(_safe_float(cfg.risk_injury_hist_weight_critical, 0.36), 0.0, 1.0)
+        wp = _clamp(_safe_float(cfg.risk_injury_hist_weight_repeat, 0.30), 0.0, 1.0)
+        ws = _clamp(_safe_float(cfg.risk_injury_hist_weight_severity, 0.12), 0.0, 1.0)
+        wsum = max(wr + wc + wp + ws, self.config.fit.eps)
+
+        risk = _clamp((wr * fr + wc * fc + wp * fp + ws * fs) / wsum, 0.0, 1.0)
+        return risk, {
+            "inj_hist_recent_180": recent_180,
+            "inj_hist_critical_365": critical_365,
+            "inj_hist_repeat_same": repeat_same,
+            "inj_hist_weighted_severity_365d": weighted_severity,
+            "inj_hist_fr": fr,
+            "inj_hist_fc": fc,
+            "inj_hist_fp": fp,
+            "inj_hist_fs": fs,
+        }
+
+    def _injury_current_risk(self, inputs: Mapping[str, Any]) -> Tuple[float, Dict[str, Any]]:
+        cfg = self.config
+        current = inputs.get("current") if isinstance(inputs.get("current"), Mapping) else {}
+
+        status = str(current.get("status") or "UNKNOWN").upper()
+        is_out = bool(current.get("is_out", status == "OUT"))
+        is_returning = bool(current.get("is_returning", status == "RETURNING"))
+        is_active = is_out or is_returning
+
+        severity = max(_safe_float(current.get("severity"), 0.0), 0.0)
+        sev_norm = _clamp(severity / max(_safe_float(cfg.risk_current_severity_max, 5.0), self.config.fit.eps), 0.0, 1.0)
+
+        body_part = str(current.get("body_part") or "").upper().strip()
+        critical_parts = {str(x).upper().strip() for x in cfg.risk_critical_body_parts}
+        is_critical_part = bool(body_part) and body_part in critical_parts
+
+        days_to_return = max(_safe_float(current.get("days_to_return"), 0.0), 0.0)
+        t30 = max(_safe_float(cfg.risk_current_days_t30, 30.0), 1.0)
+        t180 = max(_safe_float(cfg.risk_current_days_t180, 180.0), t30 + 1.0)
+        s30 = max(_safe_float(cfg.risk_current_days_s30, 10.0), self.config.fit.eps)
+        s180 = max(_safe_float(cfg.risk_current_days_s180, 24.0), self.config.fit.eps)
+        g30 = _sigmoid((days_to_return - t30) / s30)
+        g180 = _sigmoid((days_to_return - t180) / s180)
+        mid = _clamp((days_to_return - t30) / max(t180 - t30, self.config.fit.eps), 0.0, 1.0)
+        day_gate = _clamp(0.45 * g30 * mid + 0.55 * g180, 0.0, 1.0)
+
+        status_mult = 0.0
+        if is_out:
+            status_mult = _clamp(_safe_float(cfg.risk_current_out_multiplier, 1.0), 0.0, 1.5)
+        elif is_returning:
+            status_mult = _clamp(_safe_float(cfg.risk_current_returning_multiplier, 0.55), 0.0, 1.5)
+
+        if not is_active:
+            return 0.0, {
+                "inj_cur_status": status,
+                "inj_cur_is_out": is_out,
+                "inj_cur_is_returning": is_returning,
+                "inj_cur_body_part": body_part or None,
+                "inj_cur_is_critical_part": bool(is_critical_part),
+                "inj_cur_severity": severity,
+                "inj_cur_sev_norm": sev_norm,
+                "inj_cur_days_to_return": days_to_return,
+                "inj_cur_day_gate": day_gate,
+            }
+
+        base = _clamp(_safe_float(cfg.risk_current_status_weight, 0.55), 0.0, 1.0)
+        part_bonus = _safe_float(cfg.risk_current_critical_part_bonus, 0.25) if is_critical_part else 0.0
+        sev_term = _clamp(_safe_float(cfg.risk_current_severity_scale, 0.20), 0.0, 1.0) * sev_norm
+        day_term = _clamp(_safe_float(cfg.risk_current_days_weight, 0.35), 0.0, 1.0) * day_gate
+
+        risk = _clamp(status_mult * (base + part_bonus + sev_term + day_term), 0.0, 1.0)
+        return risk, {
+            "inj_cur_status": status,
+            "inj_cur_is_out": is_out,
+            "inj_cur_is_returning": is_returning,
+            "inj_cur_body_part": body_part or None,
+            "inj_cur_is_critical_part": bool(is_critical_part),
+            "inj_cur_severity": severity,
+            "inj_cur_sev_norm": sev_norm,
+            "inj_cur_days_to_return": days_to_return,
+            "inj_cur_day_gate": day_gate,
+            "inj_cur_status_mult": status_mult,
+        }
+
+    def _health_relief(self, inputs: Mapping[str, Any]) -> Tuple[float, Dict[str, Any]]:
+        cfg = self.config
+        history = inputs.get("history") if isinstance(inputs.get("history"), Mapping) else {}
+        health = inputs.get("health") if isinstance(inputs.get("health"), Mapping) else {}
+
+        availability = _clamp(_safe_float(health.get("availability_rate_365d"), 1.0), 0.0, 1.0)
+        critical_365 = max(_safe_float(history.get("critical_count_365d"), 0.0), 0.0)
+        repeat_same = max(_safe_float(history.get("same_part_repeat_365d_max"), 0.0) - 1.0, 0.0)
+
+        avail_ref = _clamp(_safe_float(cfg.risk_health_relief_availability_ref, 0.90), 0.0, 1.0)
+        avail_scale = max(_safe_float(cfg.risk_health_relief_availability_scale, 0.06), self.config.fit.eps)
+        avail_gate = _sigmoid((availability - avail_ref) / avail_scale)
+
+        low_critical_ref = max(_safe_float(cfg.risk_health_relief_low_critical_ref, 0.25), 0.0)
+        low_repeat_ref = max(_safe_float(cfg.risk_health_relief_low_repeat_ref, 0.25), 0.0)
+        critical_clean = _clamp(1.0 - (critical_365 / max(low_critical_ref, self.config.fit.eps)), 0.0, 1.0)
+        repeat_clean = _clamp(1.0 - (repeat_same / max(low_repeat_ref, self.config.fit.eps)), 0.0, 1.0)
+        clean_mix = (critical_clean + repeat_clean) * 0.5
+
+        cap = _clamp(_safe_float(cfg.risk_health_relief_cap, 0.30), 0.0, 1.0)
+        relief = _clamp(avail_gate * clean_mix, 0.0, cap)
+        return relief, {
+            "health_availability_rate": availability,
+            "health_availability_gate": avail_gate,
+            "health_critical_365": critical_365,
+            "health_repeat_same": repeat_same,
+            "health_clean_mix": clean_mix,
+            "health_relief_cap": cap,
+        }
 
     # -------------------------------------------------------------------------
     # 5) Finance penalty (players)
@@ -616,4 +847,3 @@ class TeamUtilityAdjuster:
             )
         )
         return v.scale(factor)
-

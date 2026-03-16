@@ -259,6 +259,87 @@ class InjuryPayloadInjectionTests(unittest.TestCase):
 
         self.assertEqual(payload['history']['critical_count_365d'], 1)
 
+    def test_severity_is_normalized_and_current_severity_norm_is_present(self):
+        conn = self._conn_with_injury_tables()
+        conn.execute(
+            """
+            INSERT INTO player_injury_state(player_id, team_id, status, body_part, severity)
+            VALUES ('p1', 'LAL', 'OUT', 'BACK', 9);
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO injury_events(
+                injury_id, player_id, team_id, season_year, date, context, body_part,
+                injury_type, severity, duration_days, out_until_date, returning_days,
+                returning_until_date, temp_debuff_json, perm_drop_json, created_at
+            ) VALUES (
+                'e1', 'p1', 'LAL', 2026, '2026-03-01', 'game', 'back',
+                'SPASM', 12, 7, '2026-03-08', 0, '2026-03-08', '{}', '{}', '2026-03-01'
+            );
+            """
+        )
+        conn.commit()
+
+        payload = build_injury_payloads_for_players(
+            conn=conn,
+            player_ids=['p1'],
+            as_of_date_iso='2026-03-15',
+        )['p1']
+
+        self.assertEqual(payload['current']['severity'], 5)
+        self.assertAlmostEqual(payload['current']['severity_norm'], 1.0, places=6)
+        self.assertLessEqual(payload['history']['avg_severity_365d'], 5.0)
+
+    def test_history_includes_recent_weighted_count_signal(self):
+        conn = self._conn_with_injury_tables()
+        for i, d in enumerate(("2026-03-10", "2026-02-20"), start=1):
+            conn.execute(
+                """
+                INSERT INTO injury_events(
+                    injury_id, player_id, team_id, season_year, date, context, body_part,
+                    injury_type, severity, duration_days, out_until_date, returning_days,
+                    returning_until_date, temp_debuff_json, perm_drop_json, created_at
+                ) VALUES (?, 'p1', 'LAL', 2026, ?, 'game', 'knee', 'SPRAIN', 2, 5, ?, 0, ?, '{}', '{}', ?)
+                """,
+                (f"e{i}", d, d, d, d),
+            )
+        conn.commit()
+
+        payload = build_injury_payloads_for_players(
+            conn=conn,
+            player_ids=['p1'],
+            as_of_date_iso='2026-03-15',
+        )['p1']
+
+        self.assertIn('recent_weighted_count_180d', payload['history'])
+        self.assertGreater(payload['history']['recent_weighted_count_180d'], 0.0)
+
+
+    def test_default_critical_body_parts_include_hamstring(self):
+        conn = self._conn_with_injury_tables()
+        conn.execute(
+            """
+            INSERT INTO injury_events(
+                injury_id, player_id, team_id, season_year, date, context, body_part,
+                injury_type, severity, duration_days, out_until_date, returning_days,
+                returning_until_date, temp_debuff_json, perm_drop_json, created_at
+            ) VALUES (
+                'e_ham', 'p1', 'LAL', 2026, '2026-03-01', 'game', 'hamstring',
+                'STRAIN', 2, 7, '2026-03-08', 3, '2026-03-11', '{}', '{}', '2026-03-01'
+            );
+            """
+        )
+        conn.commit()
+
+        payload = build_injury_payloads_for_players(
+            conn=conn,
+            player_ids=['p1'],
+            as_of_date_iso='2026-03-15',
+        )['p1']
+
+        self.assertEqual(payload['history']['critical_count_365d'], 1)
+
 
     def test_builder_loads_injury_payload_even_when_assets_and_ledger_are_injected(self):
         class _FakeRepo:
