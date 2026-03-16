@@ -79,49 +79,51 @@ class DealGeneratorConfig:
     max_picks_per_side: int = 4
     max_seconds_per_side: int = 4
 
-    # --- target tier routing (phase-4)
-    skeleton_route_role: Tuple[str, ...] = (
+    # --- target tier routing (8-tier)
+    skeleton_route_mvp: Tuple[str, ...] = (
         "compat.picks_only",
-        "compat.young_plus_pick",
-        "compat.p4p_salary",
         "compat.consolidate_2_for_1",
-        "player_swap.role_swap_small_delta",
-        "player_swap.fit_swap_2_for_2",
-        "player_swap.one_for_two_depth",
-        "player_swap.bench_bundle_for_role",
-        "player_swap.change_of_scenery_young",
-        "timeline.veteran_for_young",
-        "salary_cleanup.rental_expiring_plus_second",
-        "salary_cleanup.pure_absorb_for_asset",
-        "salary_cleanup.partial_dump_for_expiring",
-        "salary_cleanup.bad_money_swap",
-        "pick_engineering.first_split",
-        "pick_engineering.second_ladder_to_protected_first",
-        "pick_engineering.swap_purchase",
-        "pick_engineering.swap_substitute_for_first",
-    )
-    skeleton_route_starter: Tuple[str, ...] = (
-        "compat.picks_only",
-        "compat.young_plus_pick",
         "compat.p4p_salary",
-        "compat.consolidate_2_for_1",
-        "player_swap.role_swap_small_delta",
-        "player_swap.fit_swap_2_for_2",
-        "player_swap.one_for_two_depth",
         "player_swap.starter_for_two_rotation",
         "player_swap.three_for_one_upgrade",
-        "player_swap.bench_bundle_for_role",
-        "player_swap.change_of_scenery_young",
-        "timeline.veteran_for_young",
+        "player_swap.star_lateral_plus_delta",
         "timeline.veteran_for_young_plus_protected_first",
-        "salary_cleanup.rental_expiring_plus_second",
-        "salary_cleanup.pure_absorb_for_asset",
+        "timeline.bluechip_plus_first_plus_swap",
+        "salary_cleanup.partial_dump_for_expiring",
+        "salary_cleanup.bad_money_swap",
+        "pick_engineering.first_split",
+        "pick_engineering.swap_substitute_for_first",
+    )
+    skeleton_route_all_nba: Tuple[str, ...] = (
+        "compat.picks_only",
+        "compat.young_plus_pick",
+        "compat.p4p_salary",
+        "compat.consolidate_2_for_1",
+        "player_swap.fit_swap_2_for_2",
+        "player_swap.starter_for_two_rotation",
+        "player_swap.three_for_one_upgrade",
+        "player_swap.star_lateral_plus_delta",
+        "timeline.veteran_for_young_plus_protected_first",
+        "timeline.bluechip_plus_first_plus_swap",
         "salary_cleanup.partial_dump_for_expiring",
         "salary_cleanup.bad_money_swap",
         "pick_engineering.first_split",
         "pick_engineering.second_ladder_to_protected_first",
+    )
+    skeleton_route_all_star: Tuple[str, ...] = (
+        "compat.picks_only",
+        "compat.young_plus_pick",
+        "compat.p4p_salary",
+        "compat.consolidate_2_for_1",
+        "player_swap.role_swap_small_delta",
+        "player_swap.fit_swap_2_for_2",
+        "player_swap.starter_for_two_rotation",
+        "player_swap.three_for_one_upgrade",
+        "timeline.veteran_for_young_plus_protected_first",
+        "salary_cleanup.partial_dump_for_expiring",
+        "salary_cleanup.bad_money_swap",
+        "pick_engineering.first_split",
         "pick_engineering.swap_purchase",
-        "pick_engineering.swap_substitute_for_first",
     )
     skeleton_route_high_starter: Tuple[str, ...] = (
         "compat.picks_only",
@@ -133,26 +135,66 @@ class DealGeneratorConfig:
         "player_swap.one_for_two_depth",
         "player_swap.starter_for_two_rotation",
         "player_swap.three_for_one_upgrade",
-        "player_swap.star_lateral_plus_delta",
         "timeline.veteran_for_young",
         "timeline.veteran_for_young_plus_protected_first",
-        "timeline.bluechip_plus_first_plus_swap",
         "salary_cleanup.rental_expiring_plus_second",
-        "salary_cleanup.pure_absorb_for_asset",
         "salary_cleanup.partial_dump_for_expiring",
         "salary_cleanup.bad_money_swap",
         "pick_engineering.first_split",
         "pick_engineering.second_ladder_to_protected_first",
-        "pick_engineering.swap_purchase",
-        "pick_engineering.swap_substitute_for_first",
     )
-    skeleton_route_pick_only: Tuple[str, ...] = (
+    skeleton_route_starter: Tuple[str, ...] = (
         "compat.picks_only",
+        "compat.young_plus_pick",
+        "compat.p4p_salary",
+        "compat.consolidate_2_for_1",
+        "player_swap.role_swap_small_delta",
+        "player_swap.fit_swap_2_for_2",
+        "player_swap.one_for_two_depth",
+        "player_swap.starter_for_two_rotation",
+        "player_swap.bench_bundle_for_role",
+        "timeline.veteran_for_young",
+        "salary_cleanup.rental_expiring_plus_second",
+        "salary_cleanup.partial_dump_for_expiring",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+    )
+    skeleton_route_high_rotation: Tuple[str, ...] = (
+        "compat.picks_only",
+        "compat.young_plus_pick",
+        "compat.p4p_salary",
+        "player_swap.role_swap_small_delta",
+        "player_swap.one_for_two_depth",
+        "player_swap.bench_bundle_for_role",
+        "player_swap.change_of_scenery_young",
+        "timeline.veteran_for_young",
+        "salary_cleanup.rental_expiring_plus_second",
+        "salary_cleanup.pure_absorb_for_asset",
+        "pick_engineering.first_split",
+        "pick_engineering.swap_purchase",
+    )
+    skeleton_route_rotation: Tuple[str, ...] = (
+        "compat.picks_only",
+        "compat.young_plus_pick",
+        "player_swap.role_swap_small_delta",
+        "player_swap.one_for_two_depth",
+        "player_swap.bench_bundle_for_role",
+        "player_swap.change_of_scenery_young",
+        "salary_cleanup.rental_expiring_plus_second",
+        "salary_cleanup.pure_absorb_for_asset",
+        "pick_engineering.first_split",
+        "pick_engineering.second_ladder_to_protected_first",
+        "pick_engineering.swap_purchase",
+    )
+    skeleton_route_garbege: Tuple[str, ...] = (
+        "compat.picks_only",
+        "player_swap.bench_bundle_for_role",
+        "player_swap.change_of_scenery_young",
+        "salary_cleanup.pure_absorb_for_asset",
         "pick_engineering.first_split",
         "pick_engineering.second_ladder_to_protected_first",
         "pick_engineering.swap_purchase",
         "pick_engineering.swap_substitute_for_first",
-        "salary_cleanup.pure_absorb_for_asset",
     )
 
     # --- sweetener loop
@@ -465,6 +507,7 @@ class DealGeneratorStats:
     skeleton_id_counts: Dict[str, int] = field(default_factory=dict)
     skeleton_domain_counts: Dict[str, int] = field(default_factory=dict)
     target_tier_counts: Dict[str, int] = field(default_factory=dict)
+    contract_tag_counts: Dict[str, int] = field(default_factory=dict)
     arch_compat_counts: Dict[str, int] = field(default_factory=dict)
     modifier_trace_counts: Dict[str, int] = field(default_factory=dict)
 
@@ -528,6 +571,7 @@ class DealCandidate:
     skeleton_id: str = ""
     skeleton_domain: str = ""
     target_tier: str = ""
+    contract_tag: str = ""
     compat_archetype: str = ""
     modifier_trace: List[str] = field(default_factory=list)
 

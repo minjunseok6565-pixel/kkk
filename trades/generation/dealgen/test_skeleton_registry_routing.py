@@ -31,13 +31,13 @@ class SkeletonRegistryRoutingTests(unittest.TestCase):
     def test_tier_route_filters_by_config_allowlist(self):
         reg = build_default_registry()
         cfg = DealGeneratorConfig(
-            skeleton_route_pick_only=(
+            skeleton_route_rotation=(
                 "compat.picks_only",
                 "pick_engineering.first_split",
             )
         )
 
-        specs = reg.get_specs_for_mode_and_tier("BUY", "PICK_ONLY", cfg)
+        specs = reg.get_specs_for_mode_and_tier("BUY", "ROTATION", cfg)
         ids = [s.skeleton_id for s in specs]
 
         self.assertEqual(ids, ["compat.picks_only", "pick_engineering.first_split"])
@@ -46,24 +46,24 @@ class SkeletonRegistryRoutingTests(unittest.TestCase):
         reg = build_default_registry()
         cfg = DealGeneratorConfig()
 
-        role_specs = reg.get_specs_for_mode_and_tier("BUY", "ROLE", cfg)
-        role_ids = {s.skeleton_id for s in role_specs}
+        rotation_specs = reg.get_specs_for_mode_and_tier("BUY", "ROTATION", cfg)
+        rotation_ids = {s.skeleton_id for s in rotation_specs}
         starter_specs = reg.get_specs_for_mode_and_tier("BUY", "STARTER", cfg)
         starter_ids = {s.skeleton_id for s in starter_specs}
 
-        self.assertIn("player_swap.bench_bundle_for_role", role_ids)
-        self.assertNotIn("timeline.bluechip_plus_first_plus_swap", role_ids)
+        self.assertIn("player_swap.bench_bundle_for_role", rotation_ids)
+        self.assertNotIn("timeline.bluechip_plus_first_plus_swap", rotation_ids)
         self.assertIn("player_swap.one_for_two_depth", starter_ids)
 
-    def test_star_uses_high_starter_route_table(self):
+    def test_mvp_uses_mvp_route_table(self):
         reg = build_default_registry()
         cfg = DealGeneratorConfig(
-            skeleton_route_high_starter=(
+            skeleton_route_mvp=(
                 "player_swap.star_lateral_plus_delta",
                 "timeline.bluechip_plus_first_plus_swap",
             )
         )
-        specs = reg.get_specs_for_mode_and_tier("BUY", "STAR", cfg)
+        specs = reg.get_specs_for_mode_and_tier("BUY", "MVP", cfg)
         ids = [s.skeleton_id for s in specs]
         self.assertEqual(ids, ["player_swap.star_lateral_plus_delta", "timeline.bluechip_plus_first_plus_swap"])
 

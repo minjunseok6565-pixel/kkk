@@ -41,7 +41,7 @@ def _with_core_tags(tags: List[str], *, mode: str, focal_player_id: str, archety
     return out
 
 
-def _attach_v3_meta(candidate: DealCandidate, *, spec: object, target_tier: str) -> None:
+def _attach_v3_meta(candidate: DealCandidate, *, spec: object, target_tier: str, contract_tag: str) -> None:
     skeleton_id = str(getattr(spec, "skeleton_id", "") or "")
     domain = str(getattr(spec, "domain", "") or "")
     compat = str(getattr(spec, "compat_archetype", "") or candidate.archetype)
@@ -52,6 +52,7 @@ def _attach_v3_meta(candidate: DealCandidate, *, spec: object, target_tier: str)
         candidate.skeleton_domain = domain
     candidate.compat_archetype = compat
     candidate.target_tier = str(target_tier).upper()
+    candidate.contract_tag = str(contract_tag).upper()
     candidate.archetype = compat
 
     if not isinstance(candidate.tags, list):
@@ -61,6 +62,7 @@ def _attach_v3_meta(candidate: DealCandidate, *, spec: object, target_tier: str)
         f"skeleton:{candidate.skeleton_id}",
         f"domain:{candidate.skeleton_domain}",
         f"target_tier:{candidate.target_tier}",
+        f"contract_tag:{candidate.contract_tag}",
         f"arch_compat:{candidate.compat_archetype}",
         f"arch:{candidate.archetype}",
     ):
@@ -87,6 +89,8 @@ def build_offer_skeletons_buy(
     if bool(getattr(config, "skeleton_overhaul_enabled", True)):
         registry = build_default_registry()
         target_profile = classify_target_profile(target=target, config=config)
+        target_tier = str(target_profile.get("tier") or "STARTER")
+        contract_tag = str(target_profile.get("contract_tag") or "FAIR")
         ctx = BuildContext(
             mode="BUY",
             buyer_id=buyer_id,
@@ -102,10 +106,10 @@ def build_offer_skeletons_buy(
             banned_receivers_by_player=banned_receivers_by_player,
         )
         out_v3: List[DealCandidate] = []
-        for spec in registry.get_specs_for_mode_and_tier("BUY", target_tier, config, ctx=ctx):
+        for spec in registry.get_specs_for_mode_and_tier("BUY", target_tier, config, ctx=ctx, contract_tag=contract_tag):
             built = spec.build_fn(ctx)
             for cand in built:
-                _attach_v3_meta(cand, spec=spec, target_tier=target_tier)
+                _attach_v3_meta(cand, spec=spec, target_tier=target_tier, contract_tag=contract_tag)
             out_v3.extend(built)
         out_v3 = apply_modifiers(
             out_v3,
@@ -121,6 +125,8 @@ def build_offer_skeletons_buy(
                 c.compat_archetype = c.archetype
             if not c.target_tier:
                 c.target_tier = str(target_tier).upper()
+            if not c.contract_tag:
+                c.contract_tag = str(contract_tag).upper()
             if _shape_ok(c.deal, config=config, catalog=catalog):
                 trimmed_v3.append(c)
         return trimmed_v3[: max(2, int(budget.beam_width))]
@@ -389,6 +395,8 @@ def build_offer_skeletons_sell(
     if bool(getattr(config, "skeleton_overhaul_enabled", True)):
         registry = build_default_registry()
         target_profile = classify_target_profile(sale_asset=sale_asset, match_tag=match_tag, config=config)
+        target_tier = str(target_profile.get("tier") or "STARTER")
+        contract_tag = str(target_profile.get("contract_tag") or "FAIR")
         ctx = BuildContext(
             mode="SELL",
             buyer_id=buyer_id,
@@ -405,10 +413,10 @@ def build_offer_skeletons_sell(
             banned_receivers_by_player=banned_receivers_by_player,
         )
         out_v3: List[DealCandidate] = []
-        for spec in registry.get_specs_for_mode_and_tier("SELL", target_tier, config, ctx=ctx):
+        for spec in registry.get_specs_for_mode_and_tier("SELL", target_tier, config, ctx=ctx, contract_tag=contract_tag):
             built = spec.build_fn(ctx)
             for cand in built:
-                _attach_v3_meta(cand, spec=spec, target_tier=target_tier)
+                _attach_v3_meta(cand, spec=spec, target_tier=target_tier, contract_tag=contract_tag)
             out_v3.extend(built)
         out_v3 = apply_modifiers(
             out_v3,
@@ -424,6 +432,8 @@ def build_offer_skeletons_sell(
                 c.compat_archetype = c.archetype
             if not c.target_tier:
                 c.target_tier = str(target_tier).upper()
+            if not c.contract_tag:
+                c.contract_tag = str(contract_tag).upper()
             if _shape_ok(c.deal, config=config, catalog=catalog):
                 trimmed_v3.append(c)
         return trimmed_v3[: max(2, int(budget.beam_width))]
