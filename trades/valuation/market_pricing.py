@@ -116,6 +116,13 @@ def _soft_count(x: float, k: float) -> float:
     return 1.0 - math.exp(-kv * xv)
 
 
+def _normalize_option_type(value: Any) -> str:
+    v = str(value or "").strip().upper()
+    if v in {"TEAM", "PLAYER", "ETO"}:
+        return v
+    return "PLAYER"
+
+
 # =============================================================================
 # Config: curves & weights (tunable, deterministic)
 # =============================================================================
@@ -180,6 +187,17 @@ class MarketPricingConfig:
     contract_year_discount_rate: float = 0.12
     contract_value_abs_cap: float = 40.0
     contract_fallback_years_cap: int = 6
+
+    # Contract option value (added on top of contract surplus delta).
+    # TEAM option: always + (team-favorable control)
+    # PLAYER/ETO option: always - (team-side uncertainty), with salary mismatch shaping magnitude.
+    option_value_base_units: float = 0.30
+    option_pending_probability: float = 0.75
+    option_mismatch_alpha: float = 0.45
+    option_mismatch_beta_cap_share: float = 0.05
+    option_mismatch_min_mult: float = 0.65
+    option_mismatch_max_mult: float = 1.45
+    option_value_abs_cap: float = 2.0
 
     contract_efficiency_factor_floor: float = 0.70
     contract_efficiency_factor_cap: float = 1.35
@@ -656,7 +674,13 @@ class MarketPricer:
                 }
             )
 
-        delta = ValueComponents(now_units, fut_units)
+        base_delta = ValueComponents(now_units, fut_units)
+        option_delta, option_rows = self._contract_option_value_delta(
+            snap,
+            env=env,
+            fair_pct=float(fair_pct),
+        )
+        delta = base_delta + option_delta
         delta = self._clamp_abs_mass(delta, cfg.contract_value_abs_cap)
 
         meta = {
@@ -665,9 +689,89 @@ class MarketPricer:
             "fair_salary_pct": fair_pct,
             "terms_meta": terms.meta,
             "rows": rows,
+            "base_delta": {"now": base_delta.now, "future": base_delta.future, "total": base_delta.total},
+            "option_rows": option_rows,
+            "option_delta": {"now": option_delta.now, "future": option_delta.future, "total": option_delta.total},
             "delta": {"now": delta.now, "future": delta.future, "total": delta.total},
         }
         return delta, meta
+
+    def _contract_option_value_delta(
+        self,
+        snap: PlayerSnapshot,
+        *,
+        env: ValuationEnv,
+        fair_pct: float,
+    ) -> Tuple[ValueComponents, List[Dict[str, Any]]]:
+        cfg = self.config
+        c = snap.contract
+        if c is None or not c.options:
+            return ValueComponents.zero(), []
+
+        if cfg.option_value_base_units <= cfg.eps:
+            return ValueComponents.zero(), []
+
+        cur = int(env.current_season_year)
+        now_units = 0.0
+        fut_units = 0.0
+        rows: List[Dict[str, Any]] = []
+
+        for opt in c.options:
+            year = int(_safe_int(getattr(opt, "season_year", 0), 0))
+            if year < cur:
+                continue
+
+            raw_status = str(getattr(opt, "status", "") or "").strip().upper()
+            if raw_status == "DECLINED":
+                p_active = 0.0
+            elif raw_status == "EXERCISED":
+                p_active = 1.0
+            else:
+                p_active = float(_clamp(cfg.option_pending_probability, 0.0, 1.0))
+            if p_active <= cfg.eps:
+                continue
+
+            opt_type = _normalize_option_type(getattr(opt, "type", ""))
+            sign = 1.0 if opt_type == "TEAM" else -1.0
+
+            cap_y = float(env.cap_model.salary_cap_for_season(int(year)))
+            if cap_y <= cfg.eps:
+                continue
+            salary_y = float(_safe_float(c.salary_by_year.get(int(year)), 0.0))
+            fair_y = cap_y * float(fair_pct)
+            mismatch_cap_share = (salary_y - fair_y) / max(cap_y, cfg.eps)
+            beta = max(float(cfg.option_mismatch_beta_cap_share), cfg.eps)
+            gm = 1.0 + float(cfg.option_mismatch_alpha) * math.tanh(float(mismatch_cap_share) / beta)
+            gm = _clamp(gm, float(cfg.option_mismatch_min_mult), float(cfg.option_mismatch_max_mult))
+
+            years_ahead = max(int(year) - int(cur), 0)
+            disc = (1.0 - cfg.contract_year_discount_rate) ** years_ahead
+            disc = _clamp(disc, 0.35, 1.00)
+
+            units = sign * float(cfg.option_value_base_units) * float(gm) * float(p_active) * float(disc)
+            if int(year) == int(cur):
+                now_units += units
+            else:
+                fut_units += units
+
+            rows.append(
+                {
+                    "year": int(year),
+                    "type": str(opt_type),
+                    "status": str(raw_status or "PENDING"),
+                    "cap": cap_y,
+                    "salary": salary_y,
+                    "fair_salary": fair_y,
+                    "mismatch_cap_share": mismatch_cap_share,
+                    "mismatch_mult": gm,
+                    "p_active": p_active,
+                    "disc": disc,
+                    "units": units,
+                }
+            )
+
+        out = self._clamp_abs_mass(ValueComponents(now_units, fut_units), float(cfg.option_value_abs_cap))
+        return out, rows
 
 
     def _ovr_to_now_value(self, ovr: float) -> float:
