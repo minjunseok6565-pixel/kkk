@@ -518,29 +518,6 @@ def classify_target_profile(
     }
 
 
-def classify_target_tier(
-    *,
-    target: Optional[Any] = None,
-    sale_asset: Optional[Any] = None,
-    match_tag: str = "",
-    config: Optional[DealGeneratorConfig] = None,
-) -> str:
-    """Classify focal player tier only (compat wrapper).
-
-    New implementation computes both skill tier and contract tag via
-    classify_target_profile(); this wrapper returns tier for legacy callers.
-    """
-    profile = classify_target_profile(
-        target=target,
-        sale_asset=sale_asset,
-        match_tag=match_tag,
-        config=config,
-    )
-    return str(profile.get("tier") or "STARTER")
-
-
-
-
 # -----------------------------------------------------------------------------
 # Cap space helpers (shared)
 # -----------------------------------------------------------------------------
