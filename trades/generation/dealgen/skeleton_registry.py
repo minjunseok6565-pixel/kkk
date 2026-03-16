@@ -72,7 +72,7 @@ class SkeletonRegistry:
             "STARTER": "skeleton_route_starter",
             "HIGH_ROTATION": "skeleton_route_high_rotation",
             "ROTATION": "skeleton_route_rotation",
-            "GARBEGE": "skeleton_route_garbege",
+            "GARBAGE": "skeleton_route_garbage",
         }
         route_attr = route_attr_map.get(tier_upper)
         route_ids = tuple(getattr(config, route_attr, tuple()) or tuple()) if route_attr else tuple()
@@ -111,7 +111,7 @@ class SkeletonRegistry:
         return out
 
 
-ALL_TARGET_TIERS: Tuple[str, ...] = ("MVP", "ALL_NBA", "ALL_STAR", "HIGH_STARTER", "STARTER", "HIGH_ROTATION", "ROTATION", "GARBEGE")
+ALL_TARGET_TIERS: Tuple[str, ...] = ("MVP", "ALL_NBA", "ALL_STAR", "HIGH_STARTER", "STARTER", "HIGH_ROTATION", "ROTATION", "GARBAGE")
 
 
 def build_default_registry() -> SkeletonRegistry:
@@ -259,7 +259,7 @@ def build_default_registry() -> SkeletonRegistry:
             domain="player_swap",
             compat_archetype="consolidate_2_for_1",
             mode_allow=("BUY", "SELL"),
-            target_tiers=("HIGH_STARTER", "STARTER", "HIGH_ROTATION", "ROTATION", "GARBEGE"),
+            target_tiers=("HIGH_STARTER", "STARTER", "HIGH_ROTATION", "ROTATION", "GARBAGE"),
             priority=53,
             build_fn=build_one_for_two_depth,
             gate_fn=lambda ctx: bool(ctx.target is not None or ctx.sale_asset is not None),
@@ -280,7 +280,7 @@ def build_default_registry() -> SkeletonRegistry:
             domain="player_swap",
             compat_archetype="consolidate_2_for_1",
             mode_allow=("BUY", "SELL"),
-            target_tiers=("STARTER", "HIGH_ROTATION", "ROTATION", "GARBEGE"),
+            target_tiers=("STARTER", "HIGH_ROTATION", "ROTATION", "GARBAGE"),
             priority=55,
             build_fn=build_bench_bundle_for_role,
         ),
@@ -289,7 +289,7 @@ def build_default_registry() -> SkeletonRegistry:
             domain="player_swap",
             compat_archetype="young_plus_pick",
             mode_allow=("BUY", "SELL"),
-            target_tiers=("STARTER", "HIGH_ROTATION", "ROTATION", "GARBEGE"),
+            target_tiers=("STARTER", "HIGH_ROTATION", "ROTATION", "GARBAGE"),
             priority=56,
             build_fn=build_change_of_scenery_young,
         ),
@@ -307,7 +307,7 @@ def build_default_registry() -> SkeletonRegistry:
             domain="timeline",
             compat_archetype="young_plus_pick",
             mode_allow=("BUY", "SELL"),
-            target_tiers=("HIGH_STARTER", "STARTER", "HIGH_ROTATION", "ROTATION", "GARBEGE"),
+            target_tiers=("HIGH_STARTER", "STARTER", "HIGH_ROTATION", "ROTATION", "GARBAGE"),
             priority=60,
             build_fn=build_veteran_for_young,
         ),
@@ -334,7 +334,7 @@ def build_default_registry() -> SkeletonRegistry:
             domain="salary_cleanup",
             compat_archetype="p4p_salary",
             mode_allow=("BUY", "SELL"),
-            target_tiers=("STARTER", "HIGH_ROTATION", "ROTATION", "GARBEGE"),
+            target_tiers=("STARTER", "HIGH_ROTATION", "ROTATION", "GARBAGE"),
             priority=70,
             build_fn=build_rental_expiring_plus_second,
         ),
