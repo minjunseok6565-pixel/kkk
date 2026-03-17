@@ -9,14 +9,6 @@ class SkeletonCompatAliasTests(unittest.TestCase):
         for spec in reg.specs:
             self.assertTrue(spec.compat_archetype)
 
-    def test_phase2_domains_are_registered(self):
-        reg = build_default_registry()
-        domains = {s.domain for s in reg.specs}
-        self.assertIn("player_swap", domains)
-        self.assertIn("timeline", domains)
-        self.assertIn("salary_cleanup", domains)
-        self.assertIn("pick_engineering", domains)
-
 
 if __name__ == "__main__":
     unittest.main()

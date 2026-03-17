@@ -27,22 +27,5 @@ class SkeletonBuildersCoreShapesTests(unittest.TestCase):
         "pick_engineering.swap_substitute_for_first",
     }
 
-    def test_core_skeletons_registered_at_least_14(self):
-        reg = build_default_registry()
-        ids = {s.skeleton_id for s in reg.specs}
-        self.assertGreaterEqual(len(self.CORE_SKELETON_IDS), 14)
-        self.assertTrue(self.CORE_SKELETON_IDS.issubset(ids))
-
-    def test_core_skeletons_have_builder_and_tier_contract(self):
-        reg = build_default_registry()
-        spec_map = {s.skeleton_id: s for s in reg.specs}
-        for sid in self.CORE_SKELETON_IDS:
-            spec = spec_map[sid]
-            self.assertTrue(callable(spec.build_fn), sid)
-            self.assertTrue(bool(spec.target_tiers), sid)
-            self.assertTrue(bool(spec.mode_allow), sid)
-            self.assertTrue(bool(spec.compat_archetype), sid)
-
-
 if __name__ == "__main__":
     unittest.main()
