@@ -58,8 +58,8 @@ class SkeletonPhase4ConfigTests(unittest.TestCase):
         high_profile = classify_target_profile(target=high, config=DealGeneratorConfig())
         role_profile = classify_target_profile(target=role, config=DealGeneratorConfig())
 
-        self.assertEqual(high_profile.get("tier"), "HIGH_STARTER")
-        self.assertEqual(role_profile.get("tier"), "HIGH_ROTATION")
+        self.assertEqual(high_profile.get("tier"), "GARBAGE")
+        self.assertEqual(role_profile.get("tier"), "GARBAGE")
         self.assertEqual(high_profile.get("contract_tag"), "fair")
         self.assertEqual(role_profile.get("contract_tag"), "fair")
 
@@ -73,8 +73,22 @@ class SkeletonPhase4ConfigTests(unittest.TestCase):
             top_tags=("VETERAN_SALE",),
         )
         sale_profile = classify_target_profile(sale_asset=sale, match_tag="pick_bridge", config=DealGeneratorConfig())
-        self.assertEqual(sale_profile.get("tier"), "STARTER")
+        self.assertEqual(sale_profile.get("tier"), "GARBAGE")
         self.assertEqual(sale_profile.get("contract_tag"), "fair")
+
+    def test_classify_target_profile_ovr_hardcut_boundaries(self):
+        class Probe:
+            def __init__(self, ovr: float):
+                self.ovr = ovr
+
+        self.assertEqual(classify_target_profile(target=Probe(97.0)).get("tier"), "MVP")
+        self.assertEqual(classify_target_profile(target=Probe(93.0)).get("tier"), "ALL_NBA")
+        self.assertEqual(classify_target_profile(target=Probe(90.0)).get("tier"), "ALL_STAR")
+        self.assertEqual(classify_target_profile(target=Probe(85.0)).get("tier"), "HIGH_STARTER")
+        self.assertEqual(classify_target_profile(target=Probe(80.0)).get("tier"), "STARTER")
+        self.assertEqual(classify_target_profile(target=Probe(77.0)).get("tier"), "HIGH_ROTATION")
+        self.assertEqual(classify_target_profile(target=Probe(75.0)).get("tier"), "ROTATION")
+        self.assertEqual(classify_target_profile(target=Probe(74.0)).get("tier"), "GARBAGE")
 
     def test_route_tables_include_tier_score_skeletons(self):
         cfg = DealGeneratorConfig()

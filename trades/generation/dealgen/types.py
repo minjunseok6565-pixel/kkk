@@ -582,6 +582,7 @@ class TargetCandidate:
     salary_m: float
     remaining_years: float
     age: Optional[float]
+    ovr: Optional[float] = None
 
 
 @dataclass(frozen=True, slots=True)

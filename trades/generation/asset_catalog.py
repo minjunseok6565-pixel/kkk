@@ -298,6 +298,8 @@ class IncomingPlayerRef:
     contract_gap_cap_share: float = 0.0
     expected_cap_share_avg: float = 0.0
     actual_cap_share_avg: float = 0.0
+    # optional OVR passthrough for OVR-only target tiering
+    ovr: Optional[float] = None
     # multi-tag supply profile for need-similarity scoring (tag, strength in [0,1])
     supply_items: Tuple[Tuple[str, float], ...] = tuple()
 
@@ -1497,6 +1499,7 @@ def build_trade_asset_catalog(
                 contract_gap_cap_share=float((incoming_player_value_by_id.get(c.player_id) or {}).get("contract_gap_cap_share", 0.0) or 0.0),
                 expected_cap_share_avg=float((incoming_player_value_by_id.get(c.player_id) or {}).get("expected_cap_share_avg", 0.0) or 0.0),
                 actual_cap_share_avg=float((incoming_player_value_by_id.get(c.player_id) or {}).get("actual_cap_share_avg", 0.0) or 0.0),
+                ovr=_safe_float(getattr(c.snap, "ovr", None), None),
                 supply_items=tuple(supply_items_t),
             )
             incoming_all_players_by_id[c.player_id] = all_ref
