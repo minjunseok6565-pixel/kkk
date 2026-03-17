@@ -69,6 +69,9 @@ def handle_pass(
     )
 
     q_detail = None
+    q_context = getattr(getattr(defense, "tactics", None), "context", {})
+    if not isinstance(q_context, Mapping):
+        q_context = {}
     try:
         if debug_q:
             q_detail = quality.compute_quality_score(
@@ -77,6 +80,7 @@ def handle_pass(
                 outcome=outcome,
                 role_players=role_players,
                 get_stat=engine_get_stat,
+                context=q_context,
                 return_detail=True,
             )
             q_score = float(q_detail.score)
@@ -88,6 +92,7 @@ def handle_pass(
                     outcome=outcome,
                     role_players=role_players,
                     get_stat=engine_get_stat,
+                    context=q_context,
                 )
             )
     except Exception as e:
