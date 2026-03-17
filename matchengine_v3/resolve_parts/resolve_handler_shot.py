@@ -56,6 +56,9 @@ def handle_shot(
         debug_detail_key=("def_role_players_detail" if debug_q else None),
     )
     q_detail = None
+    q_context = getattr(getattr(defense, "tactics", None), "context", {})
+    if not isinstance(q_context, Mapping):
+        q_context = {}
     try:
         if debug_q:
             q_detail = quality.compute_quality_score(
@@ -64,6 +67,7 @@ def handle_shot(
                 outcome=outcome,
                 role_players=role_players,
                 get_stat=engine_get_stat,
+                context=q_context,
                 return_detail=True,
             )
             q_score = float(q_detail.score)
@@ -74,6 +78,7 @@ def handle_shot(
                 outcome=outcome,
                 role_players=role_players,
                 get_stat=engine_get_stat,
+                context=q_context,
             ))
     except Exception as e:
         _record_exception("quality_compute_shot", e)
@@ -300,4 +305,3 @@ def handle_shot(
 
         clear_pass_tracking(ctx)
         return "MISS", _with_matchup(payload)
-

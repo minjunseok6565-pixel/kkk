@@ -35,6 +35,11 @@ LABEL_SCORE: Dict[str, int] = {
 
 DEFAULT_NEUTRAL_STAT = 50.0
 
+_DEF_QUALITY_LABEL_OVERRIDES_CTX_KEY = "DEF_QUALITY_LABEL_OVERRIDES_V1"
+_DEF_QUALITY_LABEL_OVERRIDES_VERSION = 1
+_ALLOWED_PRESET_OVERRIDE_LABELS = {"weak", "tight", "neutral"}
+_PRESET_DEFENSE_SCHEME_KEY = "프리셋-수비"
+
 @dataclass(frozen=True)
 class QualityConfig:
     # How much player defense (vs 50) moves the quality score.
@@ -152,18 +157,87 @@ def outcome_kind(outcome: str) -> str:
         return "reset"
     return "other"
 
-def get_base_quality_label(scheme: str, base_action: str, outcome: str) -> str:
-    scheme = canonical_scheme(scheme)
-    label = (
-        SCHEME_BASE_OUTCOME_LABELS
-        .get(scheme, {})
-        .get(base_action, {})
-        .get(outcome, "neutral")
-    )
-    return normalize_label(label)
+def _extract_preset_override_label(context: Optional[Mapping[str, Any]], base_action: str, outcome: str) -> Optional[str]:
+    if not isinstance(context, Mapping):
+        return None
 
-def get_base_quality_score(scheme: str, base_action: str, outcome: str) -> int:
-    return LABEL_SCORE[get_base_quality_label(scheme, base_action, outcome)]
+    raw = context.get(_DEF_QUALITY_LABEL_OVERRIDES_CTX_KEY)
+    if not isinstance(raw, Mapping):
+        return None
+
+    version = raw.get("version", _DEF_QUALITY_LABEL_OVERRIDES_VERSION)
+    try:
+        version_i = int(version)
+    except Exception:
+        return None
+    if version_i != _DEF_QUALITY_LABEL_OVERRIDES_VERSION:
+        return None
+
+    actions = raw.get("actions")
+    if not isinstance(actions, Mapping):
+        return None
+    outcome_map = actions.get(base_action)
+    if not isinstance(outcome_map, Mapping):
+        return None
+    if outcome not in outcome_map:
+        return None
+
+    raw_label = outcome_map.get(outcome)
+    if raw_label is None:
+        return None
+    label = str(raw_label).strip().lower().replace(" ", "_").replace("-", "_")
+    if label.startswith("neutral"):
+        return "neutral"
+    if label in _ALLOWED_PRESET_OVERRIDE_LABELS:
+        return label
+    return None
+
+
+def resolve_base_quality_label(
+    scheme: str,
+    base_action: str,
+    outcome: str,
+    *,
+    context: Optional[Mapping[str, Any]] = None,
+) -> Tuple[str, str, bool]:
+    """Resolve base quality label with optional Preset_Defense-only context override.
+
+    Returns (label, label_source, override_hit).
+    label_source is one of: "override", "scheme_table", "fallback_neutral".
+    """
+    scheme_c = canonical_scheme(scheme)
+
+    if scheme_c == _PRESET_DEFENSE_SCHEME_KEY:
+        override = _extract_preset_override_label(context, base_action, outcome)
+        if override is not None:
+            return override, "override", True
+
+    scheme_map = SCHEME_BASE_OUTCOME_LABELS.get(scheme_c, {})
+    action_map = scheme_map.get(base_action, {}) if isinstance(scheme_map, Mapping) else {}
+    if isinstance(action_map, Mapping) and outcome in action_map:
+        return normalize_label(action_map.get(outcome, "neutral")), "scheme_table", False
+
+    return "neutral", "fallback_neutral", False
+
+
+def get_base_quality_label(
+    scheme: str,
+    base_action: str,
+    outcome: str,
+    *,
+    context: Optional[Mapping[str, Any]] = None,
+) -> str:
+    return resolve_base_quality_label(scheme, base_action, outcome, context=context)[0]
+
+
+def get_base_quality_score(
+    scheme: str,
+    base_action: str,
+    outcome: str,
+    *,
+    context: Optional[Mapping[str, Any]] = None,
+) -> int:
+    return LABEL_SCORE[get_base_quality_label(scheme, base_action, outcome, context=context)]
 
 def get_outcome_group(outcome: str) -> str:
     gid = OUTCOME_TO_GROUP.get(outcome, "unknown")
@@ -233,6 +307,8 @@ class QualityDetail:
     def_index: float
     stat_delta: float
     score: float
+    label_source: str = "scheme_table"
+    override_hit: bool = False
     role_scores: Dict[str, float] = field(default_factory=dict)
     role_weights: Dict[str, float] = field(default_factory=dict)
 
@@ -244,6 +320,7 @@ def compute_quality_score(
     *,
     config: QualityConfig = QualityConfig(),
     get_stat: Callable[[Any, str, float], float] = default_get_stat,
+    context: Optional[Mapping[str, Any]] = None,
     return_detail: bool = False,
 ) -> float | QualityDetail:
     """
@@ -272,10 +349,17 @@ def compute_quality_score(
                 def_index=DEFAULT_NEUTRAL_STAT,
                 stat_delta=0.0,
                 score=0.0,
+                label_source="fallback_neutral",
+                override_hit=False,
             )
         return 0.0
 
-    base_label = get_base_quality_label(scheme_c, base_action, outcome)
+    base_label, label_source, override_hit = resolve_base_quality_label(
+        scheme_c,
+        base_action,
+        outcome,
+        context=context,
+    )
     base_score = float(LABEL_SCORE.get(base_label, 0))
 
     role_weights = get_scheme_role_weights(scheme_c, outcome)
@@ -319,6 +403,8 @@ def compute_quality_score(
             def_index=def_index,
             stat_delta=stat_delta,
             score=score,
+            label_source=label_source,
+            override_hit=override_hit,
             role_scores=role_scores,
             role_weights=role_weights,
         )
