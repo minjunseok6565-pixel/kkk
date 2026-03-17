@@ -76,16 +76,16 @@ class SkeletonPhase4ConfigTests(unittest.TestCase):
         self.assertEqual(sale_profile.get("tier"), "STARTER")
         self.assertEqual(sale_profile.get("contract_tag"), "fair")
 
-    def test_route_tables_include_new_depth_skeleton(self):
+    def test_route_tables_include_tier_score_skeletons(self):
         cfg = DealGeneratorConfig()
-        self.assertIn("player_swap.one_for_two_depth", cfg.skeleton_route_high_rotation)
-        self.assertIn("player_swap.one_for_two_depth", cfg.skeleton_route_starter)
-        self.assertIn("player_swap.one_for_two_depth", cfg.skeleton_route_high_starter)
+        self.assertIn("high_rotation.mixed", cfg.skeleton_route_high_rotation)
+        self.assertIn("starter.mixed", cfg.skeleton_route_starter)
+        self.assertIn("high_starter.mixed", cfg.skeleton_route_high_starter)
 
     def test_route_tables_expose_garbage_tier(self):
         cfg = DealGeneratorConfig()
         self.assertTrue(hasattr(cfg, "skeleton_route_garbage"))
-        self.assertIn("compat.picks_only", cfg.skeleton_route_garbage)
+        self.assertIn("garbage.garbage", cfg.skeleton_route_garbage)
 
 
 if __name__ == "__main__":
