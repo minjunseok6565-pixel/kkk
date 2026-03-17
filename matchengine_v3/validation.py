@@ -164,6 +164,19 @@ _MAX_DEF_QUALITY_OVERRIDE_OUTCOMES_PER_ACTION = 64
 _MAX_DEF_QUALITY_OVERRIDE_TOTAL_ENTRIES = 512
 
 
+_PRESET_DEFENSE_OVERRIDE_ALLOWED_ACTIONS = {
+    "Cut",
+    "DHO",
+    "Drive",
+    "ISO",
+    "PnP",
+    "PnR",
+    "PostUp",
+    "SpotUp",
+    "TransitionEarly",
+}
+
+
 def _sanitize_def_quality_label_overrides(
     raw: Any,
     *,
@@ -492,7 +505,7 @@ def sanitize_tactics_config(
                 continue
             clean_override = _sanitize_def_quality_label_overrides(
                 v,
-                allowed_actions=allowed.offense_actions,
+                allowed_actions=_PRESET_DEFENSE_OVERRIDE_ALLOWED_ACTIONS,
                 allowed_outcomes=allowed.outcomes,
                 report=report,
                 path=f"{label}.context.{k}",

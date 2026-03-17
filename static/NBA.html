@@ -634,6 +634,15 @@
               <span class="tactics-scheme-desc">PnR 대응과 로테이션 안정성 조정</span>
             </button>
             <div id="tactics-defense-options" class="tactics-options hidden"></div>
+            <button
+              type="button"
+              id="preset-defense-open-btn"
+              class="btn btn-secondary hidden"
+              aria-haspopup="dialog"
+              aria-controls="preset-defense-modal"
+            >
+              프리셋 수비 상세 설정
+            </button>
           </div>
         </section>
 
@@ -711,6 +720,35 @@
           <div class="modal-actions">
             <button type="button" id="preset-offense-reset-btn" class="btn btn-secondary">초기화</button>
             <button type="button" id="preset-offense-apply-btn" class="btn btn-primary">적용</button>
+          </div>
+          <span tabindex="0" aria-hidden="true" data-focus-sentinel="end"></span>
+        </div>
+      </div>
+
+      <div
+        id="preset-defense-modal"
+        class="modal hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="preset-defense-modal-title"
+        aria-describedby="preset-defense-modal-desc"
+        aria-hidden="true"
+      >
+        <div id="preset-defense-modal-backdrop" class="modal-backdrop" data-close="preset-defense-modal"></div>
+        <div class="modal-card" role="document" tabindex="-1">
+          <span tabindex="0" aria-hidden="true" data-focus-sentinel="start"></span>
+          <div class="modal-header">
+            <h3 id="preset-defense-modal-title">Preset Defense 상세 설정</h3>
+            <button type="button" id="preset-defense-close-btn" class="btn btn-secondary" aria-label="모달 닫기">닫기</button>
+          </div>
+          <p id="preset-defense-modal-desc" class="subtitle">액션 버짓과 억제 정책, 전역 압박 강도를 설정합니다.</p>
+          <div id="preset-defense-errors" class="empty-copy" role="status" aria-live="polite"></div>
+          <form id="preset-defense-form" class="modal-body" novalidate>
+            <p class="empty-copy">프리셋 수비 상세 설정 UI가 여기에 렌더됩니다.</p>
+          </form>
+          <div class="modal-actions">
+            <button type="button" id="preset-defense-reset-btn" class="btn btn-secondary">초기화</button>
+            <button type="button" id="preset-defense-apply-btn" class="btn btn-primary">적용</button>
           </div>
           <span tabindex="0" aria-hidden="true" data-focus-sentinel="end"></span>
         </div>

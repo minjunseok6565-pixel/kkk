@@ -17,6 +17,7 @@ import {
   saveTacticsDraft,
   hasUnsavedTacticsChanges,
   openPresetOffenseModal,
+  openPresetDefenseModal,
 } from "../features/tactics/tacticsScreen.js";
 import { showScheduleScreen } from "../features/schedule/scheduleScreen.js";
 import { showTrainingScreen } from "../features/training/trainingScreen.js";
@@ -90,6 +91,7 @@ function bindEvents() {
   els.tacticsOffenseBtn.addEventListener("click", () => toggleTacticsOptions("offense"));
   els.tacticsDefenseBtn.addEventListener("click", () => toggleTacticsOptions("defense"));
   els.presetOffenseOpenBtn?.addEventListener("click", () => openPresetOffenseModal());
+  els.presetDefenseOpenBtn?.addEventListener("click", () => openPresetDefenseModal());
   els.standingsMenuBtn.addEventListener("click", () => showStandingsScreen().catch((e) => alert(e.message)));
   els.collegeMenuBtn.addEventListener("click", () => showCollegeScreen().catch((e) => alert(e.message)));
   els.medicalMenuBtn.addEventListener("click", () => showMedicalScreen().catch((e) => alert(e.message)));
