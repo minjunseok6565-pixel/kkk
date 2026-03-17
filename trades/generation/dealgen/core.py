@@ -32,6 +32,7 @@ from .repair import repair_until_valid
 from .scoring import evaluate_and_score, _proposal_from_cached_eval, _should_discard_prop
 from .pick_protection_decorator import maybe_apply_pick_protection_variants
 from .sweetener import maybe_apply_sweeteners
+from .template_fallback_policy import decide_fallback_after_template_stage
 
 # =============================================================================
 # DealGenerator
@@ -748,15 +749,17 @@ def _generate_buy_mode(
             candidates=template_candidates,
         )
 
-        should_fallback = False
-        if template_built <= 0:
-            stats.bump_failure("template_stage_empty")
-            should_fallback = True
-        elif template_kept < min_keep:
-            stats.bump_failure("template_stage_all_discarded")
-            should_fallback = True
+        fallback_decision = decide_fallback_after_template_stage(
+            template_enabled=template_enabled,
+            fallback_enabled=fallback_enabled,
+            template_candidates_built=template_built,
+            template_proposals_kept=template_kept,
+            min_keep_after_eval=min_keep,
+        )
+        if fallback_decision.reason in {"template_stage_empty", "template_stage_all_discarded"}:
+            stats.bump_failure(fallback_decision.reason)
 
-        if not fallback_enabled or not should_fallback:
+        if not fallback_decision.should_fallback:
             continue
         if _budget_or_hard_cap_reached(stats, budget, config):
             continue
@@ -1201,15 +1204,17 @@ def _generate_sell_mode(
                 candidates=template_candidates,
             )
 
-            should_fallback = False
-            if template_built <= 0:
-                stats.bump_failure("template_stage_empty")
-                should_fallback = True
-            elif template_kept < min_keep:
-                stats.bump_failure("template_stage_all_discarded")
-                should_fallback = True
+            fallback_decision = decide_fallback_after_template_stage(
+                template_enabled=template_enabled,
+                fallback_enabled=fallback_enabled,
+                template_candidates_built=template_built,
+                template_proposals_kept=template_kept,
+                min_keep_after_eval=min_keep,
+            )
+            if fallback_decision.reason in {"template_stage_empty", "template_stage_all_discarded"}:
+                stats.bump_failure(fallback_decision.reason)
 
-            if not fallback_enabled or not should_fallback:
+            if not fallback_decision.should_fallback:
                 continue
             if _budget_or_hard_cap_reached(stats, budget, config):
                 continue
