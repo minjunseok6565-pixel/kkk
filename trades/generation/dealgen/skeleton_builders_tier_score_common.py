@@ -80,8 +80,7 @@ def _is_sendable_player(ctx: BuildContext, cand: PlayerTradeCandidate) -> bool:
 
 def _player_points(cand: PlayerTradeCandidate, ctx: BuildContext) -> float:
     probe = SimpleNamespace(
-        market_total=float(getattr(getattr(cand, "market", None), "total", 0.0) or 0.0),
-        basketball_total=float(getattr(getattr(cand, "market", None), "total", 0.0) or 0.0),
+        ovr=getattr(getattr(cand, "snap", None), "ovr", None),
         contract_gap_cap_share=0.0,
     )
     tier = str(classify_target_profile(target=probe, config=ctx.config).get("tier") or "GARBAGE").upper()

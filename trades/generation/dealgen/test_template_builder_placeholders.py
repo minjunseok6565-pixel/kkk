@@ -74,6 +74,7 @@ class TemplateBuilderPlaceholdersTests(unittest.TestCase):
             "p_send": SimpleNamespace(
                 player_id="p_send",
                 market=SimpleNamespace(total=70.0),
+                snap=SimpleNamespace(ovr=97.0),
                 salary_m=20.0,
                 remaining_years=3.0,
                 return_ban_teams=tuple(),

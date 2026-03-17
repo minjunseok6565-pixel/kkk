@@ -614,6 +614,7 @@ def select_targets_buy(
                     salary_m=float(ref.salary_m),
                     remaining_years=float(ref.remaining_years),
                     age=ref.age,
+                    ovr=ref.ovr,
                 ),
                 _age_tiebreak_value(ref.age),
                 float(row.get("need_priority", 0.0) or 0.0),

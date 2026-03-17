@@ -74,8 +74,8 @@ class BuyTargetListingInterestTests(unittest.TestCase):
 
     def test_listed_player_gets_buy_side_interest_priority(self):
         refs = [
-            IncomingPlayerRef("p1", "LAL", "WING", 0.9, 10.0, 8.0, 2.0, 26.0),
-            IncomingPlayerRef("p2", "LAL", "WING", 0.9, 10.0, 8.0, 2.0, 26.0),
+            IncomingPlayerRef("p1", "LAL", "WING", 0.9, 10.0, 8.0, 2.0, 26.0, ovr=85.0),
+            IncomingPlayerRef("p2", "LAL", "WING", 0.9, 10.0, 8.0, 2.0, 26.0, ovr=93.0),
         ]
         trade_market = {
             "listings": {
@@ -99,6 +99,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
             banned_players=set(),
         )
         self.assertEqual(out[0].player_id, "p2")
+        self.assertEqual(out[0].ovr, 93.0)
 
     def test_listing_recency_decay_reduces_interest(self):
         refs = [
