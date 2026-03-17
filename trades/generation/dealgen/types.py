@@ -84,11 +84,15 @@ class DealGeneratorConfig:
         "MVP.player_heavy",
         "MVP.pick_heavy",
         "MVP.mixed",
+        "timeline.veteran_for_young_plus_protected_first",
+        "timeline.bluechip_plus_first_plus_swap",
     )
     skeleton_route_all_nba: Tuple[str, ...] = (
         "all_nba.player_heavy",
         "all_nba.pick_heavy",
         "all_nba.mixed",
+        "timeline.veteran_for_young_plus_protected_first",
+        "timeline.bluechip_plus_first_plus_swap",
     )
     skeleton_route_all_star: Tuple[str, ...] = (
         "all_star.player_heavy",
