@@ -81,9 +81,9 @@ class DealGeneratorConfig:
 
     # --- target tier routing (8-tier)
     skeleton_route_mvp: Tuple[str, ...] = (
-        "MVP.player_heavy",
-        "MVP.pick_heavy",
-        "MVP.mixed",
+        "mvp.player_heavy",
+        "mvp.pick_heavy",
+        "mvp.mixed",
         "timeline.veteran_for_young_plus_protected_first",
         "timeline.bluechip_plus_first_plus_swap",
     )
@@ -122,6 +122,13 @@ class DealGeneratorConfig:
     skeleton_route_garbage: Tuple[str, ...] = (
         "garbage.garbage"
     )
+
+    # --- contract tag routing overlay (optional)
+    # Empty tuple keeps current tier-only routing behavior.
+    # When configured, these IDs are unioned with tier routes in the registry.
+    skeleton_route_contract_overpay: Tuple[str, ...] = tuple()
+    skeleton_route_contract_fair: Tuple[str, ...] = tuple()
+    skeleton_route_contract_value: Tuple[str, ...] = tuple()
 
     # --- sweetener loop
     sweetener_enabled: bool = True
