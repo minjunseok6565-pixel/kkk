@@ -62,6 +62,42 @@ def _attach_v3_meta(candidate: DealCandidate, *, spec: object, target_tier: str,
             candidate.tags.append(t)
 
 
+def _append_unique_tag(candidate: DealCandidate, tag: str) -> None:
+    if not isinstance(candidate.tags, list):
+        candidate.tags = list(candidate.tags or [])
+    if tag not in candidate.tags:
+        candidate.tags.append(tag)
+
+
+def _build_candidates_for_phase(
+    *,
+    registry: object,
+    mode: str,
+    target_tier: str,
+    contract_tag: str,
+    config: DealGeneratorConfig,
+    ctx: BuildContext,
+    route_phase: str,
+    stage_tag: str,
+) -> List[DealCandidate]:
+    out: List[DealCandidate] = []
+    specs = registry.get_specs_for_mode_and_tier(
+        mode,
+        target_tier,
+        config,
+        ctx=ctx,
+        contract_tag=contract_tag,
+        route_phase=route_phase,
+    )
+    for spec in specs:
+        built = spec.build_fn(ctx)
+        for cand in built:
+            _attach_v3_meta(cand, spec=spec, target_tier=target_tier, contract_tag=contract_tag)
+            _append_unique_tag(cand, stage_tag)
+        out.extend(built)
+    return out
+
+
 def build_offer_skeletons_buy(
     buyer_id: str,
     seller_id: str,
@@ -75,6 +111,7 @@ def build_offer_skeletons_buy(
     banned_asset_keys: Set[str],
     banned_players: Set[str],
     banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
+    generation_phase: str = "combined",
 ) -> List[DealCandidate]:
     """BUY 모드: target 1명 기준 2~4개 archetype 스켈레톤."""
     registry = build_default_registry()
@@ -95,12 +132,67 @@ def build_offer_skeletons_buy(
         banned_players=banned_players,
         banned_receivers_by_player=banned_receivers_by_player,
     )
+    phase = str(generation_phase or "combined").strip().lower()
     out_v3: List[DealCandidate] = []
-    for spec in registry.get_specs_for_mode_and_tier("BUY", target_tier, config, ctx=ctx, contract_tag=contract_tag):
-        built = spec.build_fn(ctx)
-        for cand in built:
-            _attach_v3_meta(cand, spec=spec, target_tier=target_tier, contract_tag=contract_tag)
-        out_v3.extend(built)
+
+    if phase == "template":
+        if bool(getattr(config, "template_first_enabled", True)):
+            out_v3 = _build_candidates_for_phase(
+                registry=registry,
+                mode="BUY",
+                target_tier=target_tier,
+                contract_tag=contract_tag,
+                config=config,
+                ctx=ctx,
+                route_phase="template_only",
+                stage_tag="stage:template",
+            )
+    elif phase == "fallback":
+        if bool(getattr(config, "template_first_fallback_enabled", True)):
+            out_v3 = _build_candidates_for_phase(
+                registry=registry,
+                mode="BUY",
+                target_tier=target_tier,
+                contract_tag=contract_tag,
+                config=config,
+                ctx=ctx,
+                route_phase="fallback_only",
+                stage_tag="stage:fallback",
+            )
+    else:
+        template_enabled = bool(getattr(config, "template_first_enabled", True))
+        fallback_enabled = bool(getattr(config, "template_first_fallback_enabled", True))
+        min_keep = max(1, int(getattr(config, "template_first_min_keep_after_eval", 1) or 1))
+
+        out_template: List[DealCandidate] = []
+        if template_enabled:
+            out_template = _build_candidates_for_phase(
+                registry=registry,
+                mode="BUY",
+                target_tier=target_tier,
+                contract_tag=contract_tag,
+                config=config,
+                ctx=ctx,
+                route_phase="template_only",
+                stage_tag="stage:template",
+            )
+
+        out_v3.extend(out_template)
+
+        should_run_fallback = (not template_enabled) or (len(out_template) < min_keep)
+        if should_run_fallback and fallback_enabled:
+            out_v3.extend(
+                _build_candidates_for_phase(
+                    registry=registry,
+                    mode="BUY",
+                    target_tier=target_tier,
+                    contract_tag=contract_tag,
+                    config=config,
+                    ctx=ctx,
+                    route_phase="fallback_only" if template_enabled else "combined",
+                    stage_tag="stage:fallback",
+                )
+            )
     out_v3 = apply_modifiers(
         out_v3,
         catalog=catalog,
@@ -111,6 +203,9 @@ def build_offer_skeletons_buy(
 
     trimmed_v3: List[DealCandidate] = []
     for c in out_v3:
+        buyer_leg = c.deal.legs.get(str(buyer_id).upper(), []) or []
+        if not buyer_leg:
+            continue
         if not c.compat_archetype:
             c.compat_archetype = c.archetype
         if not c.target_tier:
@@ -136,6 +231,7 @@ def build_offer_skeletons_sell(
     banned_asset_keys: Set[str],
     banned_players: Set[str],
     banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
+    generation_phase: str = "combined",
 ) -> List[DealCandidate]:
     """SELL 모드: (seller sends sale_asset.player_id) 기준 BUYER 패키지를 생성."""
     registry = build_default_registry()
@@ -157,12 +253,67 @@ def build_offer_skeletons_sell(
         banned_players=banned_players,
         banned_receivers_by_player=banned_receivers_by_player,
     )
+    phase = str(generation_phase or "combined").strip().lower()
     out_v3: List[DealCandidate] = []
-    for spec in registry.get_specs_for_mode_and_tier("SELL", target_tier, config, ctx=ctx, contract_tag=contract_tag):
-        built = spec.build_fn(ctx)
-        for cand in built:
-            _attach_v3_meta(cand, spec=spec, target_tier=target_tier, contract_tag=contract_tag)
-        out_v3.extend(built)
+
+    if phase == "template":
+        if bool(getattr(config, "template_first_enabled", True)):
+            out_v3 = _build_candidates_for_phase(
+                registry=registry,
+                mode="SELL",
+                target_tier=target_tier,
+                contract_tag=contract_tag,
+                config=config,
+                ctx=ctx,
+                route_phase="template_only",
+                stage_tag="stage:template",
+            )
+    elif phase == "fallback":
+        if bool(getattr(config, "template_first_fallback_enabled", True)):
+            out_v3 = _build_candidates_for_phase(
+                registry=registry,
+                mode="SELL",
+                target_tier=target_tier,
+                contract_tag=contract_tag,
+                config=config,
+                ctx=ctx,
+                route_phase="fallback_only",
+                stage_tag="stage:fallback",
+            )
+    else:
+        template_enabled = bool(getattr(config, "template_first_enabled", True))
+        fallback_enabled = bool(getattr(config, "template_first_fallback_enabled", True))
+        min_keep = max(1, int(getattr(config, "template_first_min_keep_after_eval", 1) or 1))
+
+        out_template: List[DealCandidate] = []
+        if template_enabled:
+            out_template = _build_candidates_for_phase(
+                registry=registry,
+                mode="SELL",
+                target_tier=target_tier,
+                contract_tag=contract_tag,
+                config=config,
+                ctx=ctx,
+                route_phase="template_only",
+                stage_tag="stage:template",
+            )
+
+        out_v3.extend(out_template)
+
+        should_run_fallback = (not template_enabled) or (len(out_template) < min_keep)
+        if should_run_fallback and fallback_enabled:
+            out_v3.extend(
+                _build_candidates_for_phase(
+                    registry=registry,
+                    mode="SELL",
+                    target_tier=target_tier,
+                    contract_tag=contract_tag,
+                    config=config,
+                    ctx=ctx,
+                    route_phase="fallback_only" if template_enabled else "combined",
+                    stage_tag="stage:fallback",
+                )
+            )
     out_v3 = apply_modifiers(
         out_v3,
         catalog=catalog,
@@ -173,6 +324,9 @@ def build_offer_skeletons_sell(
 
     trimmed_v3: List[DealCandidate] = []
     for c in out_v3:
+        buyer_leg = c.deal.legs.get(str(buyer_id).upper(), []) or []
+        if not buyer_leg:
+            continue
         if not c.compat_archetype:
             c.compat_archetype = c.archetype
         if not c.target_tier:
