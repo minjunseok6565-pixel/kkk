@@ -79,7 +79,18 @@ class DealGeneratorConfig:
     max_picks_per_side: int = 4
     max_seconds_per_side: int = 4
 
-    # --- target tier routing (8-tier)
+    # --- template-first stage toggles
+    template_first_enabled: bool = True
+    template_first_max_templates_per_target: int = 4
+    template_first_fallback_enabled: bool = True
+    template_first_min_keep_after_eval: int = 1
+    template_first_allow_timeline_in_fallback: bool = True
+
+    # --- target tier routing (8-tier, legacy/combined)
+    # NOTE:
+    # - 기존 라우팅과의 완전 호환을 위해 유지한다.
+    # - template/fallback 분리 라우팅이 비어 있거나 phase=combined인 경우
+    #   이 필드들을 기본 경로로 사용한다.
     skeleton_route_mvp: Tuple[str, ...] = (
         "mvp.player_heavy",
         "mvp.pick_heavy",
@@ -120,7 +131,104 @@ class DealGeneratorConfig:
         "rotation.mixed",
     )
     skeleton_route_garbage: Tuple[str, ...] = (
-        "garbage.garbage"
+        "garbage.garbage",
+    )
+
+    # --- template-first route split (8-tier)
+    # planner는 아래 template route의 placeholder를 실제 template skeleton id로 교체하면 된다.
+    skeleton_route_template_mvp: Tuple[str, ...] = (
+        "template.mvp.placeholder_1",
+        "template.mvp.placeholder_2",
+        "template.mvp.placeholder_3",
+        "template.mvp.placeholder_4",
+    )
+    skeleton_route_template_all_nba: Tuple[str, ...] = (
+        "template.all_nba.placeholder_1",
+        "template.all_nba.placeholder_2",
+        "template.all_nba.placeholder_3",
+        "template.all_nba.placeholder_4",
+    )
+    skeleton_route_template_all_star: Tuple[str, ...] = (
+        "template.all_star.placeholder_1",
+        "template.all_star.placeholder_2",
+        "template.all_star.placeholder_3",
+        "template.all_star.placeholder_4",
+    )
+    skeleton_route_template_high_starter: Tuple[str, ...] = (
+        "template.high_starter.placeholder_1",
+        "template.high_starter.placeholder_2",
+        "template.high_starter.placeholder_3",
+        "template.high_starter.placeholder_4",
+    )
+    skeleton_route_template_starter: Tuple[str, ...] = (
+        "template.starter.placeholder_1",
+        "template.starter.placeholder_2",
+        "template.starter.placeholder_3",
+        "template.starter.placeholder_4",
+    )
+    skeleton_route_template_high_rotation: Tuple[str, ...] = (
+        "template.high_rotation.placeholder_1",
+        "template.high_rotation.placeholder_2",
+        "template.high_rotation.placeholder_3",
+        "template.high_rotation.placeholder_4",
+    )
+    skeleton_route_template_rotation: Tuple[str, ...] = (
+        "template.rotation.placeholder_1",
+        "template.rotation.placeholder_2",
+        "template.rotation.placeholder_3",
+        "template.rotation.placeholder_4",
+    )
+    skeleton_route_template_garbage: Tuple[str, ...] = (
+        "template.garbage.placeholder_1",
+        "template.garbage.placeholder_2",
+        "template.garbage.placeholder_3",
+        "template.garbage.placeholder_4",
+    )
+
+    # --- fallback route split (8-tier)
+    # template stage가 실패(구성 실패/평가 탈락)했을 때 사용할 2차 자유 탐색 경로.
+    # 기본값은 기존 skeleton_route_* 내용을 복제한다.
+    skeleton_route_fallback_mvp: Tuple[str, ...] = (
+        "mvp.player_heavy",
+        "mvp.pick_heavy",
+        "mvp.mixed",
+        "timeline.veteran_for_young_plus_protected_first",
+        "timeline.bluechip_plus_first_plus_swap",
+    )
+    skeleton_route_fallback_all_nba: Tuple[str, ...] = (
+        "all_nba.player_heavy",
+        "all_nba.pick_heavy",
+        "all_nba.mixed",
+        "timeline.veteran_for_young_plus_protected_first",
+        "timeline.bluechip_plus_first_plus_swap",
+    )
+    skeleton_route_fallback_all_star: Tuple[str, ...] = (
+        "all_star.player_heavy",
+        "all_star.pick_heavy",
+        "all_star.mixed",
+    )
+    skeleton_route_fallback_high_starter: Tuple[str, ...] = (
+        "high_starter.player_heavy",
+        "high_starter.pick_heavy",
+        "high_starter.mixed",
+    )
+    skeleton_route_fallback_starter: Tuple[str, ...] = (
+        "starter.player_heavy",
+        "starter.pick_heavy",
+        "starter.mixed",
+    )
+    skeleton_route_fallback_high_rotation: Tuple[str, ...] = (
+        "high_rotation.player_heavy",
+        "high_rotation.pick_heavy",
+        "high_rotation.mixed",
+    )
+    skeleton_route_fallback_rotation: Tuple[str, ...] = (
+        "rotation.player_heavy",
+        "rotation.pick_heavy",
+        "rotation.mixed",
+    )
+    skeleton_route_fallback_garbage: Tuple[str, ...] = (
+        "garbage.garbage",
     )
 
     # --- contract tag routing overlay (optional)
