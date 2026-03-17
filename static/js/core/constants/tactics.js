@@ -27,6 +27,30 @@ const TACTICS_OFFENSE_ROLES = [
   "Roll_Man", "ShortRoll_Hub", "Pop_Threat", "Post_Anchor"
 ];
 
+
+const TACTICS_PRESET_DEFENSE_ACTIONS = [
+  "Cut",
+  "DHO",
+  "Drive",
+  "ISO",
+  "PnP",
+  "PnR",
+  "PostUp",
+  "SpotUp",
+  "TransitionEarly",
+];
+
+const TACTICS_PRESET_DEFENSE_POLICY_SIDE = {
+  NEUTRAL: "neutral",
+  A: "A",
+  B: "B",
+};
+
+const TACTICS_PRESET_DEFENSE_POLICY_LEVEL = {
+  NORMAL: "normal",
+  STRONG: "strong",
+};
+
 const TACTICS_DEFENSE_ROLE_BY_SCHEME = {
   Drop: ["PnR_POA_Defender", "PnR_Cover_Big_Drop", "Lowman_Helper", "Nail_Helper", "Weakside_Rotator"],
   Switch_Everything: ["PnR_POA_Switch", "PnR_Cover_Big_Switch", "Switch_Wing_Strong", "Switch_Wing_Weak", "Backline_Anchor"],
@@ -38,4 +62,12 @@ const TACTICS_DEFENSE_ROLE_BY_SCHEME = {
   Preset_Defense: ["preset-role-G", "preset-role-W", "preset-role-B"]
 };
 
-export { TACTICS_OFFENSE_SCHEMES, TACTICS_DEFENSE_SCHEMES, TACTICS_OFFENSE_ROLES, TACTICS_DEFENSE_ROLE_BY_SCHEME };
+export {
+  TACTICS_OFFENSE_SCHEMES,
+  TACTICS_DEFENSE_SCHEMES,
+  TACTICS_OFFENSE_ROLES,
+  TACTICS_DEFENSE_ROLE_BY_SCHEME,
+  TACTICS_PRESET_DEFENSE_ACTIONS,
+  TACTICS_PRESET_DEFENSE_POLICY_SIDE,
+  TACTICS_PRESET_DEFENSE_POLICY_LEVEL,
+};

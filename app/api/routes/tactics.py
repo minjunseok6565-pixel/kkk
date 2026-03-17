@@ -89,13 +89,17 @@ def _sanitize_context(raw: Any) -> Dict[str, Any]:
     if isinstance(draft_snapshot, Mapping):
         out["USER_PRESET_OFFENSE_DRAFT_V1"] = dict(draft_snapshot)
 
+    defense_draft_snapshot = src.get("USER_PRESET_DEFENSE_DRAFT_V1")
+    if isinstance(defense_draft_snapshot, Mapping):
+        out["USER_PRESET_DEFENSE_DRAFT_V1"] = dict(defense_draft_snapshot)
+
     preset_def_roles = _sanitize_preset_defense_role_by_pid(src.get("USER_PRESET_DEFENSE_ROLE_BY_PID_V1"))
     if preset_def_roles:
         out["USER_PRESET_DEFENSE_ROLE_BY_PID_V1"] = preset_def_roles
 
     for k, v in src.items():
         key = str(k or "").strip()
-        if key in {"tempo_mult", "USER_PRESET_OFFENSE_DRAFT_V1", "USER_PRESET_DEFENSE_ROLE_BY_PID_V1"}:
+        if key in {"tempo_mult", "USER_PRESET_OFFENSE_DRAFT_V1", "USER_PRESET_DEFENSE_DRAFT_V1", "USER_PRESET_DEFENSE_ROLE_BY_PID_V1"}:
             continue
         out[key] = v
     return out
@@ -238,6 +242,10 @@ def _to_ui_tactics(payload: Any) -> Any:
     if isinstance(context.get("USER_PRESET_OFFENSE_DRAFT_V1"), Mapping):
         preset_draft = dict(context.get("USER_PRESET_OFFENSE_DRAFT_V1") or {})
 
+    preset_defense_draft = None
+    if isinstance(context.get("USER_PRESET_DEFENSE_DRAFT_V1"), Mapping):
+        preset_defense_draft = dict(context.get("USER_PRESET_DEFENSE_DRAFT_V1") or {})
+
     return {
         "offenseScheme": str(raw.get("offense_scheme") or "Spread_HeavyPnR"),
         "defenseScheme": str(raw.get("defense_scheme") or "Drop"),
@@ -249,6 +257,7 @@ def _to_ui_tactics(payload: Any) -> Any:
         "outcome_global_mult": _sanitize_number_dict(raw.get("outcome_global_mult")),
         "context": context,
         "presetOffenseDraft": preset_draft,
+        "presetDefenseDraft": preset_defense_draft,
     }
 
 
