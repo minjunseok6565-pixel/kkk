@@ -208,7 +208,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0].player_id, "core2")
 
-    def test_buy_skeleton_builds_even_when_target_not_in_seller_outgoing_bucket(self):
+    def test_buy_skeleton_returns_empty_when_no_sendable_assets_exist(self):
         refs = [IncomingPlayerRef("core1", "LAL", "WING", 0.8, 10.0, 8.0, 2.0, 26.0)]
         out_lal = TeamOutgoingCatalog(
             team_id="LAL",
@@ -257,7 +257,7 @@ class BuyTargetListingInterestTests(unittest.TestCase):
             banned_receivers_by_player={},
         )
 
-        self.assertGreaterEqual(len(candidates), 1)
+        self.assertEqual(len(candidates), 0)
 
     def test_listing_boost_can_outweigh_negative_contract_gap_when_capped(self):
         refs = [
