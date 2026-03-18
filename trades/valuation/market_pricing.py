@@ -134,14 +134,14 @@ class MarketPricingConfig:
     """
 
     # --- Player base pricing
-    player_ovr_center: float = 75.0
-    player_ovr_scale: float = 6.0
-    player_ovr_now_max: float = 25.0  # OVR 기반 now 상한(화폐 단위)
+    player_ovr_center: float = 91.5
+    player_ovr_scale: float = 5.5
+    player_ovr_now_max: float = 60.0  # OVR 기반 now 상한(화폐 단위)
     player_ovr_now_min: float = 0.0
 
     # OVR 증가가 상위 구간에서 더 비싸지도록(비선형)
-    player_star_softplus_scale: float = 0.55
-    player_star_softplus_shift: float = 86.0
+    player_star_softplus_scale: float = 1.3
+    player_star_softplus_shift: float = 91.0
 
     # --- Age / horizon split (market-level expectation)
     age_peak: float = 27.0
@@ -234,8 +234,8 @@ class MarketPricingConfig:
     health_credit_cap: float = 0.06
 
     # --- Pick base pricing
-    pick_round1_base_future: float = 14.0
-    pick_round2_base_future: float = 3.5
+    pick_round1_base_future: float = 12.0
+    pick_round2_base_future: float = 1.5
 
     # pick number -> value curve
     pick_num_best: int = 1
