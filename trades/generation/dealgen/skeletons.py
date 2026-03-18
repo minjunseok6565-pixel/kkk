@@ -10,7 +10,6 @@ from ..asset_catalog import TradeAssetCatalog, TeamOutgoingCatalog, BucketId
 
 from .types import DealGeneratorConfig, DealGeneratorBudget, TargetCandidate, DealCandidate, SellAssetCandidate
 from .skeleton_registry import BuildContext, build_default_registry
-from .skeleton_modifiers import apply_modifiers
 from .utils import (
     _add_pick_package,
     _shape_ok,
@@ -193,13 +192,8 @@ def build_offer_skeletons_buy(
                     stage_tag="stage:fallback",
                 )
             )
-    out_v3 = apply_modifiers(
-        out_v3,
-        catalog=catalog,
-        config=config,
-        banned_asset_keys=banned_asset_keys,
-        max_variants_per_candidate=int(getattr(config, "modifier_max_variants_per_candidate", 3) or 3),
-    )
+    # skeleton_modifiers module removed: keep candidates as-is.
+    out_v3 = list(out_v3)
 
     trimmed_v3: List[DealCandidate] = []
     for c in out_v3:
@@ -314,13 +308,8 @@ def build_offer_skeletons_sell(
                     stage_tag="stage:fallback",
                 )
             )
-    out_v3 = apply_modifiers(
-        out_v3,
-        catalog=catalog,
-        config=config,
-        banned_asset_keys=banned_asset_keys,
-        max_variants_per_candidate=int(getattr(config, "modifier_max_variants_per_candidate", 3) or 3),
-    )
+    # skeleton_modifiers module removed: keep candidates as-is.
+    out_v3 = list(out_v3)
 
     trimmed_v3: List[DealCandidate] = []
     for c in out_v3:
