@@ -66,7 +66,7 @@ class DealGeneratorConfig:
 
     # --- deal shape constraints (generator-side)
     skeleton_overhaul_enabled: bool = True
-    skeleton_modifiers_enabled: bool = True
+    skeleton_modifiers_enabled: bool = False
     modifier_max_variants_per_candidate: int = 3
     modifier_protection_enabled: bool = True
     modifier_swap_substitute_enabled: bool = True
