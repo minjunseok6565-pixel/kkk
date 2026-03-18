@@ -234,8 +234,8 @@ class MarketPricingConfig:
     health_credit_cap: float = 0.06
 
     # --- Pick base pricing
-    pick_round1_base_future: float = 12.0
-    pick_round2_base_future: float = 1.5
+    pick_round1_base_future: float = 8.0
+    pick_round2_base_future: float = 1.0
 
     # pick number -> value curve
     pick_num_best: int = 1
@@ -243,7 +243,7 @@ class MarketPricingConfig:
     pick_num_curve_power: float = 1.65  # 상위픽 프리미엄(비선형)
 
     # year discount (멀수록 가치 감소)
-    pick_year_discount_rate: float = 0.10  # 1년당 할인
+    pick_year_discount_rate: float = 0.08  # 1년당 할인
 
     # --- Protection expectation (TOP_N)
     protection_logit_k: float = 0.85  # convey probability sharpness
