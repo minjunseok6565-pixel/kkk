@@ -259,49 +259,6 @@ class DealGeneratorConfig:
     # 예산이 빡빡하면 sweetener.py에서 자동으로 더 줄인다.
     sweetener_candidate_width: int = 3
     
-    # --- fit swap counter (DecisionReason: FIT_FAILS)
-    # FIT_FAILS(=상대가 받는 incoming 플레이어들의 team-fit 불만)일 때,
-    # outgoing 플레이어 1명을 "더 맞는 선수"로 교체해보는 카운터를 시도한다.
-    fit_swap_enabled: bool = True
-    # base(=sweetener 이전) 딜 하나당 fit-swap 시도 상한
-    fit_swap_max_trials_per_base: int = 1
-    # replacement 후보 풀/시도 제한
-    fit_swap_candidate_pool: int = 18
-    fit_swap_try_top_n: int = 6
-    # 얼마나 fit이 좋아져야 교체 후보로 인정할지
-    fit_swap_min_fit_improvement: float = 0.02
-    # 샐러리 급격히 달라져 수리 비용이 폭증하는 것을 방지(단위: $M)
-    fit_swap_max_salary_diff_m: float = 10.0
-    # fit-swap 카운터에서 허용하는 최대 repair 횟수(최소 수리)
-    fit_swap_max_repairs: int = 1
-
-    # --- fit swap horizon-aware scoring (v2 absorption)
-    # receiver(=FIT_FAILS 낸 팀)의 타임라인/포스처 성향에 따라
-    # replacement 후보 랭킹 primary_score를 youth/fit/market_norm 가중합으로 계산한다.
-    # primary_score = w_youth*youth + w_fit*fit + w_market*market_norm
-    #
-    # - REBUILD: youth/years 우선, market은 약하게 감점
-    # - WIN_NOW: fit + market(즉시전력) 우선
-    # - NEUTRAL: 균형
-    #
-    # NOTE: fit_swap.py에서만 사용하며, False면 기존(v1)처럼 fit 중심으로 랭킹한다.
-    fit_swap_use_horizon_weights: bool = True
-
-    # market normalization: market_norm = market_total / divisor
-    fit_swap_market_norm_divisor: float = 50.0
-
-    # youth score shaping:
-    # youth = max(0, age_anchor - age) / age_span  +  min(years_cap, remaining_years) / years_span
-    fit_swap_youth_age_anchor: float = 30.0
-    fit_swap_youth_age_span: float = 10.0
-    fit_swap_youth_years_cap: float = 4.0
-    fit_swap_youth_years_span: float = 4.0
-
-    # weights are (w_youth, w_fit, w_market)
-    fit_swap_weights_rebuild: Tuple[float, float, float] = (0.55, 0.40, -0.05)
-    fit_swap_weights_win_now: Tuple[float, float, float] = (0.05, 0.70, 0.25)
-    fit_swap_weights_neutral: Tuple[float, float, float] = (0.20, 0.60, 0.20)
-
     # --- target diversity / spam prevention (v2 absorption)
     # 동일 타깃(같은 선수)이 결과 상단에 반복 노출되는 것을 억제하기 위한 soft penalty.
     # v2는 core 단계에서 target_seen 카운트 기반으로 score를 감점한다.
@@ -522,11 +479,6 @@ class DealGeneratorStats:
     sweetener_trials: int = 0
     sweetener_commits: int = 0
     sweetener_rollbacks: int = 0
-
-    # fit swap counter telemetry
-    fit_swap_triggers: int = 0
-    fit_swap_candidates_tried: int = 0
-    fit_swap_success: int = 0
 
     # hard-cap monitoring
     budget_validation_cap_hits: int = 0

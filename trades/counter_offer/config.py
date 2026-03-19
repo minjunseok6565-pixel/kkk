@@ -7,7 +7,7 @@ Counter-offer tuning knobs.
 This module is intentionally *thin* and avoids duplicating SSOT logic.
 It only provides:
 - default budgets for counter-offer search (validation/evaluation caps)
-- strategy toggles (fit-swap / sweetener / protection tweak)
+- strategy toggles (sweetener / protection tweak)
 - a helper to build DealGeneratorConfig/Budget used by existing dealgen utilities
 
 Design notes
@@ -45,7 +45,7 @@ class CounterOfferConfig:
     max_validations: int = 140
     max_evaluations: int = 70
 
-    # For repair loops (fit-swap uses repair_until_valid internally)
+    # For repair loops
     max_repairs: int = 1
 
     # Candidate cap (avoid long tails)
@@ -69,7 +69,6 @@ class CounterOfferConfig:
     # ------------------------------------------------------------------
     # Strategy toggles
     # ------------------------------------------------------------------
-    enable_fit_swap: bool = True
     enable_pick_sweeteners: bool = True
     enable_player_sweeteners: bool = True
     enable_remove_outgoing: bool = True
@@ -116,14 +115,6 @@ class CounterOfferConfig:
     sweetener_max_additions: int = 2
     sweetener_candidate_width: int = 2
 
-    # ------------------------------------------------------------------
-    # Fit swap budgets (existing dealgen.fit_swap)
-    # ------------------------------------------------------------------
-    fit_swap_candidate_pool: int = 14
-    fit_swap_try_top_n: int = 5
-    fit_swap_max_repairs: int = 1
-
-    # ------------------------------------------------------------------
     # Player sweetener fallback
     # ------------------------------------------------------------------
     player_sweetener_max_additions: int = 1
@@ -151,7 +142,6 @@ class CounterOfferConfig:
 
         We intentionally reuse DealGeneratorConfig as SSOT for:
         - sweetener loop logic
-        - fit-swap counter logic
         - scoring / discard heuristics
 
         The returned config is a *small override* over DealGeneratorConfig defaults.
@@ -171,11 +161,6 @@ class CounterOfferConfig:
             sweetener_enabled=bool(self.enable_pick_sweeteners),
             sweetener_max_additions=int(self.sweetener_max_additions),
             sweetener_candidate_width=int(self.sweetener_candidate_width),
-
-            fit_swap_enabled=bool(self.enable_fit_swap),
-            fit_swap_candidate_pool=int(self.fit_swap_candidate_pool),
-            fit_swap_try_top_n=int(self.fit_swap_try_top_n),
-            fit_swap_max_repairs=int(self.fit_swap_max_repairs),
         )
         return cfg
 
@@ -188,7 +173,7 @@ class CounterOfferConfig:
     ):
         """Build a DealGeneratorBudget for utilities that require one.
 
-        dealgen.sweetener / dealgen.fit_swap only use a subset of the budget fields,
+        dealgen helpers only use a subset of the budget fields,
         but we keep the struct complete for consistency.
         """
 
