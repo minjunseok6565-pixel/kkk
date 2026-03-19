@@ -79,7 +79,6 @@ from ..generation.dealgen.dedupe import dedupe_hash
 from ..generation.dealgen.utils import _clone_deal, _shape_ok
 
 from ..generation.dealgen.sweetener import maybe_apply_sweeteners
-from ..generation.dealgen.fit_swap import maybe_apply_fit_swap
 
 from .config import CounterOfferConfig
 from .diff import DealDiff, compute_deal_diff
@@ -485,55 +484,7 @@ class CounterOfferBuilder:
             )
 
         # ------------------------------------------------------------------
-        # Strategy 1: FIT swap (if fit is a major blocker)
-        # ------------------------------------------------------------------
-        if cfg.enable_fit_swap and _has_reason(base_prop.seller_decision, "FIT_FAILS") and _can_spend(v=2, e=2):
-            try:
-                stats = DealGeneratorStats(mode="COUNTER_FIT_SWAP")
-                budget = cfg.to_dealgen_budget(
-                    max_validations=min(int(cfg.max_validations) - validations_used, 70),
-                    max_evaluations=min(int(cfg.max_evaluations) - evaluations_used, 40),
-                    max_repairs=int(cfg.max_repairs),
-                )
-                # Policy parity with deal generation:
-                # in counter-offer flow, USER is the proposer/initiator.
-                res = maybe_apply_fit_swap(
-                    base_prop,
-                    initiator_team_id=user,
-                    tick_ctx=tick_ctx,
-                    catalog=getattr(tick_ctx, "asset_catalog", None),
-                    config=dealgen_cfg,
-                    budget=budget,
-                    banned_asset_keys=set(),
-                    banned_players=set(),
-                    banned_receivers_by_player={},
-                    protected_player_id=None,
-                    opponent_repeat_count=0,
-                    rng=rng,
-                    validations_remaining=int(budget.max_validations),
-                    evaluations_remaining=int(budget.max_evaluations),
-                    stats=stats,
-                )
-                if res and res.proposal is not None:
-                    # budget accounting (best-effort)
-                    validations_used += int(res.validations_used)
-                    evaluations_used += int(res.evaluations_used)
-
-                    _add_candidate(
-                        res.proposal,
-                        strategy="FIT_SWAP",
-                        meta={"candidates_tried": int(getattr(res, "candidates_tried", 0) or 0), "swapped": bool(getattr(res, "swapped", False))},
-                    )
-
-                    # If still not accepted by seller, we can try sweeteners on top of fit-swap.
-                    if cfg.enable_pick_sweeteners and res.proposal.seller_decision.verdict in (DealVerdict.COUNTER, DealVerdict.REJECT):
-                        pass
-            except Exception:
-                # Fit swap is optional; ignore failures.
-                pass
-
-        # ------------------------------------------------------------------
-        # Strategy 2: Remove outgoing sweeteners from OTHER leg
+        # Strategy 1: Remove outgoing sweeteners from OTHER leg
         # ------------------------------------------------------------------
         if cfg.enable_remove_outgoing:
             try:
@@ -584,7 +535,7 @@ class CounterOfferBuilder:
                 pass
 
         # ------------------------------------------------------------------
-        # Strategy 3: Reduce pick protection on USER picks (more valuable pick)
+        # Strategy 2: Reduce pick protection on USER picks (more valuable pick)
         # ------------------------------------------------------------------
         if cfg.enable_reduce_pick_protection and len(candidates) < int(cfg.max_candidates):
             try:
@@ -604,7 +555,7 @@ class CounterOfferBuilder:
                 pass
 
         # ------------------------------------------------------------------
-        # Strategy 4: Pick/swap sweeteners (add value from USER to OTHER)
+        # Strategy 3: Pick/swap sweeteners (add value from USER to OTHER)
         # ------------------------------------------------------------------
         if cfg.enable_pick_sweeteners and len(candidates) < int(cfg.max_candidates) and _can_spend(v=2, e=2):
             try:
@@ -644,7 +595,7 @@ class CounterOfferBuilder:
                 pass
 
         # ------------------------------------------------------------------
-        # Strategy 5: Player sweetener fallback (add 1 cheap player from USER)
+        # Strategy 4: Player sweetener fallback (add 1 cheap player from USER)
         # ------------------------------------------------------------------
         if cfg.enable_player_sweeteners and len(candidates) < int(cfg.max_candidates) and _can_spend(v=2, e=2):
             try:
