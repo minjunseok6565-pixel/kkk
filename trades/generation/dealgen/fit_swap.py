@@ -36,6 +36,34 @@ def _has_reason(dec: Any, code: str) -> bool:
     return False
 
 
+def _allowed_verdicts_for_receiver(*, receiver_id: str, initiator_team_id: str) -> Tuple[DealVerdict, ...]:
+    """
+    Receiver role-aware trigger policy.
+
+    - receiver == initiator  -> REJECT / COUNTER 허용
+    - receiver != initiator  -> REJECT만 허용 (acceptor COUNTER는 제외)
+    """
+    receiver_u = str(receiver_id).upper()
+    initiator_u = str(initiator_team_id).upper()
+    receiver_is_initiator = receiver_u == initiator_u
+    if receiver_is_initiator:
+        return (DealVerdict.REJECT, DealVerdict.COUNTER)
+    return (DealVerdict.REJECT,)
+
+
+def _is_triggerable_for_receiver(*, dec: Any, receiver_id: str, initiator_team_id: str) -> bool:
+    if dec is None:
+        return False
+    verdict = getattr(dec, "verdict", None)
+    allowed = _allowed_verdicts_for_receiver(
+        receiver_id=str(receiver_id),
+        initiator_team_id=str(initiator_team_id),
+    )
+    if verdict not in allowed:
+        return False
+    return _has_reason(dec, "FIT_FAILS")
+
+
 def _extract_fit_failed_incoming_player_ids(dec: Any) -> Set[str]:
     """
     trade.zip decision_policy.py:
@@ -280,6 +308,7 @@ def _fit_swap_primary_score(
 def maybe_apply_fit_swap(
     base_prop: DealProposal,
     *,
+    initiator_team_id: str,
     tick_ctx: TradeGenerationTickContext,
     catalog: TradeAssetCatalog,
     config: DealGeneratorConfig,
@@ -297,6 +326,9 @@ def maybe_apply_fit_swap(
     """
     FIT_FAILS(=받는 쪽 fit 불만)일 때,
     보내는 쪽 outgoing player 1명을 '더 맞는 선수'로 교체해 COUNTER를 시도.
+    Trigger policy is role-aware:
+    - initiator side receiver: REJECT / COUNTER
+    - acceptor side receiver: REJECT only (COUNTER 제외)
     """
 
     if not bool(getattr(config, "fit_swap_enabled", True)):
@@ -313,9 +345,19 @@ def maybe_apply_fit_swap(
     giver_id: Optional[str] = None
     receiver_dec = None
 
-    if base_prop.seller_decision.verdict in (DealVerdict.REJECT, DealVerdict.COUNTER) and _has_reason(base_prop.seller_decision, "FIT_FAILS"):
+    initiator_u = str(initiator_team_id).upper()
+
+    if _is_triggerable_for_receiver(
+        dec=base_prop.seller_decision,
+        receiver_id=seller_id,
+        initiator_team_id=initiator_u,
+    ):
         receiver_id, giver_id, receiver_dec = seller_id, buyer_id, base_prop.seller_decision
-    elif base_prop.buyer_decision.verdict in (DealVerdict.REJECT, DealVerdict.COUNTER) and _has_reason(base_prop.buyer_decision, "FIT_FAILS"):
+    elif _is_triggerable_for_receiver(
+        dec=base_prop.buyer_decision,
+        receiver_id=buyer_id,
+        initiator_team_id=initiator_u,
+    ):
         receiver_id, giver_id, receiver_dec = buyer_id, seller_id, base_prop.buyer_decision
     else:
         return None

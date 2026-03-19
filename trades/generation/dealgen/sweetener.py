@@ -103,9 +103,37 @@ def _sweetener_close_corridor(team_eval: TeamDealEvaluation, cfg: DealGeneratorC
     return float(close)
 
 
+def _allowed_verdicts_for_team(*, team_id: str, initiator_team_id: str) -> Tuple[DealVerdict, ...]:
+    """
+    Role-aware trigger policy for sweetener receiver selection.
+
+    - initiator side: REJECT / COUNTER
+    - acceptor side: REJECT only
+    """
+    team_u = str(team_id).upper()
+    initiator_u = str(initiator_team_id).upper()
+    if team_u == initiator_u:
+        return (DealVerdict.REJECT, DealVerdict.COUNTER)
+    return (DealVerdict.REJECT,)
+
+
+def _can_trigger_for_team(
+    *,
+    team_id: str,
+    decision: object,
+    initiator_team_id: str,
+) -> bool:
+    verdict = getattr(decision, "verdict", None)
+    return verdict in _allowed_verdicts_for_team(
+        team_id=str(team_id),
+        initiator_team_id=str(initiator_team_id),
+    )
+
+
 def maybe_apply_sweeteners(
     base: DealProposal,
     *,
+    initiator_team_id: str,
     tick_ctx: TradeGenerationTickContext,
     catalog: TradeAssetCatalog,
     config: DealGeneratorConfig,
@@ -153,9 +181,21 @@ def maybe_apply_sweeteners(
     close_seller = _sweetener_close_corridor(base.seller_eval, config)
     close_buyer = _sweetener_close_corridor(base.buyer_eval, config)
 
-    if base.seller_decision.verdict in (DealVerdict.REJECT, DealVerdict.COUNTER) and ms < 0.0 and abs(ms) <= float(close_seller):
+    initiator_u = str(initiator_team_id).upper()
+    seller_triggerable = _can_trigger_for_team(
+        team_id=base.seller_id,
+        decision=base.seller_decision,
+        initiator_team_id=initiator_u,
+    )
+    buyer_triggerable = _can_trigger_for_team(
+        team_id=base.buyer_id,
+        decision=base.buyer_decision,
+        initiator_team_id=initiator_u,
+    )
+
+    if seller_triggerable and ms < 0.0 and abs(ms) <= float(close_seller):
         giver, receiver, deficit = base.buyer_id, base.seller_id, abs(ms)
-    elif base.buyer_decision.verdict in (DealVerdict.REJECT, DealVerdict.COUNTER) and mb < 0.0 and abs(mb) <= float(close_buyer):
+    elif buyer_triggerable and mb < 0.0 and abs(mb) <= float(close_buyer):
         giver, receiver, deficit = base.seller_id, base.buyer_id, abs(mb)
     else:
         return base, 0, 0
@@ -165,6 +205,11 @@ def maybe_apply_sweeteners(
 
     giver_u = str(giver).upper()
     receiver_u = str(receiver).upper()
+    receiver_side = "initiator" if receiver_u == initiator_u else "acceptor"
+    trigger_verdict = (
+        base.buyer_decision.verdict if receiver_u == str(base.buyer_id).upper() else base.seller_decision.verdict
+    )
+    trigger_verdict_s = str(getattr(trigger_verdict, "value", str(trigger_verdict))).lower()
 
     out_cat = catalog.outgoing_by_team.get(giver_u)
     if out_cat is None:
@@ -327,6 +372,8 @@ def maybe_apply_sweeteners(
                         f'sweetener:{bucket}',
                         f'sweetener_from:{giver_u}',
                         f'sweetener_to:{receiver_u}',
+                        f'sweetener_trigger_side:{receiver_side}',
+                        f'sweetener_trigger_verdict:{trigger_verdict_s}',
                         f'sweetener_round:{int(trial_round)}',
                     ),
                     opponent_repeat_count=0,
