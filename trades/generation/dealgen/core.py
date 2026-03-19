@@ -248,8 +248,6 @@ def _generate_buy_mode(
 
     # 같은 base deal에서 sweetener를 여러 번 시도할 수 있게 하되 비용 폭증을 막기 위한 카운터
     sweetener_trials_by_base: Dict[str, int] = {}
-    # 같은 base deal에서 fit-swap(FIT_FAILS counter)을 여러 번 시도할 수 있게 하되 비용 폭증을 막기 위한 카운터
-    fit_swap_trials_by_base: Dict[str, int] = {}
     banned_asset_keys: Set[str] = set()
     banned_players: Set[str] = set()
     banned_receivers_by_player: Dict[str, Set[str]] = {}
@@ -273,7 +271,6 @@ def _generate_buy_mode(
         pool_cap = max(pool_cap, int(max_results) * 2)
 
     max_sweetener_trials_per_base = int(getattr(config, "sweetener_max_trials_per_base", 2))
-    max_fit_swap_trials_per_base = int(getattr(config, "fit_swap_max_trials_per_base", 1))
 
     retrieval_cfg = _derive_buy_retrieval_budget_guard_config(config, budget)
 
@@ -399,19 +396,14 @@ def _generate_buy_mode(
             # (A) repair 이후 base deal identity (수리 과정에서 서로 다른 스켈레톤이 같은 딜로 수렴 가능)
             h_valid = dedupe_hash(cand2.deal)
 
-            # 이미 출력된 base라면, sweetener/fit-swap 둘 다 더 시도할 여지가 없을 때만 스킵(비용 가드)
+            # 이미 출력된 base라면, sweetener를 더 시도할 여지가 없을 때만 스킵(비용 가드)
             if h_valid in seen_output:
                 sweet_left = (
                     bool(getattr(config, "sweetener_enabled", True))
                     and int(getattr(config, "sweetener_max_additions", 0)) > 0
                     and int(sweetener_trials_by_base.get(h_valid, 0)) < int(max_sweetener_trials_per_base)
                 )
-                fit_left = (
-                    bool(getattr(config, "fit_swap_enabled", True))
-                    and int(max_fit_swap_trials_per_base) > 0
-                    and int(fit_swap_trials_by_base.get(h_valid, 0)) < int(max_fit_swap_trials_per_base)
-                )
-                if not sweet_left and not fit_left:
+                if not sweet_left:
                     continue
 
             # evaluate (cache)
@@ -468,74 +460,8 @@ def _generate_buy_mode(
             if _should_discard_prop(base_prop, config):
                 continue
 
-            # --- FIT_FAILS -> fit swap counter (v2 absorption)
             pre_sweet_prop = base_prop
             pre_sweet_hash = dedupe_hash(pre_sweet_prop.deal)
-
-            fit_enabled = bool(getattr(config, "fit_swap_enabled", True))
-            if fit_enabled and int(max_fit_swap_trials_per_base) > 0:
-                if int(fit_swap_trials_by_base.get(h_valid, 0)) < int(max_fit_swap_trials_per_base):
-                    try:
-                        from .fit_swap import maybe_apply_fit_swap  # local import to avoid cycles
-                    except ImportError:
-                        maybe_apply_fit_swap = None  # type: ignore
-
-                    if maybe_apply_fit_swap is not None:
-                        val_rem = max(0, int(budget.max_validations) - int(stats.validations))
-                        eval_rem = max(0, int(budget.max_evaluations) - int(stats.evaluations))
-
-                        trial_idx = int(fit_swap_trials_by_base.get(h_valid, 0))
-                        local_seed = _compute_sweetener_seed(
-                            config,
-                            tick_ctx,
-                            initiator_team_id=buyer_id,
-                            counterparty_team_id=seller_id,
-                            base_hash=pre_sweet_hash,
-                            skeleton_hash=f"fit_swap|{h}",
-                            trial_index=trial_idx,
-                        )
-                        local_rng = random.Random(int(local_seed))
-
-                        res = maybe_apply_fit_swap(
-                            pre_sweet_prop,
-                            initiator_team_id=buyer_id,
-                            tick_ctx=tick_ctx,
-                            catalog=catalog,
-                            config=config,
-                            budget=budget,
-                            banned_asset_keys=banned_asset_keys,
-                            banned_players=banned_players,
-                            banned_receivers_by_player=banned_receivers_by_player,
-                            protected_player_id=cand2.focal_player_id,
-                            opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
-                            rng=local_rng,
-                            validations_remaining=int(val_rem),
-                            evaluations_remaining=int(eval_rem),
-                            stats=stats,
-                        )
-
-                        # maybe_apply_fit_swap can return None (e.g. no FIT_FAILS / empty pool / budget gate).
-                        # Count it as a trial to avoid repeatedly retrying the same base deal.
-                        if res is None:
-                            fit_swap_trials_by_base[h_valid] = int(fit_swap_trials_by_base.get(h_valid, 0)) + 1
-
-                        # budget counters
-                        stats.validations += int(getattr(res, "validations_used", 0) or 0)
-                        stats.evaluations += int(getattr(res, "evaluations_used", 0) or 0)
-
-                        # telemetry
-                        tried = int(getattr(res, "candidates_tried", 0) or 0)
-                        if tried > 0:
-                            stats.fit_swap_triggers += 1
-                            stats.fit_swap_candidates_tried += tried
-                            fit_swap_trials_by_base[h_valid] = int(fit_swap_trials_by_base.get(h_valid, 0)) + 1
-
-                            if bool(getattr(res, "swapped", False)):
-                                stats.fit_swap_success += 1
-
-                        # update base for sweetener stage
-                        pre_sweet_prop = getattr(res, "proposal", pre_sweet_prop) or pre_sweet_prop
-                        pre_sweet_hash = dedupe_hash(pre_sweet_prop.deal)
 
             # sweetener loop (대개 buyer -> seller)
             best_prop = pre_sweet_prop
@@ -577,7 +503,7 @@ def _generate_buy_mode(
                 pushed = best_prop
                 seen_output.add(h_best)
             else:
-                # sweetened가 중복이면 (fit-swap 포함) 현재 base라도 유니크할 때는 결과로 남긴다.
+                # sweetened가 중복이면 현재 base라도 유니크할 때는 결과로 남긴다.
                 if pre_sweet_hash not in seen_output:
                     pushed = pre_sweet_prop
                     seen_output.add(pre_sweet_hash)
@@ -751,8 +677,6 @@ def _generate_sell_mode(
 
     # 같은 base deal에서 sweetener를 여러 번 시도할 수 있게 하되 비용 폭증을 막기 위한 카운터
     sweetener_trials_by_base: Dict[str, int] = {}
-    # 같은 base deal에서 fit-swap(FIT_FAILS counter)을 여러 번 시도할 수 있게 하되 비용 폭증을 막기 위한 카운터
-    fit_swap_trials_by_base: Dict[str, int] = {}
     banned_asset_keys: Set[str] = set()
     banned_players: Set[str] = set()
     banned_receivers_by_player: Dict[str, Set[str]] = {}
@@ -772,7 +696,6 @@ def _generate_sell_mode(
         pool_cap = max(pool_cap, int(max_results) * 2)
 
     max_sweetener_trials_per_base = int(getattr(config, "sweetener_max_trials_per_base", 2))
-    max_fit_swap_trials_per_base = int(getattr(config, "fit_swap_max_trials_per_base", 1))
 
     sale_assets = select_targets_sell(
         seller_id,
@@ -851,19 +774,14 @@ def _generate_sell_mode(
             # (A) repair 이후 base deal identity (수리 과정에서 서로 다른 스켈레톤이 같은 딜로 수렴 가능)
             h_valid = dedupe_hash(cand2.deal)
 
-            # 이미 출력된 base라면, sweetener/fit-swap 둘 다 더 시도할 여지가 없을 때만 스킵(비용 가드)
+            # 이미 출력된 base라면, sweetener를 더 시도할 여지가 없을 때만 스킵(비용 가드)
             if h_valid in seen_output:
                 sweet_left = (
                     bool(getattr(config, "sweetener_enabled", True))
                     and int(getattr(config, "sweetener_max_additions", 0)) > 0
                     and int(sweetener_trials_by_base.get(h_valid, 0)) < int(max_sweetener_trials_per_base)
                 )
-                fit_left = (
-                    bool(getattr(config, "fit_swap_enabled", True))
-                    and int(max_fit_swap_trials_per_base) > 0
-                    and int(fit_swap_trials_by_base.get(h_valid, 0)) < int(max_fit_swap_trials_per_base)
-                )
-                if not sweet_left and not fit_left:
+                if not sweet_left:
                     continue
 
             # evaluate (cache)
@@ -922,70 +840,6 @@ def _generate_sell_mode(
 
             pre_sweet_prop = base_prop
             pre_sweet_hash = dedupe_hash(pre_sweet_prop.deal)
-
-            fit_enabled = bool(getattr(config, "fit_swap_enabled", True))
-            if fit_enabled and int(max_fit_swap_trials_per_base) > 0:
-                if int(fit_swap_trials_by_base.get(h_valid, 0)) < int(max_fit_swap_trials_per_base):
-                    try:
-                        from .fit_swap import maybe_apply_fit_swap  # local import to avoid cycles
-                    except ImportError:
-                        maybe_apply_fit_swap = None  # type: ignore
-
-                    if maybe_apply_fit_swap is not None:
-                        val_rem = max(0, int(budget.max_validations) - int(stats.validations))
-                        eval_rem = max(0, int(budget.max_evaluations) - int(stats.evaluations))
-
-                        trial_idx = int(fit_swap_trials_by_base.get(h_valid, 0))
-                        local_seed = _compute_sweetener_seed(
-                            config,
-                            tick_ctx,
-                            initiator_team_id=seller_id,
-                            counterparty_team_id=buyer_id,
-                            base_hash=pre_sweet_hash,
-                            skeleton_hash=f"fit_swap|{h}",
-                            trial_index=trial_idx,
-                        )
-                        local_rng = random.Random(int(local_seed))
-
-                        res = maybe_apply_fit_swap(
-                            pre_sweet_prop,
-                            initiator_team_id=seller_id,
-                            tick_ctx=tick_ctx,
-                            catalog=catalog,
-                            config=config,
-                            budget=budget,
-                            banned_asset_keys=banned_asset_keys,
-                            banned_players=banned_players,
-                            banned_receivers_by_player=banned_receivers_by_player,
-                            protected_player_id=cand2.focal_player_id,
-                            opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
-                            rng=local_rng,
-                            validations_remaining=int(val_rem),
-                            evaluations_remaining=int(eval_rem),
-                            stats=stats,
-                        )
-                        # maybe_apply_fit_swap can return None (e.g. no FIT_FAILS / empty pool / budget gate).
-                        # Count it as a trial to avoid repeatedly retrying the same base deal.
-                        if res is None:
-                            fit_swap_trials_by_base[h_valid] = int(fit_swap_trials_by_base.get(h_valid, 0)) + 1
-
-                        # budget counters
-                        stats.validations += int(getattr(res, "validations_used", 0) or 0)
-                        stats.evaluations += int(getattr(res, "evaluations_used", 0) or 0)
-
-                        # telemetry
-                        tried = int(getattr(res, "candidates_tried", 0) or 0)
-                        if tried > 0:
-                            stats.fit_swap_triggers += 1
-                            stats.fit_swap_candidates_tried += tried
-                            fit_swap_trials_by_base[h_valid] = int(fit_swap_trials_by_base.get(h_valid, 0)) + 1
-
-                            if bool(getattr(res, "swapped", False)):
-                                stats.fit_swap_success += 1
-
-                        # update base for sweetener stage
-                        pre_sweet_prop = getattr(res, "proposal", pre_sweet_prop) or pre_sweet_prop
-                        pre_sweet_hash = dedupe_hash(pre_sweet_prop.deal)
 
             best_prop = pre_sweet_prop
             if config.sweetener_enabled and int(config.sweetener_max_additions) > 0:

@@ -133,7 +133,6 @@ class TemplateEvalFallbackInCoreTests(unittest.TestCase):
             patch("trades.generation.dealgen.core.maybe_apply_sweeteners", side_effect=lambda p, **k: (p, 0, 0)),
             patch("trades.generation.dealgen.core._apply_target_repeat_penalty", side_effect=lambda p, **k: p),
             patch("trades.generation.dealgen.core._should_discard_prop", side_effect=discard_side_effect),
-            patch("trades.generation.dealgen.fit_swap.maybe_apply_fit_swap", return_value=None),
         ):
             core._generate_buy_mode(
                 initiator_buyer_id="BOS",
