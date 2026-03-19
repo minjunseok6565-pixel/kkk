@@ -1576,7 +1576,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
                 if dedupe_hash(deal) == expected_hash.strip():
                     committed = agreements.create_committed_deal(
                         deal,
-                        valid_days=2,
+                        valid_days=22,
                         current_date=in_game_date,
                         validate=False,   # already validated above
                         db_path=db_path,
@@ -1841,7 +1841,7 @@ async def api_trade_negotiation_commit(req: TradeNegotiationCommitRequest):
         if verdict == DealVerdict.ACCEPT:
             committed = agreements.create_committed_deal(
                 deal,
-                valid_days=2,
+                valid_days=22,
                 current_date=in_game_date,
                 validate=False,   # already validated above
                 db_path=db_path,  # keep hash/locking based on the same db snapshot
