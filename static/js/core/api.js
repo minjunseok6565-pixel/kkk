@@ -256,6 +256,29 @@ async function fetchStateSummary({ signal = undefined } = {}) {
   return fetchJson("/api/state/summary", { signal });
 }
 
+async function fetchTradeLabTeamAssets({ teamId, signal = undefined } = {}) {
+  const normalizedTeamId = String(teamId || "").trim().toUpperCase();
+  if (!normalizedTeamId) throw new Error("team_id가 필요합니다.");
+  const params = new URLSearchParams({ team_id: normalizedTeamId });
+  return fetchJson(`/api/trade/lab/team-assets?${params.toString()}`, { signal });
+}
+
+async function evaluateTradeDealForTeam({ deal, teamId, includeBreakdown = true, signal = undefined } = {}) {
+  const normalizedTeamId = String(teamId || "").trim().toUpperCase();
+  if (!normalizedTeamId) throw new Error("team_id가 필요합니다.");
+  if (!deal || typeof deal !== "object") throw new Error("deal payload가 필요합니다.");
+  return fetchJson("/api/trade/evaluate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      deal,
+      team_id: normalizedTeamId,
+      include_breakdown: Boolean(includeBreakdown),
+    }),
+    signal,
+  });
+}
+
 function normalizeCacheKey(key) {
   return String(key || "").trim();
 }
@@ -620,6 +643,8 @@ export {
   commitTradeNegotiationSession,
   submitCommittedTradeDeal,
   fetchStateSummary,
+  fetchTradeLabTeamAssets,
+  evaluateTradeDealForTeam,
   fetchCachedJson,
   getCachedValue,
   setCachedValue,
