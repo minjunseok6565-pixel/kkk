@@ -28,7 +28,6 @@ class AssetCatalogOutgoingReworkTests(unittest.TestCase):
             salary_m=2.0,
             remaining_years=float(remaining_years),
             is_expiring=bool(is_expiring),
-            lock=ac.LockInfo(is_locked=False),
             recent_signing_banned_until=None,
             aggregation_banned_until=None,
             aggregation_solo_only=False,
