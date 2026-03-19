@@ -495,8 +495,11 @@ class CounterOfferBuilder:
                     max_evaluations=min(int(cfg.max_evaluations) - evaluations_used, 40),
                     max_repairs=int(cfg.max_repairs),
                 )
+                # Policy parity with deal generation:
+                # in counter-offer flow, USER is the proposer/initiator.
                 res = maybe_apply_fit_swap(
                     base_prop,
+                    initiator_team_id=user,
                     tick_ctx=tick_ctx,
                     catalog=getattr(tick_ctx, "asset_catalog", None),
                     config=dealgen_cfg,
@@ -612,8 +615,11 @@ class CounterOfferBuilder:
                     max_repairs=int(cfg.max_repairs),
                 )
 
+                # Policy parity with deal generation:
+                # in counter-offer flow, USER is the proposer/initiator.
                 best_prop, extra_v, extra_e = maybe_apply_sweeteners(
                     base_prop,
+                    initiator_team_id=user,
                     tick_ctx=tick_ctx,
                     catalog=getattr(tick_ctx, "asset_catalog", None),
                     config=dealgen_cfg,

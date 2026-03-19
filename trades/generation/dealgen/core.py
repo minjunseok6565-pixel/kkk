@@ -498,18 +498,19 @@ def _generate_buy_mode(
 
                         res = maybe_apply_fit_swap(
                             pre_sweet_prop,
+                            initiator_team_id=buyer_id,
                             tick_ctx=tick_ctx,
                             catalog=catalog,
                             config=config,
                             budget=budget,
-                            validations_remaining=int(val_rem),
-                            evaluations_remaining=int(eval_rem),
-                                        banned_asset_keys=banned_asset_keys,
+                            banned_asset_keys=banned_asset_keys,
                             banned_players=banned_players,
                             banned_receivers_by_player=banned_receivers_by_player,
                             protected_player_id=cand2.focal_player_id,
                             opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
                             rng=local_rng,
+                            validations_remaining=int(val_rem),
+                            evaluations_remaining=int(eval_rem),
                             stats=stats,
                         )
 
@@ -555,6 +556,7 @@ def _generate_buy_mode(
 
                     best_prop, extra_v, extra_e = maybe_apply_sweeteners(
                         pre_sweet_prop,
+                        initiator_team_id=buyer_id,
                         tick_ctx=tick_ctx,
                         catalog=catalog,
                         config=config,
@@ -947,18 +949,19 @@ def _generate_sell_mode(
 
                         res = maybe_apply_fit_swap(
                             pre_sweet_prop,
+                            initiator_team_id=seller_id,
                             tick_ctx=tick_ctx,
                             catalog=catalog,
                             config=config,
                             budget=budget,
-                            validations_remaining=int(val_rem),
-                            evaluations_remaining=int(eval_rem),
-                                        banned_asset_keys=banned_asset_keys,
+                            banned_asset_keys=banned_asset_keys,
                             banned_players=banned_players,
                             banned_receivers_by_player=banned_receivers_by_player,
                             protected_player_id=cand2.focal_player_id,
                             opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
                             rng=local_rng,
+                            validations_remaining=int(val_rem),
+                            evaluations_remaining=int(eval_rem),
                             stats=stats,
                         )
                         # maybe_apply_fit_swap can return None (e.g. no FIT_FAILS / empty pool / budget gate).
@@ -1002,11 +1005,12 @@ def _generate_sell_mode(
 
                     best_prop, extra_v, extra_e = maybe_apply_sweeteners(
                         pre_sweet_prop,
+                        initiator_team_id=seller_id,
                         tick_ctx=tick_ctx,
                         catalog=catalog,
                         config=config,
                         budget=budget,
-                                banned_asset_keys=banned_asset_keys,
+                        banned_asset_keys=banned_asset_keys,
                         rng=local_rng,
                         stats=stats,
                     )
