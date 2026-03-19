@@ -8,7 +8,6 @@ from ...errors import (
     TradeError,
     DEAL_INVALIDATED,
     ROSTER_LIMIT,
-    ASSET_LOCKED,
     PLAYER_NOT_OWNED,
     PICK_NOT_OWNED,
     SWAP_NOT_OWNED,
@@ -472,10 +471,6 @@ class DealGeneratorConfig:
     # --- RNG determinism
     deterministic_seed_salt: str = "deal_generator_v2"
 
-    # --- catalog behavior
-    # allow_locked_by_deal_id가 주어진 경우, catalog를 1회 재빌드하여 locked asset을 풀어줄지
-    rebuild_catalog_when_allow_locked: bool = True
-
     # --- soft guard (invalid 폭발 방지)
     # 딜 적용 후 추정 payroll_after가 second_apron 이상이면 one-for-one 형태만 남긴다(soft).
     # (SSOT: SalaryMatchingRule은 payroll_after 기반으로 apron status를 판정한다)
@@ -630,7 +625,6 @@ class RuleFailureKind(str, Enum):
     DEADLINE = "deadline"
     SALARY_MATCHING = "salary_matching"
     ROSTER_LIMIT = "roster_limit"
-    ASSET_LOCK = "asset_lock"
     PLAYER_ELIGIBILITY = "player_eligibility"
     RETURN_TO_TRADING_TEAM = "return_to_trading_team_same_season"
     PICK_RULES = "pick_rules"
@@ -661,7 +655,7 @@ def parse_trade_error(err: TradeError) -> RuleFailure:
     """TradeError -> RuleFailure.
 
     - 대부분의 rules는 TradeError.details에 {"rule": rule_id, ...}를 넣는다.
-    - 일부는 code로만 구분한다(예: ROSTER_LIMIT, ASSET_LOCKED, DUPLICATE_ASSET, OWNERSHIP 계열).
+    - 일부는 code로만 구분한다(예: ROSTER_LIMIT, DUPLICATE_ASSET, OWNERSHIP 계열).
     """
 
     details: Dict[str, Any] = {}
@@ -684,15 +678,6 @@ def parse_trade_error(err: TradeError) -> RuleFailure:
             message=err.message,
             rule_id="roster_limit",
             team_id=str(details.get("team_id") or "") or None,
-            details=details,
-        )
-    if err.code == ASSET_LOCKED:
-        return RuleFailure(
-            kind=RuleFailureKind.ASSET_LOCK,
-            code=err.code,
-            message=err.message,
-            rule_id="asset_lock",
-            asset_key=str(details.get("asset_key") or "") or None,
             details=details,
         )
     if err.code in (PLAYER_NOT_OWNED, PICK_NOT_OWNED, SWAP_NOT_OWNED, SWAP_NOT_FOUND, SWAP_INVALID):

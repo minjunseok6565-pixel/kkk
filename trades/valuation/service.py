@@ -529,7 +529,6 @@ def evaluate_deal_for_team(
     allow_counter: bool = True,
     rng: Optional[random.Random] = None,
     rng_seed: Optional[int] = None,
-    allow_locked_by_deal_id: Optional[str] = None,
     validate: bool = True,
 ) -> Tuple[DealDecision, TeamDealEvaluation]:
     """
@@ -562,8 +561,6 @@ def evaluate_deal_for_team(
         Whether the decision policy is allowed to return COUNTER.
     rng / rng_seed:
         Control the (optional) stochastic edge behavior for counter decisions.
-    allow_locked_by_deal_id:
-        Pass-through to validate_deal for committed-deal lock exceptions.
     validate:
         If True, runs validate_deal first. (Recommended for server usage.)
     """
@@ -615,7 +612,6 @@ def evaluate_deal_for_team(
             validate_deal(
                 deal,
                 current_date=cd,
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
                 db_path=dbp,
                 tick_ctx=rule_tick_ctx,
             )
@@ -623,7 +619,6 @@ def evaluate_deal_for_team(
             validate_deal(
                 deal,
                 current_date=cd,
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
                 db_path=dbp,
             )
 

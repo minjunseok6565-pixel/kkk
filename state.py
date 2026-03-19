@@ -77,8 +77,6 @@ __all__ = [
     "export_trade_assets_snapshot",
     "trade_agreements_get",
     "trade_agreements_set",
-    "asset_locks_get",
-    "asset_locks_set",
     "negotiations_get",
     "negotiations_set",
     "negotiation_session_get",
@@ -769,7 +767,6 @@ def export_trade_context_snapshot(
                 teams = {}
 
             return {
-                "asset_locks": _to_plain(v.get("asset_locks") or {}),
                 "league": league_ctx,
                 "my_team_id": v["postseason"]["my_team_id"],
                 "teams": teams,
@@ -789,7 +786,6 @@ def export_trade_context_snapshot(
             "season_start": league["season_start"],
         }
         return {
-            "asset_locks": _to_plain(v.get("asset_locks") or {}),
             "league": league_ctx,
             "my_team_id": v["postseason"]["my_team_id"],
         }
@@ -883,17 +879,6 @@ def trade_agreements_set(value: dict) -> None:
         state["trade_agreements"] = deepcopy(value)
 
     _mutate_state("trade_agreements_set", _impl)
-
-
-def asset_locks_get() -> dict:
-    return _read_state(lambda v: _to_plain(v.get("asset_locks") or {}))
-
-
-def asset_locks_set(value: dict) -> None:
-    def _impl(state: dict) -> None:
-        state["asset_locks"] = deepcopy(value)
-
-    _mutate_state("asset_locks_set", _impl)
 
 
 def negotiations_get() -> dict:

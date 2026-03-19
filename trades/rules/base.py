@@ -256,19 +256,7 @@ def build_trade_context(
             f"missing meta for player_ids={missing}"
         )
         
-    # -----------------------------------------------------------------
-    # Per-deal rule context MUST NOT mutate tick-level snapshot state.
-    # Copy known-mutable submaps so rule evaluation stays order-independent.
-    # -----------------------------------------------------------------
     ctx_state = dict(ctx_state_base)
-    try:
-        asset_locks = ctx_state.get("asset_locks")
-        if isinstance(asset_locks, dict):
-            ctx_state["asset_locks"] = dict(asset_locks)
-        elif asset_locks is None:
-            ctx_state["asset_locks"] = {}
-    except Exception:
-        ctx_state["asset_locks"] = {}
     ctx_state["players"] = players_meta
     
     return TradeContext(

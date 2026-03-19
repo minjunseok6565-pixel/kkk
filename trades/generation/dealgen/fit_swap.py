@@ -157,8 +157,6 @@ def _pick_replacement_pool(
                 continue
             if str(pid) in exclude:
                 continue
-            if bool(getattr(p.lock, "is_locked", False)):
-                continue
             # return ban
             if to_team and str(to_team).upper() in set(str(x).upper() for x in (p.return_ban_teams or tuple())):
                 continue
@@ -286,7 +284,6 @@ def maybe_apply_fit_swap(
     catalog: TradeAssetCatalog,
     config: DealGeneratorConfig,
     budget: DealGeneratorBudget,
-    allow_locked_by_deal_id: Optional[str],
     banned_asset_keys: Set[str],
     banned_players: Set[str],
     banned_receivers_by_player: Dict[str, Set[str]],
@@ -492,7 +489,6 @@ def maybe_apply_fit_swap(
             tick_ctx,
             catalog,
             config,
-            allow_locked_by_deal_id=allow_locked_by_deal_id,
             budget=fit_budget,
             banned_asset_keys=banned_asset_keys,
             banned_players=banned_players,

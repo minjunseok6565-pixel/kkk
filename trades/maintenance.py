@@ -19,12 +19,12 @@ def maintain_trade_state(
     It centralizes "cleanup" responsibilities that should NOT occur inside validation rules.
 
     Currently:
-      - Expires committed deals / agreements and releases any associated asset locks.
+      - Expires committed deals / agreements.
 
     Args:
         current_date: The in-game date to use for expiration checks.
         db_path: Reserved for future DB-backed maintenance steps (kept for API symmetry).
-                Currently unused; state-backed agreements/locks are in SSOT.
+                Currently unused; state-backed agreement expiration is in SSOT.
     """
     today = current_date or state.get_current_date_as_date()
     gc_expired_agreements(current_date=today)

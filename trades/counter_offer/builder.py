@@ -301,7 +301,6 @@ class CounterOfferBuilder:
         current_date: date,
         db_path: str,
         session: Optional[Mapping[str, Any]] = None,
-        allow_locked_by_deal_id: Optional[str] = None,
         tick_ctx: Optional[TradeGenerationTickContext] = None,
         skip_repo_integrity_check: bool = True,
     ) -> Optional[CounterProposal]:
@@ -349,14 +348,13 @@ class CounterOfferBuilder:
                     current_date=current_date,
                     db_path=db_path,
                     session=session,
-                    allow_locked_by_deal_id=allow_locked_by_deal_id,
                     tick_ctx=tc,
                     skip_repo_integrity_check=skip_repo_integrity_check,
                 )
 
         # Validate base deal legality (SSOT)
         try:
-            tick_ctx.validate_deal(base_deal, allow_locked_by_deal_id=allow_locked_by_deal_id)
+            tick_ctx.validate_deal(base_deal)
         except TradeError:
             return None
 
@@ -441,7 +439,7 @@ class CounterOfferBuilder:
                 return None
 
             try:
-                tick_ctx.validate_deal(deal2c, allow_locked_by_deal_id=allow_locked_by_deal_id)
+                tick_ctx.validate_deal(deal2c)
                 validations_used += 1
             except TradeError:
                 validations_used += 1
@@ -503,7 +501,6 @@ class CounterOfferBuilder:
                     catalog=getattr(tick_ctx, "asset_catalog", None),
                     config=dealgen_cfg,
                     budget=budget,
-                    allow_locked_by_deal_id=allow_locked_by_deal_id,
                     banned_asset_keys=set(),
                     banned_players=set(),
                     banned_receivers_by_player={},
@@ -621,7 +618,6 @@ class CounterOfferBuilder:
                     catalog=getattr(tick_ctx, "asset_catalog", None),
                     config=dealgen_cfg,
                     budget=budget,
-                    allow_locked_by_deal_id=allow_locked_by_deal_id,
                     banned_asset_keys=set(),
                     rng=rng,
                     stats=stats,
@@ -949,12 +945,6 @@ def _propose_player_sweeteners(
                 continue
             if str(pid) in all_moving_players:
                 continue
-            # lock
-            try:
-                if bool(getattr(getattr(c, "lock", None), "is_locked", False)):
-                    continue
-            except Exception:
-                pass
             # return ban
             try:
                 bans = set(str(x).upper() for x in (getattr(c, "return_ban_teams", None) or tuple()))

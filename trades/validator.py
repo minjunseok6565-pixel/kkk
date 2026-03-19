@@ -14,16 +14,10 @@ if TYPE_CHECKING:
 def validate_deal(
     deal: Deal,
     current_date: Optional[date] = None,
-    allow_locked_by_deal_id: Optional[str] = None,
     db_path: Optional[str] = None,
     tick_ctx: Optional["TradeRuleTickContext"] = None,
     integrity_check: Optional[bool] = None,
 ) -> None:
-    # Avoid frame inspection inside build_trade_context; pass the lock exception explicitly.
-    extra = None
-    if allow_locked_by_deal_id is not None:
-        extra = {"allow_locked_by_deal_id": str(allow_locked_by_deal_id)}
-
     ctx = None
     try:
         deal = canonicalize_deal(deal)
@@ -33,7 +27,6 @@ def validate_deal(
             current_date=current_date,
             db_path=db_path,
             tick_ctx=tick_ctx,
-            extra=extra,
         )
         if integrity_check is None:
             # Default: validate integrity once for standalone calls,

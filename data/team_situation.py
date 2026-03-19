@@ -94,7 +94,6 @@ class TeamConstraints:
     cap_space: float
     apron_status: Literal["BELOW_CAP", "OVER_CAP", "ABOVE_1ST_APRON", "ABOVE_2ND_APRON"]
     hard_flags: Dict[str, bool] = field(default_factory=dict)
-    locks_count: int = 0
     # Market-level constraint: team temporarily throttled from trading activity (anti-spam / recent-action cooldown).
     cooldown_active: bool = False
     deadline_pressure: float = 0.0
@@ -165,7 +164,6 @@ class TeamSituationContext:
     trade_market: Dict[str, Any]
     trade_memory: Dict[str, Any]
     negotiations: Dict[str, Any]
-    asset_locks: Dict[str, Any]
     # Precomputed per-team ratings and percentiles for league-relative evaluation.
     team_ratings_index: Dict[str, Dict[str, float]]
     # Precomputed per-team trade eligibility summaries (SSOT-backed).
@@ -380,7 +378,6 @@ def build_team_situation_context(
         trade_market=_to_plain(workflow_state.get("trade_market", {}) or {}),
         trade_memory=_to_plain(workflow_state.get("trade_memory", {}) or {}),
         negotiations=_to_plain(workflow_state.get("negotiations", {}) or {}),
-        asset_locks=_to_plain(trade_state.get("asset_locks", {}) or {}),
         team_ratings_index=ratings_index,
         team_ban_index=_to_plain(team_ban_index),
     )
@@ -922,9 +919,6 @@ class TeamSituationEvaluator:
         if acquired_ban > 0:
             hard_flags["AGGREGATION_BAN"] = True
 
-        # asset locks that touch this team
-        locks_count = self._count_team_related_locks(team_id, roster)
-
         # market cooldown (from workflow_state["trade_market"]["cooldowns"])
         cooldown_active = _cooldown_active(self.ctx.trade_market, team_id)
         if cooldown_active:
@@ -938,7 +932,6 @@ class TeamSituationEvaluator:
             cap_space=float(cap_space),
             apron_status=apron_status,
             hard_flags=hard_flags,
-            locks_count=int(locks_count),
             cooldown_active=bool(cooldown_active),
             deadline_pressure=float(deadline_pressure),
         )
@@ -1777,76 +1770,6 @@ class TeamSituationEvaluator:
 
         return float(total)
 
-    def _count_team_related_locks(self, team_id: str, roster: Optional[List[Dict[str, Any]]] = None) -> int:
-        locks = self.ctx.asset_locks or {}
-        if not isinstance(locks, dict) or not locks:
-            return 0
-
-        # Build quick membership sets
-        if roster is None:
-            # Fallback: keep method safe when called outside the main evaluation path.
-            try:
-                roster = self._get_roster(team_id)
-            except Exception:
-                roster = []
- 
-        roster_pids = {str(p.get("player_id")) for p in roster if isinstance(p, dict) and p.get("player_id")}
-
-        pick_ids_owned = set()
-        for pick in (self.ctx.assets_snapshot.get("draft_picks", {}) or {}).values():
-            if not isinstance(pick, dict):
-                continue
-            if str(pick.get("owner_team", "")).upper() != team_id:
-                continue
-            if pick.get("pick_id"):
-                pick_ids_owned.add(str(pick.get("pick_id")))
-
-        swap_ids_owned = set()
-        for sw in (self.ctx.assets_snapshot.get("swap_rights", {}) or {}).values():
-            if not isinstance(sw, dict):
-                continue
-            if str(sw.get("owner_team", "")).upper() != team_id:
-                continue
-            # swap_rights table has `active` (1/0). Only count active by default.
-            try:
-                if int(sw.get("active", 1) or 0) == 0:
-                    continue
-            except Exception:
-                pass
-            if sw.get("swap_id"):
-                swap_ids_owned.add(str(sw.get("swap_id")))
-
-        fixed_ids_owned = set()
-        for fa in (self.ctx.assets_snapshot.get("fixed_assets", {}) or {}).values():
-            if not isinstance(fa, dict):
-                continue
-            if str(fa.get("owner_team", "")).upper() != team_id:
-                continue
-            if fa.get("asset_id"):
-                fixed_ids_owned.add(str(fa.get("asset_id")))
-
-        n = 0
-        for key in locks.keys():
-            if not isinstance(key, str):
-                continue
-            if key.startswith("player:"):
-                pid = key.split(":", 1)[1]
-                if pid in roster_pids:
-                    n += 1
-            elif key.startswith("pick:"):
-                pid = key.split(":", 1)[1]
-                if pid in pick_ids_owned:
-                    n += 1
-            elif key.startswith("swap:"):
-                sid = key.split(":", 1)[1]
-                if sid in swap_ids_owned:
-                    n += 1
-            elif key.startswith("fixed_asset:"):
-                aid = key.split(":", 1)[1]
-                if aid in fixed_ids_owned:
-                    n += 1
-        return n
-
 
 # ------------------------------------------------------------
 # Records index
@@ -2472,8 +2395,6 @@ def _build_reasons(
     if constraints.hard_flags:
         keys = ", ".join(sorted(constraints.hard_flags.keys()))
         r.append(f"룰/제약 플래그: {keys} → 트레이드 설계가 까다로울 수 있음.")
-    if constraints.locks_count > 0:
-        r.append(f"현재 협상/락 걸린 자산이 {constraints.locks_count}개 있어 선택지가 일부 제한됨.")
     if getattr(constraints, "cooldown_active", False):
         r.append("현재 트레이드 시장 쿨다운 상태: 당분간 적극적인 제안/협상 빈도를 낮춤.")
 

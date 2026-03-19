@@ -143,7 +143,6 @@ class TemplateEvalFallbackInCoreTests(unittest.TestCase):
                 budget=budget,
                 rng=random.Random(7),
                 max_results=5,
-                allow_locked_by_deal_id=None,
                 stats=stats,
             )
 

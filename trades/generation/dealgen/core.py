@@ -46,77 +46,6 @@ class DealGenerator:
         self.config = config or DealGeneratorConfig()
         self.last_stats: Optional[DealGeneratorStats] = None
 
-        # Cache for per-call asset catalogs built with allow_locked_by_deal_id.
-        #
-        # NOTE:
-        # TradeGenerationTickContext is @dataclass(slots=True) and is NOT weakref-able.
-        # So we keep a single-tick cache keyed by allow_locked_by_deal_id, and clear it
-        # whenever the tick_ctx identity changes.
-        self._asset_catalog_cache_tick_id: Optional[int] = None
-        self._asset_catalog_cache: Dict[str, TradeAssetCatalog] = {}
-
-
-    def _get_asset_catalog_for_call(
-        self,
-        tick_ctx: TradeGenerationTickContext,
-        *,
-        allow_locked_by_deal_id: Optional[str],
-    ) -> Optional[TradeAssetCatalog]:
-        """이번 generate_for_team 호출에 사용할 TradeAssetCatalog를 반환.
-
-        정책:
-        - allow_locked_by_deal_id가 None/blank 이거나, config.rebuild_catalog_when_allow_locked=False면:
-          tick_ctx.asset_catalog을 재사용하되, 없으면 build해서 tick_ctx.asset_catalog에 주입 후 사용.
-        - allow_locked_by_deal_id가 유효하고 rebuild가 True면:
-          allow_locked_by_deal_id별로 catalog를 build하고, tick_ctx 단위(id 기준)로 캐싱하여 재사용.
-        - allow-locked rebuild 실패 시:
-          base catalog(tick_ctx.asset_catalog)을 fallback으로 사용하고,
-          같은 tick에서 반복 rebuild 시도를 막기 위해 fallback을 negative-cache로 저장.
-        """
-        # Normalize allow_locked_by_deal_id (treat empty/whitespace as None)
-        allow_id = str(allow_locked_by_deal_id or "").strip()
-
-        # If allow-locked rebuild is disabled OR allow_id is empty => base catalog path
-        if not allow_id or not bool(getattr(self.config, "rebuild_catalog_when_allow_locked", True)):
-            if tick_ctx.asset_catalog is None:
-                try:
-                    tick_ctx.asset_catalog = build_trade_asset_catalog(tick_ctx=tick_ctx)
-                except Exception:
-                    return None
-            return tick_ctx.asset_catalog
-
-        # Ensure base catalog exists for fallback
-        if tick_ctx.asset_catalog is None:
-            try:
-                tick_ctx.asset_catalog = build_trade_asset_catalog(tick_ctx=tick_ctx)
-            except Exception:
-                return None
-        base_cat = tick_ctx.asset_catalog
-
-        # Single-tick cache: clear whenever tick_ctx identity changes.
-        tick_id = id(tick_ctx)
-        if self._asset_catalog_cache_tick_id != tick_id:
-            self._asset_catalog_cache_tick_id = tick_id
-            self._asset_catalog_cache.clear()
-
-        cached = self._asset_catalog_cache.get(allow_id)
-        if cached is not None:
-            return cached
-
-        # Build allow-locked catalog (and cache)
-        try:
-            cat = build_trade_asset_catalog(
-                tick_ctx=tick_ctx,
-                allow_locked_by_deal_id=allow_id,
-            )
-        except Exception:
-            # Fallback to base catalog and negative-cache to avoid repeated rebuild attempts this tick.
-            self._asset_catalog_cache[allow_id] = base_cat
-            return base_cat
-
-        self._asset_catalog_cache[allow_id] = cat
-        return cat
-
 
     # ---------------------------------------------------------------------
     # Public API
@@ -127,7 +56,6 @@ class DealGenerator:
         tick_ctx: TradeGenerationTickContext,
         *,
         max_results: int = 8,
-        allow_locked_by_deal_id: Optional[str] = None,
     ) -> List[DealProposal]:
         """team_id를 기준으로 2-team 딜 후보를 생성.
 
@@ -142,11 +70,12 @@ class DealGenerator:
         """
 
         # --- asset catalog 확보
-        # allow_locked_by_deal_id가 주어진 경우, tick_ctx 단위 캐시를 사용해 1회만 재빌드/재사용한다.
-        # tick_ctx.asset_catalog이 None이면 자동으로 build한다.
-        catalog = self._get_asset_catalog_for_call(tick_ctx, allow_locked_by_deal_id=allow_locked_by_deal_id)
-        if catalog is None:
-            return []
+        if tick_ctx.asset_catalog is None:
+            try:
+                tick_ctx.asset_catalog = build_trade_asset_catalog(tick_ctx=tick_ctx)
+            except Exception:
+                return []
+        catalog = tick_ctx.asset_catalog
 
         tid = str(team_id).upper()
 
@@ -183,7 +112,6 @@ class DealGenerator:
                 budget=budget,
                 rng=rng,
                 max_results=int(max_results),
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
                 stats=stats,
             )
         else:
@@ -195,7 +123,6 @@ class DealGenerator:
                 budget=budget,
                 rng=rng,
                 max_results=int(max_results),
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
                 stats=stats,
             )
 
@@ -300,7 +227,6 @@ def _generate_buy_mode(
     budget: DealGeneratorBudget,
     rng: random.Random,
     max_results: int,
-    allow_locked_by_deal_id: Optional[str],
     stats: DealGeneratorStats,
 ) -> List[DealProposal]:
     buyer_id = str(initiator_buyer_id).upper()
@@ -460,7 +386,6 @@ def _generate_buy_mode(
                 tick_ctx,
                 catalog,
                 config,
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
                 budget=budget,
                 banned_asset_keys=banned_asset_keys,
                 banned_players=banned_players,
@@ -533,7 +458,6 @@ def _generate_buy_mode(
                 catalog=catalog,
                 config=config,
                 budget=budget,
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
                 opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
                 stats=stats,
             )
@@ -580,8 +504,7 @@ def _generate_buy_mode(
                             budget=budget,
                             validations_remaining=int(val_rem),
                             evaluations_remaining=int(eval_rem),
-                            allow_locked_by_deal_id=allow_locked_by_deal_id,
-                            banned_asset_keys=banned_asset_keys,
+                                        banned_asset_keys=banned_asset_keys,
                             banned_players=banned_players,
                             banned_receivers_by_player=banned_receivers_by_player,
                             protected_player_id=cand2.focal_player_id,
@@ -636,7 +559,6 @@ def _generate_buy_mode(
                         catalog=catalog,
                         config=config,
                         budget=budget,
-                        allow_locked_by_deal_id=allow_locked_by_deal_id,
                         banned_asset_keys=banned_asset_keys,
                         rng=local_rng,
                         stats=stats,
@@ -806,7 +728,6 @@ def _generate_sell_mode(
     budget: DealGeneratorBudget,
     rng: random.Random,
     max_results: int,
-    allow_locked_by_deal_id: Optional[str],
     stats: DealGeneratorStats,
 ) -> List[DealProposal]:
     seller_id = str(initiator_seller_id).upper()
@@ -859,7 +780,6 @@ def _generate_sell_mode(
         budget=budget,
         rng=rng,
         banned_players=banned_players,
-        allow_locked_by_deal_id=allow_locked_by_deal_id,
     )
 
     def _process_sell_candidates_for_pair(
@@ -916,7 +836,6 @@ def _generate_sell_mode(
                 tick_ctx,
                 catalog,
                 config,
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
                 budget=budget,
                 banned_asset_keys=banned_asset_keys,
                 banned_players=banned_players,
@@ -989,7 +908,6 @@ def _generate_sell_mode(
                 catalog=catalog,
                 config=config,
                 budget=budget,
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
                 opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
                 stats=stats,
             )
@@ -1035,8 +953,7 @@ def _generate_sell_mode(
                             budget=budget,
                             validations_remaining=int(val_rem),
                             evaluations_remaining=int(eval_rem),
-                            allow_locked_by_deal_id=allow_locked_by_deal_id,
-                            banned_asset_keys=banned_asset_keys,
+                                        banned_asset_keys=banned_asset_keys,
                             banned_players=banned_players,
                             banned_receivers_by_player=banned_receivers_by_player,
                             protected_player_id=cand2.focal_player_id,
@@ -1089,8 +1006,7 @@ def _generate_sell_mode(
                         catalog=catalog,
                         config=config,
                         budget=budget,
-                        allow_locked_by_deal_id=allow_locked_by_deal_id,
-                        banned_asset_keys=banned_asset_keys,
+                                banned_asset_keys=banned_asset_keys,
                         rng=local_rng,
                         stats=stats,
                     )

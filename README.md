@@ -16,3 +16,11 @@
 3. Run feature-specific scripts/modules from the repository root.
 
 Because this repository has multiple entry points, there is no single command that runs every subsystem.
+
+## Quick test check
+
+When dependencies are installed, you can run a lightweight regression check from the repository root:
+
+```bash
+python -m pytest -q tests/test_team_utils_lightweight.py
+```
