@@ -296,10 +296,6 @@ def apply_ai_proactive_listings(
         if p in active_pids:
             continue
 
-        lock = getattr(player, "lock", None)
-        if bool(getattr(lock, "is_locked", False)):
-            continue
-
         banned_until = _parse_iso_ymd(getattr(player, "recent_signing_banned_until", None))
         if banned_until is not None and today < banned_until:
             continue

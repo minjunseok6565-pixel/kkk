@@ -1214,7 +1214,6 @@ async def api_trade_submit_committed(req: TradeSubmitCommittedRequest):
         validate_deal(
             deal,
             current_date=in_game_date,
-            allow_locked_by_deal_id=req.deal_id,
         )
         transaction = apply_deal_to_db(
             db_path=db_path,

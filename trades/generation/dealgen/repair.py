@@ -31,7 +31,6 @@ def repair_until_valid(
     catalog: TradeAssetCatalog,
     config: DealGeneratorConfig,
     *,
-    allow_locked_by_deal_id: Optional[str],
     budget: DealGeneratorBudget,
     banned_asset_keys: Set[str],
     banned_players: Set[str],
@@ -52,7 +51,7 @@ def repair_until_valid(
 
     for _ in range(int(budget.max_repairs) + 1):
         try:
-            tick_ctx.validate_deal(cand.deal, allow_locked_by_deal_id=allow_locked_by_deal_id)
+            tick_ctx.validate_deal(cand.deal)
             validations_used += 1
             return True, cand, validations_used
         except TradeError as err:
@@ -109,7 +108,7 @@ def repair_once(
     """
 
     # 구조적으로 수리 의미가 거의 없는 유형
-    if failure.kind in (RuleFailureKind.ASSET_LOCK, RuleFailureKind.OWNERSHIP, RuleFailureKind.DUPLICATE_ASSET):
+    if failure.kind in (RuleFailureKind.OWNERSHIP, RuleFailureKind.DUPLICATE_ASSET):
         return False
 
     if failure.kind == RuleFailureKind.PLAYER_ELIGIBILITY:
@@ -176,7 +175,7 @@ def _apply_prune_side_effects(
     banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
 ) -> None:
     # (C) 같은 invalid를 반복 생성하지 않도록 금지 목록에 반영
-    if failure.kind in (RuleFailureKind.ASSET_LOCK, RuleFailureKind.OWNERSHIP, RuleFailureKind.DUPLICATE_ASSET):
+    if failure.kind in (RuleFailureKind.OWNERSHIP, RuleFailureKind.DUPLICATE_ASSET):
         if failure.asset_key:
             banned_asset_keys.add(failure.asset_key)
 

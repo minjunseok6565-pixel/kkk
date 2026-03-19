@@ -11,7 +11,7 @@ from ..generation_tick import TradeGenerationTickContext
 from ..asset_catalog import TradeAssetCatalog, TeamOutgoingCatalog, PickBucketId
 
 from .types import DealGeneratorConfig, DealGeneratorBudget, DealGeneratorStats, DealProposal, RuleFailureKind, parse_trade_error
-from .utils import _clone_deal, _count_swaps, _count_picks, _count_seconds, _team_pick_flow, _is_locked_candidate
+from .utils import _clone_deal, _count_swaps, _count_picks, _count_seconds, _team_pick_flow
 from .dedupe import deal_signature_payload
 from .scoring import evaluate_and_score, _should_discard_prop
 from .pick_protection_decorator import default_sweetener_protection
@@ -110,7 +110,6 @@ def maybe_apply_sweeteners(
     catalog: TradeAssetCatalog,
     config: DealGeneratorConfig,
     budget: DealGeneratorBudget,
-    allow_locked_by_deal_id: Optional[str],
     banned_asset_keys: Set[str],
     rng: random.Random,
     stats: DealGeneratorStats,
@@ -261,7 +260,6 @@ def maybe_apply_sweeteners(
                 banned_asset_keys=(set(banned_asset_keys) | set(local_sweetener_bans)),
                 rng=rng,
                 limit=int(base_limit),
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
             )
             if not candidates:
                 continue
@@ -283,15 +281,15 @@ def maybe_apply_sweeteners(
 
                 # validate (no repair)
                 try:
-                    tick_ctx.validate_deal(deal2, allow_locked_by_deal_id=allow_locked_by_deal_id)
+                    tick_ctx.validate_deal(deal2)
                     extra_v += 1
                 except TradeError as err:
                     extra_v += 1
                     failure = parse_trade_error(err)
                     stats.bump_failure(str(failure.kind.value))
 
-                    # 근본적으로 금지/미소유/잠김/중복인 케이스는 global ban이 효과적
-                    if failure.kind in (RuleFailureKind.ASSET_LOCK, RuleFailureKind.OWNERSHIP, RuleFailureKind.DUPLICATE_ASSET):
+                    # 근본적으로 금지/미소유/중복인 케이스는 global ban이 효과적
+                    if failure.kind in (RuleFailureKind.OWNERSHIP, RuleFailureKind.DUPLICATE_ASSET):
                         banned_asset_keys.add(attempted_key)
                         if failure.asset_key:
                             banned_asset_keys.add(failure.asset_key)
@@ -427,7 +425,6 @@ def _collect_sweetener_candidates(
     banned_asset_keys: Set[str],
     rng: random.Random,
     limit: int,
-    allow_locked_by_deal_id: Optional[str],
 ) -> List[Asset]:
     """주어진 bucket에서 sweetener 후보를 여러 개 수집(Deal은 mutate하지 않음).
 
@@ -453,8 +450,6 @@ def _collect_sweetener_candidates(
         for sid in cands:
             s = out_cat.swaps.get(sid)
             if s is None:
-                continue
-            if _is_locked_candidate(getattr(s, 'lock', None), allow_locked_by_deal_id=allow_locked_by_deal_id):
                 continue
             a = s.as_asset(to_team=receiver_team)
             k = asset_key(a)
@@ -488,8 +483,6 @@ def _collect_sweetener_candidates(
             if p is None:
                 return False
             if not bool(getattr(p, 'within_max_years', True)):
-                return False
-            if _is_locked_candidate(getattr(p, 'lock', None), allow_locked_by_deal_id=allow_locked_by_deal_id):
                 return False
             return True
 
@@ -619,8 +612,6 @@ def _collect_sweetener_candidates(
             continue
         # intrinsic horizon: within_max_years가 false면 스킵(validator도 어차피 실패)
         if not bool(getattr(p, 'within_max_years', True)):
-            continue
-        if _is_locked_candidate(getattr(p, 'lock', None), allow_locked_by_deal_id=allow_locked_by_deal_id):
             continue
 
         # Stepien check for 1st
