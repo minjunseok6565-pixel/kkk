@@ -28,7 +28,7 @@ from .utils import (
 from .dedupe import dedupe_hash
 from .targets import select_targets_buy, select_targets_sell, select_buyers_for_sale_asset, _active_public_listing_meta_by_player
 from .skeletons import build_offer_skeletons_buy, build_offer_skeletons_sell, expand_variants
-from .repair import repair_until_valid
+from .repair import repair_until_valid_many
 from .scoring import evaluate_and_score, _proposal_from_cached_eval, _should_discard_prop
 from .pick_protection_decorator import maybe_apply_pick_protection_variants
 from .sweetener import maybe_apply_sweeteners
@@ -378,7 +378,7 @@ def _generate_buy_mode(
                 continue
             seen_skeleton.add(h)
 
-            ok, cand2, v_used = repair_until_valid(
+            cand_list, v_used = repair_until_valid_many(
                 cand,
                 tick_ctx,
                 catalog,
@@ -390,143 +390,144 @@ def _generate_buy_mode(
                 stats=stats,
             )
             stats.validations += v_used
-            if not ok or cand2 is None:
+            if not cand_list:
                 continue
 
-            # (A) repair 이후 base deal identity (수리 과정에서 서로 다른 스켈레톤이 같은 딜로 수렴 가능)
-            h_valid = dedupe_hash(cand2.deal)
+            for cand2 in cand_list:
+                # (A) repair 이후 base deal identity (수리 과정에서 서로 다른 스켈레톤이 같은 딜로 수렴 가능)
+                h_valid = dedupe_hash(cand2.deal)
 
-            # 이미 출력된 base라면, sweetener를 더 시도할 여지가 없을 때만 스킵(비용 가드)
-            if h_valid in seen_output:
-                sweet_left = (
-                    bool(getattr(config, "sweetener_enabled", True))
-                    and int(getattr(config, "sweetener_max_additions", 0)) > 0
-                    and int(sweetener_trials_by_base.get(h_valid, 0)) < int(max_sweetener_trials_per_base)
-                )
-                if not sweet_left:
-                    continue
+                # 이미 출력된 base라면, sweetener를 더 시도할 여지가 없을 때만 스킵(비용 가드)
+                if h_valid in seen_output:
+                    sweet_left = (
+                        bool(getattr(config, "sweetener_enabled", True))
+                        and int(getattr(config, "sweetener_max_additions", 0)) > 0
+                        and int(sweetener_trials_by_base.get(h_valid, 0)) < int(max_sweetener_trials_per_base)
+                    )
+                    if not sweet_left:
+                        continue
 
-            # evaluate (cache)
-            cached = base_eval_cache.get(h_valid)
-            if cached is None:
-                base_prop, e_used = evaluate_and_score(
-                    cand2.deal,
-                    buyer_id=buyer_id,
-                    seller_id=seller_id,
+                # evaluate (cache)
+                cached = base_eval_cache.get(h_valid)
+                if cached is None:
+                    base_prop, e_used = evaluate_and_score(
+                        cand2.deal,
+                        buyer_id=buyer_id,
+                        seller_id=seller_id,
+                        tick_ctx=tick_ctx,
+                        config=config,
+                        tags=tuple(cand2.tags),
+                        opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
+                        stats=stats,
+                    )
+                    stats.evaluations += e_used
+                    if base_prop is None:
+                        continue
+                    base_eval_cache[h_valid] = (
+                        base_prop.buyer_decision,
+                        base_prop.seller_decision,
+                        base_prop.buyer_eval,
+                        base_prop.seller_eval,
+                    )
+                else:
+                    bd, sd, be, se = cached
+                    base_prop = _proposal_from_cached_eval(
+                        cand2.deal,
+                        buyer_id=buyer_id,
+                        seller_id=seller_id,
+                        buyer_decision=bd,
+                        seller_decision=sd,
+                        buyer_eval=be,
+                        seller_eval=se,
+                        config=config,
+                        tags=tuple(cand2.tags),
+                        opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
+                    )
+
+                # --- pick protection decorator (post-pick, deal-local)
+                base_prop, pv_used, pe_used = maybe_apply_pick_protection_variants(
+                    base_prop,
                     tick_ctx=tick_ctx,
+                    catalog=catalog,
                     config=config,
-                    tags=tuple(cand2.tags),
+                    budget=budget,
                     opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
                     stats=stats,
                 )
-                stats.evaluations += e_used
-                if base_prop is None:
+                stats.validations += pv_used
+                stats.evaluations += pe_used
+
+                # filter: 너무 말도 안 되는 손해
+                if _should_discard_prop(base_prop, config):
                     continue
-                base_eval_cache[h_valid] = (
-                    base_prop.buyer_decision,
-                    base_prop.seller_decision,
-                    base_prop.buyer_eval,
-                    base_prop.seller_eval,
-                )
-            else:
-                bd, sd, be, se = cached
-                base_prop = _proposal_from_cached_eval(
-                    cand2.deal,
-                    buyer_id=buyer_id,
-                    seller_id=seller_id,
-                    buyer_decision=bd,
-                    seller_decision=sd,
-                    buyer_eval=be,
-                    seller_eval=se,
-                    config=config,
-                    tags=tuple(cand2.tags),
-                    opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
-                )
 
-            # --- pick protection decorator (post-pick, deal-local)
-            base_prop, pv_used, pe_used = maybe_apply_pick_protection_variants(
-                base_prop,
-                tick_ctx=tick_ctx,
-                catalog=catalog,
-                config=config,
-                budget=budget,
-                opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
-                stats=stats,
-            )
-            stats.validations += pv_used
-            stats.evaluations += pe_used
+                pre_sweet_prop = base_prop
+                pre_sweet_hash = dedupe_hash(pre_sweet_prop.deal)
 
-            # filter: 너무 말도 안 되는 손해
-            if _should_discard_prop(base_prop, config):
-                continue
+                # sweetener loop (대개 buyer -> seller)
+                best_prop = pre_sweet_prop
+                if config.sweetener_enabled and int(config.sweetener_max_additions) > 0:
+                    trial_idx = int(sweetener_trials_by_base.get(pre_sweet_hash, 0))
+                    if trial_idx < int(max_sweetener_trials_per_base):
+                        sweetener_trials_by_base[pre_sweet_hash] = trial_idx + 1
+                        local_seed = _compute_sweetener_seed(
+                            config,
+                            tick_ctx,
+                            initiator_team_id=buyer_id,
+                            counterparty_team_id=seller_id,
+                            base_hash=pre_sweet_hash,
+                            skeleton_hash=h,
+                            trial_index=trial_idx,
+                        )
+                        local_rng = random.Random(int(local_seed))
 
-            pre_sweet_prop = base_prop
-            pre_sweet_hash = dedupe_hash(pre_sweet_prop.deal)
+                        best_prop, extra_v, extra_e = maybe_apply_sweeteners(
+                            pre_sweet_prop,
+                            initiator_team_id=buyer_id,
+                            tick_ctx=tick_ctx,
+                            catalog=catalog,
+                            config=config,
+                            budget=budget,
+                            banned_asset_keys=banned_asset_keys,
+                            rng=local_rng,
+                            stats=stats,
+                        )
+                        stats.validations += extra_v
+                        stats.evaluations += extra_e
 
-            # sweetener loop (대개 buyer -> seller)
-            best_prop = pre_sweet_prop
-            if config.sweetener_enabled and int(config.sweetener_max_additions) > 0:
-                trial_idx = int(sweetener_trials_by_base.get(pre_sweet_hash, 0))
-                if trial_idx < int(max_sweetener_trials_per_base):
-                    sweetener_trials_by_base[pre_sweet_hash] = trial_idx + 1
-                    local_seed = _compute_sweetener_seed(
-                        config,
-                        tick_ctx,
-                        initiator_team_id=buyer_id,
-                        counterparty_team_id=seller_id,
-                        base_hash=pre_sweet_hash,
-                        skeleton_hash=h,
-                        trial_index=trial_idx,
+                # (B) 최종 중복 제거는 '실제로 push된 딜'만 기준으로 한다.
+                #     - sweetener 결과가 중복이면 base 딜을 fallback으로 push할 수 있어야 한다.
+                pushed: Optional[DealProposal] = None
+
+                h_best = dedupe_hash(best_prop.deal)
+                if h_best not in seen_output:
+                    pushed = best_prop
+                    seen_output.add(h_best)
+                else:
+                    # sweetened가 중복이면 현재 base라도 유니크할 때는 결과로 남긴다.
+                    if pre_sweet_hash not in seen_output:
+                        pushed = pre_sweet_prop
+                        seen_output.add(pre_sweet_hash)
+
+                if pushed is None:
+                    continue
+
+                # (C) target repetition penalty (v2 absorption) - apply only at final push stage
+                if target_pid:
+                    pushed = _apply_target_repeat_penalty(
+                        pushed,
+                        target_repeat_count=int(target_counts.get(target_pid, 0)),
+                        cfg=config,
                     )
-                    local_rng = random.Random(int(local_seed))
 
-                    best_prop, extra_v, extra_e = maybe_apply_sweeteners(
-                        pre_sweet_prop,
-                        initiator_team_id=buyer_id,
-                        tick_ctx=tick_ctx,
-                        catalog=catalog,
-                        config=config,
-                        budget=budget,
-                        banned_asset_keys=banned_asset_keys,
-                        rng=local_rng,
-                        stats=stats,
-                    )
-                    stats.validations += extra_v
-                    stats.evaluations += extra_e
-
-            # (B) 최종 중복 제거는 '실제로 push된 딜'만 기준으로 한다.
-            #     - sweetener 결과가 중복이면 base 딜을 fallback으로 push할 수 있어야 한다.
-            pushed: Optional[DealProposal] = None
-
-            h_best = dedupe_hash(best_prop.deal)
-            if h_best not in seen_output:
-                pushed = best_prop
-                seen_output.add(h_best)
-            else:
-                # sweetened가 중복이면 현재 base라도 유니크할 때는 결과로 남긴다.
-                if pre_sweet_hash not in seen_output:
-                    pushed = pre_sweet_prop
-                    seen_output.add(pre_sweet_hash)
-
-            if pushed is None:
-                continue
-
-            # (C) target repetition penalty (v2 absorption) - apply only at final push stage
-            if target_pid:
-                pushed = _apply_target_repeat_penalty(
+                proposals = _push_best(
+                    proposals,
                     pushed,
-                    target_repeat_count=int(target_counts.get(target_pid, 0)),
-                    cfg=config,
+                    max_results=pool_cap,
                 )
-
-            proposals = _push_best(
-                proposals,
-                pushed,
-                max_results=pool_cap,
-            )
-            partner_counts[pushed.seller_id] = int(partner_counts.get(pushed.seller_id, 0)) + 1
-            if target_pid:
-                target_counts[target_pid] = int(target_counts.get(target_pid, 0)) + 1
+                partner_counts[pushed.seller_id] = int(partner_counts.get(pushed.seller_id, 0)) + 1
+                if target_pid:
+                    target_counts[target_pid] = int(target_counts.get(target_pid, 0)) + 1
 
         return max(0, len(proposals) - pushed_before)
 
@@ -756,7 +757,7 @@ def _generate_sell_mode(
                 continue
             seen_skeleton.add(h)
 
-            ok, cand2, v_used = repair_until_valid(
+            cand_list, v_used = repair_until_valid_many(
                 cand,
                 tick_ctx,
                 catalog,
@@ -768,135 +769,136 @@ def _generate_sell_mode(
                 stats=stats,
             )
             stats.validations += v_used
-            if not ok or cand2 is None:
+            if not cand_list:
                 continue
 
-            # (A) repair 이후 base deal identity (수리 과정에서 서로 다른 스켈레톤이 같은 딜로 수렴 가능)
-            h_valid = dedupe_hash(cand2.deal)
+            for cand2 in cand_list:
+                # (A) repair 이후 base deal identity (수리 과정에서 서로 다른 스켈레톤이 같은 딜로 수렴 가능)
+                h_valid = dedupe_hash(cand2.deal)
 
-            # 이미 출력된 base라면, sweetener를 더 시도할 여지가 없을 때만 스킵(비용 가드)
-            if h_valid in seen_output:
-                sweet_left = (
-                    bool(getattr(config, "sweetener_enabled", True))
-                    and int(getattr(config, "sweetener_max_additions", 0)) > 0
-                    and int(sweetener_trials_by_base.get(h_valid, 0)) < int(max_sweetener_trials_per_base)
-                )
-                if not sweet_left:
-                    continue
+                # 이미 출력된 base라면, sweetener를 더 시도할 여지가 없을 때만 스킵(비용 가드)
+                if h_valid in seen_output:
+                    sweet_left = (
+                        bool(getattr(config, "sweetener_enabled", True))
+                        and int(getattr(config, "sweetener_max_additions", 0)) > 0
+                        and int(sweetener_trials_by_base.get(h_valid, 0)) < int(max_sweetener_trials_per_base)
+                    )
+                    if not sweet_left:
+                        continue
 
-            # evaluate (cache)
-            cached = base_eval_cache.get(h_valid)
-            if cached is None:
-                base_prop, e_used = evaluate_and_score(
-                    cand2.deal,
-                    buyer_id=buyer_id,
-                    seller_id=seller_id,
+                # evaluate (cache)
+                cached = base_eval_cache.get(h_valid)
+                if cached is None:
+                    base_prop, e_used = evaluate_and_score(
+                        cand2.deal,
+                        buyer_id=buyer_id,
+                        seller_id=seller_id,
+                        tick_ctx=tick_ctx,
+                        config=config,
+                        tags=tuple(cand2.tags),
+                        opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
+                        stats=stats,
+                    )
+                    stats.evaluations += e_used
+                    if base_prop is None:
+                        continue
+                    base_eval_cache[h_valid] = (
+                        base_prop.buyer_decision,
+                        base_prop.seller_decision,
+                        base_prop.buyer_eval,
+                        base_prop.seller_eval,
+                    )
+                else:
+                    bd, sd, be, se = cached
+                    base_prop = _proposal_from_cached_eval(
+                        cand2.deal,
+                        buyer_id=buyer_id,
+                        seller_id=seller_id,
+                        buyer_decision=bd,
+                        seller_decision=sd,
+                        buyer_eval=be,
+                        seller_eval=se,
+                        config=config,
+                        tags=tuple(cand2.tags),
+                        opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
+                    )
+
+                # --- pick protection decorator (post-pick, deal-local)
+                base_prop, pv_used, pe_used = maybe_apply_pick_protection_variants(
+                    base_prop,
                     tick_ctx=tick_ctx,
+                    catalog=catalog,
                     config=config,
-                    tags=tuple(cand2.tags),
+                    budget=budget,
                     opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
                     stats=stats,
                 )
-                stats.evaluations += e_used
-                if base_prop is None:
+                stats.validations += pv_used
+                stats.evaluations += pe_used
+
+                # filter: 너무 말도 안 되는 손해
+                if _should_discard_prop(base_prop, config):
                     continue
-                base_eval_cache[h_valid] = (
-                    base_prop.buyer_decision,
-                    base_prop.seller_decision,
-                    base_prop.buyer_eval,
-                    base_prop.seller_eval,
-                )
-            else:
-                bd, sd, be, se = cached
-                base_prop = _proposal_from_cached_eval(
-                    cand2.deal,
-                    buyer_id=buyer_id,
-                    seller_id=seller_id,
-                    buyer_decision=bd,
-                    seller_decision=sd,
-                    buyer_eval=be,
-                    seller_eval=se,
-                    config=config,
-                    tags=tuple(cand2.tags),
-                    opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
-                )
 
-            # --- pick protection decorator (post-pick, deal-local)
-            base_prop, pv_used, pe_used = maybe_apply_pick_protection_variants(
-                base_prop,
-                tick_ctx=tick_ctx,
-                catalog=catalog,
-                config=config,
-                budget=budget,
-                opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
-                stats=stats,
-            )
-            stats.validations += pv_used
-            stats.evaluations += pe_used
+                pre_sweet_prop = base_prop
+                pre_sweet_hash = dedupe_hash(pre_sweet_prop.deal)
 
-            # filter: 너무 말도 안 되는 손해
-            if _should_discard_prop(base_prop, config):
-                continue
+                best_prop = pre_sweet_prop
+                if config.sweetener_enabled and int(config.sweetener_max_additions) > 0:
+                    trial_idx = int(sweetener_trials_by_base.get(pre_sweet_hash, 0))
+                    if trial_idx < int(max_sweetener_trials_per_base):
+                        sweetener_trials_by_base[pre_sweet_hash] = trial_idx + 1
+                        local_seed = _compute_sweetener_seed(
+                            config,
+                            tick_ctx,
+                            initiator_team_id=seller_id,
+                            counterparty_team_id=buyer_id,
+                            base_hash=pre_sweet_hash,
+                            skeleton_hash=h,
+                            trial_index=trial_idx,
+                        )
+                        local_rng = random.Random(int(local_seed))
 
-            pre_sweet_prop = base_prop
-            pre_sweet_hash = dedupe_hash(pre_sweet_prop.deal)
+                        best_prop, extra_v, extra_e = maybe_apply_sweeteners(
+                            pre_sweet_prop,
+                            initiator_team_id=seller_id,
+                            tick_ctx=tick_ctx,
+                            catalog=catalog,
+                            config=config,
+                            budget=budget,
+                            banned_asset_keys=banned_asset_keys,
+                            rng=local_rng,
+                            stats=stats,
+                        )
+                        stats.validations += extra_v
+                        stats.evaluations += extra_e
 
-            best_prop = pre_sweet_prop
-            if config.sweetener_enabled and int(config.sweetener_max_additions) > 0:
-                trial_idx = int(sweetener_trials_by_base.get(pre_sweet_hash, 0))
-                if trial_idx < int(max_sweetener_trials_per_base):
-                    sweetener_trials_by_base[pre_sweet_hash] = trial_idx + 1
-                    local_seed = _compute_sweetener_seed(
-                        config,
-                        tick_ctx,
-                        initiator_team_id=seller_id,
-                        counterparty_team_id=buyer_id,
-                        base_hash=pre_sweet_hash,
-                        skeleton_hash=h,
-                        trial_index=trial_idx,
+                # (B) 최종 중복 제거는 '실제로 push된 딜'만 기준으로 한다.
+                pushed: Optional[DealProposal] = None
+
+                h_best = dedupe_hash(best_prop.deal)
+                if h_best not in seen_output:
+                    pushed = best_prop
+                    seen_output.add(h_best)
+                else:
+                    if pre_sweet_hash not in seen_output:
+                        pushed = pre_sweet_prop
+                        seen_output.add(pre_sweet_hash)
+
+                if pushed is None:
+                    continue
+
+                if target_pid:
+                    pushed = _apply_target_repeat_penalty(
+                        pushed,
+                        target_repeat_count=int(target_counts.get(target_pid, 0)),
+                        cfg=config,
                     )
-                    local_rng = random.Random(int(local_seed))
 
-                    best_prop, extra_v, extra_e = maybe_apply_sweeteners(
-                        pre_sweet_prop,
-                        initiator_team_id=seller_id,
-                        tick_ctx=tick_ctx,
-                        catalog=catalog,
-                        config=config,
-                        budget=budget,
-                        banned_asset_keys=banned_asset_keys,
-                        rng=local_rng,
-                        stats=stats,
-                    )
-                    stats.validations += extra_v
-                    stats.evaluations += extra_e
-
-            # (B) 최종 중복 제거는 '실제로 push된 딜'만 기준으로 한다.
-            pushed: Optional[DealProposal] = None
-
-            h_best = dedupe_hash(best_prop.deal)
-            if h_best not in seen_output:
-                pushed = best_prop
-                seen_output.add(h_best)
-            else:
-                if pre_sweet_hash not in seen_output:
-                    pushed = pre_sweet_prop
-                    seen_output.add(pre_sweet_hash)
-
-            if pushed is None:
-                continue
-
-            if target_pid:
-                pushed = _apply_target_repeat_penalty(
-                    pushed,
-                    target_repeat_count=int(target_counts.get(target_pid, 0)),
-                    cfg=config,
-                )
-
-            proposals = _push_best(proposals, pushed, max_results=pool_cap)
-            partner_counts[pushed.buyer_id] = int(partner_counts.get(pushed.buyer_id, 0)) + 1
-            if target_pid:
-                target_counts[target_pid] = int(target_counts.get(target_pid, 0)) + 1
+                proposals = _push_best(proposals, pushed, max_results=pool_cap)
+                partner_counts[pushed.buyer_id] = int(partner_counts.get(pushed.buyer_id, 0)) + 1
+                if target_pid:
+                    target_counts[target_pid] = int(target_counts.get(target_pid, 0)) + 1
 
         return max(0, len(proposals) - pushed_before)
 
