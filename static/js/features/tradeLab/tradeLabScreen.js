@@ -334,7 +334,18 @@ function renderAssetList(targetEl, assets, { side, kind }) {
             <div class="trade-lab-asset-meta">${asset.pos || "-"} · OVR ${asset.ovr ?? "-"} · AGE ${asset.age ?? "-"}</div>
             <div class="trade-lab-asset-meta">SALARY ${toFiniteNumber(asset.salary, 0).toLocaleString()}</div>
           </div>
-          <button class="trade-lab-inline-btn" data-trade-lab-action="add" data-side="${side}" data-kind="player" data-player-id="${asset.player_id}">패키지 추가</button>
+          <button
+            class="trade-lab-inline-btn"
+            data-trade-lab-action="add"
+            data-side="${side}"
+            data-kind="player"
+            data-player-id="${asset.player_id}"
+            data-player-name="${asset.name || ""}"
+            data-player-pos="${asset.pos || ""}"
+            data-player-ovr="${asset.ovr ?? ""}"
+            data-player-age="${asset.age ?? ""}"
+            data-player-salary="${toFiniteNumber(asset.salary, 0)}"
+          >패키지 추가</button>
         </li>
       `;
     }
@@ -360,13 +371,17 @@ function renderPackageList(targetEl, packageAssets, { side }) {
 
   targetEl.innerHTML = list.map((asset) => {
     const isPlayer = String(asset?.kind || "") === "player";
-    const label = isPlayer ? `${asset.player_id}` : `${asset.pick_id}`;
-    const meta = isPlayer ? "선수" : "1라운드 픽";
+    const label = isPlayer ? `${asset.name || asset.player_id}` : `${asset.pick_id}`;
+    const meta = isPlayer
+      ? `${asset.pos || "-"} · OVR ${asset.ovr ?? "-"} · AGE ${asset.age ?? "-"}`
+      : "1라운드 픽";
+    const extraMeta = isPlayer ? `SALARY ${toFiniteNumber(asset.salary, 0).toLocaleString()}` : "";
     return `
       <li class="trade-lab-package-item">
         <div>
           <strong>${label}</strong>
           <div class="trade-lab-asset-meta">${meta}</div>
+          ${extraMeta ? `<div class="trade-lab-asset-meta">${extraMeta}</div>` : ""}
         </div>
         <button class="trade-lab-inline-btn remove" data-trade-lab-action="remove" data-side="${side}" data-asset-key="${assetKey(asset)}">제거</button>
       </li>
@@ -501,7 +516,15 @@ function buildAssetFromDataset(dataset) {
   if (kind === "player") {
     const playerId = String(dataset.playerId || "").trim();
     if (!playerId) return null;
-    return { kind: "player", player_id: playerId };
+    return {
+      kind: "player",
+      player_id: playerId,
+      name: String(dataset.playerName || "").trim(),
+      pos: String(dataset.playerPos || "").trim(),
+      ovr: dataset.playerOvr,
+      age: dataset.playerAge,
+      salary: toFiniteNumber(dataset.playerSalary, 0),
+    };
   }
   if (kind === "pick") {
     const pickId = String(dataset.pickId || "").trim();
