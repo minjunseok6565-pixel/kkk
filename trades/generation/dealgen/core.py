@@ -30,7 +30,6 @@ from .targets import select_targets_buy, select_targets_sell, select_buyers_for_
 from .skeletons import build_offer_skeletons_buy, build_offer_skeletons_sell, expand_variants
 from .repair import repair_until_valid_many
 from .scoring import evaluate_and_score, _proposal_from_cached_eval, _should_discard_prop
-from .pick_protection_decorator import maybe_apply_pick_protection_variants
 from .sweetener import maybe_apply_sweeteners
 from .template_fallback_policy import decide_fallback_after_template_stage
 
