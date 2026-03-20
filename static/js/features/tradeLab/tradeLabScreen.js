@@ -29,6 +29,43 @@ function toFiniteNumber(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function formatMetaValue(value) {
+  if (value === null || value === undefined) return "-";
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return String(value);
+    return Number.isInteger(value) ? String(value) : value.toFixed(4);
+  }
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    if (!value.length) return "[]";
+    return value.map((v) => formatMetaValue(v)).join(", ");
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch (_) {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function renderStepMeta(meta) {
+  if (!meta || typeof meta !== "object") return "";
+  const entries = Object.entries(meta);
+  if (!entries.length) return "";
+  const items = entries.map(([k, v]) => (
+    `<li class="trade-lab-step-item"><span class="trade-lab-step-code">${escapeHtml(k)}</span><span class="trade-lab-step-label">${escapeHtml(formatMetaValue(v))}</span></li>`
+  )).join("");
+  return `
+    <details class="trade-lab-eval-details">
+      <summary>Meta (${entries.length})</summary>
+      <ul class="trade-lab-step-list">${items}</ul>
+    </details>
+  `;
+}
+
 function formatValueComponents(vc) {
   const now = toFiniteNumber(vc?.now, 0);
   const future = toFiniteNumber(vc?.future, 0);
@@ -57,11 +94,13 @@ function renderStepList(steps) {
     const label = escapeHtml(step?.label || "");
     const factor = Number.isFinite(Number(step?.factor)) ? `factor ${Number(step.factor).toFixed(3)} · ` : "";
     const deltaText = formatValueComponents(step?.delta || {});
+    const metaDetails = renderStepMeta(step?.meta);
     return `
       <li class="trade-lab-step-item">
         <span class="trade-lab-step-code">${stage}/${mode}/${code}</span>
         <span class="trade-lab-step-label">${label || "-"}</span>
         <span class="trade-lab-step-meta">${factor}${deltaText}</span>
+        ${metaDetails}
       </li>
     `;
   }).join("");
@@ -293,6 +332,7 @@ function renderAssetList(targetEl, assets, { side, kind }) {
           <div>
             <strong>${asset.name || asset.player_id}</strong>
             <div class="trade-lab-asset-meta">${asset.pos || "-"} · OVR ${asset.ovr ?? "-"} · AGE ${asset.age ?? "-"}</div>
+            <div class="trade-lab-asset-meta">SALARY ${toFiniteNumber(asset.salary, 0).toLocaleString()}</div>
           </div>
           <button class="trade-lab-inline-btn" data-trade-lab-action="add" data-side="${side}" data-kind="player" data-player-id="${asset.player_id}">패키지 추가</button>
         </li>
