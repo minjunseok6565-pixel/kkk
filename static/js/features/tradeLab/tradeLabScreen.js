@@ -33,7 +33,9 @@ function formatMetaValue(value) {
   if (value === null || value === undefined) return "-";
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return String(value);
-    return Number.isInteger(value) ? String(value) : value.toFixed(4);
+    if (Number.isInteger(value)) return String(value);
+    const truncated = Math.trunc(value * 10) / 10;
+    return truncated.toFixed(1);
   }
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "string") return value;
