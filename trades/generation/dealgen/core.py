@@ -30,7 +30,6 @@ from .targets import select_targets_buy, select_targets_sell, select_buyers_for_
 from .skeletons import build_offer_skeletons_buy, build_offer_skeletons_sell, expand_variants
 from .repair import repair_until_valid
 from .scoring import evaluate_and_score, _proposal_from_cached_eval, _should_discard_prop
-from .pick_protection_decorator import maybe_apply_pick_protection_variants
 from .sweetener import maybe_apply_sweeteners
 from .template_fallback_policy import decide_fallback_after_template_stage
 
@@ -443,19 +442,6 @@ def _generate_buy_mode(
                     opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
                 )
 
-            # --- pick protection decorator (post-pick, deal-local)
-            base_prop, pv_used, pe_used = maybe_apply_pick_protection_variants(
-                base_prop,
-                tick_ctx=tick_ctx,
-                catalog=catalog,
-                config=config,
-                budget=budget,
-                opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
-                stats=stats,
-            )
-            stats.validations += pv_used
-            stats.evaluations += pe_used
-
             # filter: 너무 말도 안 되는 손해
             if _should_discard_prop(base_prop, config):
                 continue
@@ -820,19 +806,6 @@ def _generate_sell_mode(
                     tags=tuple(cand2.tags),
                     opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
                 )
-
-            # --- pick protection decorator (post-pick, deal-local)
-            base_prop, pv_used, pe_used = maybe_apply_pick_protection_variants(
-                base_prop,
-                tick_ctx=tick_ctx,
-                catalog=catalog,
-                config=config,
-                budget=budget,
-                opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
-                stats=stats,
-            )
-            stats.validations += pv_used
-            stats.evaluations += pe_used
 
             # filter: 너무 말도 안 되는 손해
             if _should_discard_prop(base_prop, config):
