@@ -612,6 +612,8 @@ def _search_min_k_salary_packages(
         return []
 
     eval_used = 0
+    passing_all: List[SalaryPackage] = []
+    blocked_from_lower_k: Set[Tuple[str, str]] = set()
 
     def _can_eval_more() -> bool:
         return eval_used < combo_eval_cap
@@ -620,13 +622,17 @@ def _search_min_k_salary_packages(
     passing_k1: List[SalaryPackage] = []
     seen_k1: Set[Tuple[Tuple[str, str], ...]] = set()
     for tid in ordered_teams:
+        if len(passing_k1) >= int(per_k_limit):
+            break
         for pid in pool_by_team.get(tid, []):
+            if len(passing_k1) >= int(per_k_limit):
+                break
             pkg = _build_salary_package([(tid, pid)], catalog)
             if pkg.additions in seen_k1:
                 continue
             seen_k1.add(pkg.additions)
             if not _can_eval_more():
-                return passing_k1
+                return passing_all + passing_k1
             c2 = _materialize_salary_package_candidate(cand, pkg, config)
             if c2 is None:
                 continue
@@ -636,12 +642,16 @@ def _search_min_k_salary_packages(
                 continue
             passing_k1.append(pkg)
             if len(passing_k1) >= int(per_k_limit):
-                return passing_k1
+                break
+
     if passing_k1:
-        return passing_k1
+        passing_all.extend(passing_k1)
+        for pkg in passing_k1:
+            for add in pkg.additions:
+                blocked_from_lower_k.add(add)
 
     if int(max_k) < 2:
-        return []
+        return passing_all
 
     # k=2
     passing_k2: List[SalaryPackage] = []
@@ -649,14 +659,20 @@ def _search_min_k_salary_packages(
 
     # same-team pairs
     for tid in ordered_teams:
+        if len(passing_k2) >= int(per_k_limit):
+            break
         pool = pool_by_team.get(tid, [])
         for p1, p2 in combinations(pool, 2):
+            if len(passing_k2) >= int(per_k_limit):
+                break
             pkg = _build_salary_package([(tid, p1), (tid, p2)], catalog)
             if pkg.additions in seen_k2:
                 continue
             seen_k2.add(pkg.additions)
+            if any(add in blocked_from_lower_k for add in pkg.additions):
+                continue
             if not _can_eval_more():
-                return passing_k2
+                return passing_all + passing_k2
             c2 = _materialize_salary_package_candidate(cand, pkg, config)
             if c2 is None:
                 continue
@@ -666,23 +682,33 @@ def _search_min_k_salary_packages(
                 continue
             passing_k2.append(pkg)
             if len(passing_k2) >= int(per_k_limit):
-                return passing_k2
+                break
 
     # cross-team pairs
     for i in range(len(ordered_teams)):
+        if len(passing_k2) >= int(per_k_limit):
+            break
         for j in range(i + 1, len(ordered_teams)):
+            if len(passing_k2) >= int(per_k_limit):
+                break
             ti = ordered_teams[i]
             tj = ordered_teams[j]
             pi = pool_by_team.get(ti, [])
             pj = pool_by_team.get(tj, [])
             for a in pi:
+                if len(passing_k2) >= int(per_k_limit):
+                    break
                 for b in pj:
+                    if len(passing_k2) >= int(per_k_limit):
+                        break
                     pkg = _build_salary_package([(ti, a), (tj, b)], catalog)
                     if pkg.additions in seen_k2:
                         continue
                     seen_k2.add(pkg.additions)
+                    if any(add in blocked_from_lower_k for add in pkg.additions):
+                        continue
                     if not _can_eval_more():
-                        return passing_k2
+                        return passing_all + passing_k2
                     c2 = _materialize_salary_package_candidate(cand, pkg, config)
                     if c2 is None:
                         continue
@@ -692,12 +718,16 @@ def _search_min_k_salary_packages(
                         continue
                     passing_k2.append(pkg)
                     if len(passing_k2) >= int(per_k_limit):
-                        return passing_k2
+                        break
+
     if passing_k2:
-        return passing_k2
+        passing_all.extend(passing_k2)
+        for pkg in passing_k2:
+            for add in pkg.additions:
+                blocked_from_lower_k.add(add)
 
     if int(max_k) < 3:
-        return []
+        return passing_all
 
     # k=3
     passing_k3: List[SalaryPackage] = []
@@ -705,14 +735,20 @@ def _search_min_k_salary_packages(
 
     # 3 same-team
     for tid in ordered_teams:
+        if len(passing_k3) >= int(per_k_limit):
+            break
         pool = pool_by_team.get(tid, [])
         for p1, p2, p3 in combinations(pool, 3):
+            if len(passing_k3) >= int(per_k_limit):
+                break
             pkg = _build_salary_package([(tid, p1), (tid, p2), (tid, p3)], catalog)
             if pkg.additions in seen_k3:
                 continue
             seen_k3.add(pkg.additions)
+            if any(add in blocked_from_lower_k for add in pkg.additions):
+                continue
             if not _can_eval_more():
-                return passing_k3
+                return passing_all + passing_k3
             c2 = _materialize_salary_package_candidate(cand, pkg, config)
             if c2 is None:
                 continue
@@ -722,11 +758,15 @@ def _search_min_k_salary_packages(
                 continue
             passing_k3.append(pkg)
             if len(passing_k3) >= int(per_k_limit):
-                return passing_k3
+                break
 
     # 2 + 1 split
     for i in range(len(ordered_teams)):
+        if len(passing_k3) >= int(per_k_limit):
+            break
         for j in range(len(ordered_teams)):
+            if len(passing_k3) >= int(per_k_limit):
+                break
             if i == j:
                 continue
             ti = ordered_teams[i]
@@ -734,13 +774,19 @@ def _search_min_k_salary_packages(
             pi = pool_by_team.get(ti, [])
             pj = pool_by_team.get(tj, [])
             for a, b in combinations(pi, 2):
+                if len(passing_k3) >= int(per_k_limit):
+                    break
                 for c in pj:
+                    if len(passing_k3) >= int(per_k_limit):
+                        break
                     pkg = _build_salary_package([(ti, a), (ti, b), (tj, c)], catalog)
                     if pkg.additions in seen_k3:
                         continue
                     seen_k3.add(pkg.additions)
+                    if any(add in blocked_from_lower_k for add in pkg.additions):
+                        continue
                     if not _can_eval_more():
-                        return passing_k3
+                        return passing_all + passing_k3
                     c2 = _materialize_salary_package_candidate(cand, pkg, config)
                     if c2 is None:
                         continue
@@ -750,13 +796,19 @@ def _search_min_k_salary_packages(
                         continue
                     passing_k3.append(pkg)
                     if len(passing_k3) >= int(per_k_limit):
-                        return passing_k3
+                        break
 
     # 1 + 1 + 1 split (3+ teams)
     if len(ordered_teams) >= 3:
         for i in range(len(ordered_teams)):
+            if len(passing_k3) >= int(per_k_limit):
+                break
             for j in range(i + 1, len(ordered_teams)):
+                if len(passing_k3) >= int(per_k_limit):
+                    break
                 for k in range(j + 1, len(ordered_teams)):
+                    if len(passing_k3) >= int(per_k_limit):
+                        break
                     ti = ordered_teams[i]
                     tj = ordered_teams[j]
                     tk = ordered_teams[k]
@@ -764,14 +816,22 @@ def _search_min_k_salary_packages(
                     pj = pool_by_team.get(tj, [])
                     pk = pool_by_team.get(tk, [])
                     for a in pi:
+                        if len(passing_k3) >= int(per_k_limit):
+                            break
                         for b in pj:
+                            if len(passing_k3) >= int(per_k_limit):
+                                break
                             for c in pk:
+                                if len(passing_k3) >= int(per_k_limit):
+                                    break
                                 pkg = _build_salary_package([(ti, a), (tj, b), (tk, c)], catalog)
                                 if pkg.additions in seen_k3:
                                     continue
                                 seen_k3.add(pkg.additions)
+                                if any(add in blocked_from_lower_k for add in pkg.additions):
+                                    continue
                                 if not _can_eval_more():
-                                    return passing_k3
+                                    return passing_all + passing_k3
                                 c2 = _materialize_salary_package_candidate(cand, pkg, config)
                                 if c2 is None:
                                     continue
@@ -781,9 +841,10 @@ def _search_min_k_salary_packages(
                                     continue
                                 passing_k3.append(pkg)
                                 if len(passing_k3) >= int(per_k_limit):
-                                    return passing_k3
+                                    break
 
-    return passing_k3
+    passing_all.extend(passing_k3)
+    return passing_all
 
 
 def _rank_salary_packages(packages: List[SalaryPackage]) -> List[SalaryPackage]:
