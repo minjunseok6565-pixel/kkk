@@ -14,6 +14,7 @@ from .types import DealGeneratorConfig, DealGeneratorBudget, DealGeneratorStats,
 from .utils import _clone_deal, _count_swaps, _count_picks, _count_seconds, _team_pick_flow
 from .dedupe import deal_signature_payload
 from .scoring import evaluate_and_score, _should_discard_prop
+from .pick_protection_decorator import maybe_apply_pick_protection_variants
 from .pick_protection_decorator import default_sweetener_protection
 
 # =============================================================================
@@ -161,6 +162,23 @@ def maybe_apply_sweeteners(
     if stats.validations >= budget.max_validations or stats.evaluations >= budget.max_evaluations:
         return base, 0, 0
 
+    # pick protection variant를 sweetener 단계에서 먼저 시도한다.
+    # (기존 core 사전 단계에서 수행하던 로직을 이 단계로 이동)
+    base, prot_v, prot_e = maybe_apply_pick_protection_variants(
+        base,
+        tick_ctx=tick_ctx,
+        catalog=catalog,
+        config=config,
+        budget=budget,
+        opponent_repeat_count=0,
+        stats=stats,
+    )
+    extra_v = int(prot_v)
+    extra_e = int(prot_e)
+
+    if stats.validations + extra_v >= budget.max_validations or stats.evaluations + extra_e >= budget.max_evaluations:
+        return base, extra_v, extra_e
+
     def _margin_for(team_id: str, p: DealProposal) -> float:
         tid = str(team_id).upper()
         if tid == str(p.buyer_id).upper():
@@ -198,10 +216,10 @@ def maybe_apply_sweeteners(
     elif buyer_triggerable and mb < 0.0 and abs(mb) <= float(close_buyer):
         giver, receiver, deficit = base.seller_id, base.buyer_id, abs(mb)
     else:
-        return base, 0, 0
+        return base, extra_v, extra_e
 
     if not giver or not receiver:
-        return base, 0, 0
+        return base, extra_v, extra_e
 
     giver_u = str(giver).upper()
     receiver_u = str(receiver).upper()
@@ -213,12 +231,9 @@ def maybe_apply_sweeteners(
 
     out_cat = catalog.outgoing_by_team.get(giver_u)
     if out_cat is None:
-        return base, 0, 0
+        return base, extra_v, extra_e
 
     local_sweetener_bans: Set[str] = set()
-
-    extra_v = 0
-    extra_e = 0
 
     verdict_rank = {DealVerdict.REJECT: 0, DealVerdict.COUNTER: 1, DealVerdict.ACCEPT: 2}
 
@@ -238,7 +253,7 @@ def maybe_apply_sweeteners(
 
     max_add = max(0, int(config.sweetener_max_additions))
     if max_add <= 0:
-        return base, 0, 0
+        return base, extra_v, extra_e
 
     # deterministic shuffle inside same bucket selection
     bucket_order = list(config.sweetener_try_buckets)
