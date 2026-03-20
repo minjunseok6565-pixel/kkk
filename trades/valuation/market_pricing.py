@@ -176,10 +176,10 @@ class MarketPricingConfig:
 
     # Fair salary curve (cap%-based).
     # - Designed to cover max salary ranges (superstars can be underpaid even at max).
-    fair_salary_pct_lo: float = 0.02
-    fair_salary_pct_hi: float = 0.47
-    fair_salary_ovr_center: float = 86.0
-    fair_salary_ovr_scale: float = 7.0
+    fair_salary_pct_lo: float = 0.010
+    fair_salary_pct_hi: float = 0.350
+    fair_salary_ovr_center: float = 83.5
+    fair_salary_ovr_scale: float = 3.8
 
     # Contract surplus (fair - actual) is converted into value units and ADDED to player value.
     # This allows truly bad contracts to become negative assets.
