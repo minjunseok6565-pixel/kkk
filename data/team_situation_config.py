@@ -94,11 +94,17 @@ class TeamSituationTierModelConfig:
         (1.00, 0.80),
     )
 
-    # blended score -> tier thresholds
-    tier_threshold_contender: float = 0.853
-    tier_threshold_playoff_buyer: float = 0.840
-    tier_threshold_fringe: float = 0.821
-    tier_threshold_rebuild: float = 0.809
+    # rank quota (must sum to 30 teams)
+    rank_quota_contender: int = 5
+    rank_quota_playoff_buyer: int = 5
+    rank_quota_fringe: int = 8
+    rank_quota_rebuild: int = 7
+    rank_quota_tank: int = 5
+
+    # soft boundary around rank cut lines
+    rank_boundary_width: float = 1.25
+    rank_boundary_tau: float = 0.55
+    rank_tie_breaker: str = "team_id"
 
     # reset special-case guard
     reset_min_progress: float = 0.35
@@ -110,6 +116,26 @@ class TeamSituationTierModelConfig:
     early_protection_max_progress: float = 0.18
     early_protection_high_overall_floor: float = 0.68
     early_protection_mid_overall_floor: float = 0.58
+
+    def __post_init__(self) -> None:
+        total_quota = (
+            int(self.rank_quota_contender)
+            + int(self.rank_quota_playoff_buyer)
+            + int(self.rank_quota_fringe)
+            + int(self.rank_quota_rebuild)
+            + int(self.rank_quota_tank)
+        )
+        if total_quota != 30:
+            raise ValueError(
+                "TeamSituationTierModelConfig: rank quotas must sum to 30 "
+                f"(got {total_quota})"
+            )
+        if float(self.rank_boundary_width) <= 0.0:
+            raise ValueError("TeamSituationTierModelConfig: rank_boundary_width must be > 0")
+        if float(self.rank_boundary_tau) <= 0.0:
+            raise ValueError("TeamSituationTierModelConfig: rank_boundary_tau must be > 0")
+        if str(self.rank_tie_breaker).strip().lower() != "team_id":
+            raise ValueError("TeamSituationTierModelConfig: rank_tie_breaker currently supports only 'team_id'")
 
 
 TEAM_SITUATION_TIER_MODEL = TeamSituationTierModelConfig()
