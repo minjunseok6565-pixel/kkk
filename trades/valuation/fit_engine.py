@@ -149,7 +149,11 @@ class FitEngine:
     def compute_player_supply_vector(self, snap: PlayerSnapshot) -> Dict[str, float]:
         """Compute player supply vector from attrs only (aggressive replacement)."""
         cfg = self.config
-        attrs = snap.attrs if isinstance(snap.attrs, dict) else {}
+        attrs_raw = snap.attrs if isinstance(snap.attrs, dict) else {}
+        # SSOT ratings payload includes Potential as a grade string("C-".."A+").
+        # Potential is not part of need_attr_profiles scoring inputs, so exclude it
+        # before strict numeric validation to avoid dropping the whole supply vector.
+        attrs = {k: v for k, v in attrs_raw.items() if str(k) != "Potential"}
         try:
             out = tag_supply(attrs, strict=bool(cfg.supply_strict_attrs_0_99)) or {}
         except Exception:
