@@ -190,7 +190,7 @@ def build_default_registry() -> SkeletonRegistry:
         expected_tag = f"template_id:tpl_{tier_u.lower()}_placeholder_{int(placeholder_idx)}"
 
         def _build(ctx: BuildContext) -> List[DealCandidate]:
-            max_candidates = max(1, int(getattr(ctx.config, "template_first_max_templates_per_target", 4) or 4))
+            max_candidates = max(1, int(getattr(ctx.config, "template_first_max_templates_per_target", 7) or 7))
             built = build_template_first_skeletons(
                 ctx,
                 tier=tier_u,
@@ -214,7 +214,7 @@ def build_default_registry() -> SkeletonRegistry:
     template_specs: List[SkeletonSpec] = []
     for tier in ALL_TARGET_TIERS:
         t = str(tier).lower()
-        for idx, pri in enumerate((10, 11, 12, 13), start=1):
+        for idx, pri in enumerate(range(10, 17), start=1):
             sid = f"template.{t}.placeholder_{idx}"
             template_specs.append(
                 SkeletonSpec(
