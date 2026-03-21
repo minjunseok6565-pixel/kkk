@@ -4,15 +4,85 @@ import { activateScreen } from "../../app/router.js";
 import { fetchCachedJson, fetchJson, setLoading } from "../../core/api.js";
 import { TACTICS_OFFENSE_SCHEMES, TACTICS_DEFENSE_SCHEMES, TACTICS_OFFENSE_ROLES } from "../../core/constants/tactics.js";
 import { tacticsSchemeLabel, tacticDisplayLabel, getDefenseRolesForScheme, buildTacticsDraft, computeTacticsInsights, rowHealthState } from "./tacticsInsights.js";
+import {
+  createDefaultPresetOffenseDraft,
+  sanitizePresetOffenseDraft,
+} from "./presetOffenseDraft.js";
+import {
+  compilePresetOffenseDraft,
+  mergeCompiledPresetIntoTactics,
+} from "./presetOffenseCompiler.js";
+import {
+  openPresetOffenseModal as openPresetOffenseModalUi,
+  bindPresetOffenseModalEvents,
+} from "./presetOffenseModal.js";
+import {
+  draftFromSavedTactics,
+  injectDraftSnapshotToContext,
+} from "./presetOffenseSerde.js";
+import {
+  createDefaultPresetDefenseDraft,
+  sanitizePresetDefenseDraft,
+} from "./presetDefenseDraft.js";
+import {
+  compilePresetDefenseDraft,
+  mergeCompiledPresetDefenseIntoTactics,
+} from "./presetDefenseCompiler.js";
+import {
+  openPresetDefenseModal as openPresetDefenseModalUi,
+  bindPresetDefenseModalEvents,
+} from "./presetDefenseModal.js";
+import {
+  defenseDraftFromSavedTactics,
+  injectDefenseDraftSnapshotToContext,
+} from "./presetDefenseSerde.js";
 import { fetchTeamDetail, hasTeamDetailCache } from "../team/teamDetailCache.js";
 import { CACHE_EVENT_TYPES, CACHE_TTL_MS, buildCacheKeys, getPrefetchPlanForEvent, runPrefetchPlan } from "../../app/cachePolicy.js";
 import { emitCacheEvent } from "../../app/cacheEvents.js";
 
 let tacticsRequestSeq = 0;
 
+function updatePresetOffenseButtonVisibility() {
+  if (!els.presetOffenseOpenBtn || !state.tacticsDraft) return;
+  const isPreset = String(state.tacticsDraft.offenseScheme) === "Preset_Offense";
+  els.presetOffenseOpenBtn.classList.toggle("hidden", !isPreset);
+}
+
+function updatePresetDefenseButtonVisibility() {
+  if (!els.presetDefenseOpenBtn || !state.tacticsDraft) return;
+  const isPreset = String(state.tacticsDraft.defenseScheme) === "Preset_Defense";
+  els.presetDefenseOpenBtn.classList.toggle("hidden", !isPreset);
+}
+
+function openPresetOffenseModal() {
+  state.presetOffenseDraft = sanitizePresetOffenseDraft(state.presetOffenseDraft || createDefaultPresetOffenseDraft());
+  openPresetOffenseModalUi(state.presetOffenseDraft, (nextDraft, validation) => {
+    state.presetOffenseDraft = sanitizePresetOffenseDraft(nextDraft);
+    if (els.presetOffenseErrors) {
+      const warn = validation?.warnings?.length ? ` (자동 조정 ${validation.warnings.length}건)` : "";
+      els.presetOffenseErrors.textContent = `프리셋 공격 설정이 적용되었습니다. 전술 저장을 눌러 반영하세요.${warn}`;
+    }
+    markTacticsDirty();
+  });
+}
+
+function openPresetDefenseModal() {
+  state.presetDefenseDraft = sanitizePresetDefenseDraft(state.presetDefenseDraft || createDefaultPresetDefenseDraft());
+  openPresetDefenseModalUi(state.presetDefenseDraft, (nextDraft, validation) => {
+    state.presetDefenseDraft = sanitizePresetDefenseDraft(nextDraft);
+    if (els.presetDefenseErrors) {
+      const warn = validation?.warnings?.length ? ` (자동 조정 ${validation.warnings.length}건)` : "";
+      els.presetDefenseErrors.textContent = `프리셋 수비 설정이 적용되었습니다. 전술 저장을 눌러 반영하세요.${warn}`;
+    }
+    markTacticsDirty();
+  });
+}
+
 function applyTacticsDetail(detail, savedTactics, teamId) {
   state.rosterRows = detail?.roster || [];
   state.tacticsDraft = normalizeDraftForRoster(savedTactics?.tactics, state.rosterRows);
+  state.presetOffenseDraft = draftFromSavedTactics(savedTactics?.tactics);
+  state.presetDefenseDraft = defenseDraftFromSavedTactics(savedTactics?.tactics);
   state.tacticsDraftTeamId = teamId;
   state.tacticsDirty = false;
   state.tacticsSaving = false;
@@ -68,7 +138,7 @@ function normalizeDraftForRoster(raw, rosterRows) {
 }
 
 function buildTacticsPayload() {
-  return {
+  const payload = {
     offenseScheme: state.tacticsDraft?.offenseScheme,
     defenseScheme: state.tacticsDraft?.defenseScheme,
     starters: (state.tacticsDraft?.starters || []).map((r) => ({
@@ -85,6 +155,17 @@ function buildTacticsPayload() {
     })),
     baselineHash: String(state.tacticsDraft?.baselineHash || ""),
   };
+  if (String(payload.offenseScheme || "") === "Preset_Offense") {
+    const compiled = compilePresetOffenseDraft(state.presetOffenseDraft || createDefaultPresetOffenseDraft(), payload);
+    Object.assign(payload, mergeCompiledPresetIntoTactics(payload, compiled));
+    Object.assign(payload, injectDraftSnapshotToContext(state.presetOffenseDraft, payload));
+  }
+  if (String(payload.defenseScheme || "") === "Preset_Defense") {
+    const compiledDefense = compilePresetDefenseDraft(state.presetDefenseDraft || createDefaultPresetDefenseDraft(), payload);
+    Object.assign(payload, mergeCompiledPresetDefenseIntoTactics(payload, compiledDefense));
+    Object.assign(payload, injectDefenseDraftSnapshotToContext(state.presetDefenseDraft, payload));
+  }
+  return payload;
 }
 
 function updateTacticsSaveButton() {
@@ -116,7 +197,8 @@ async function saveTacticsDraft({ showSuccessMessage = true } = {}) {
   const teamId = String(state.tacticsDraftTeamId || state.selectedTeamId || "").trim();
   if (!teamId) return true;
 
-  const starterDupRoles = getStarterDefenseRoleDuplicates();
+  const isPresetDefense = String(state.tacticsDraft?.defenseScheme || "") === "Preset_Defense";
+  const starterDupRoles = isPresetDefense ? [] : getStarterDefenseRoleDuplicates();
   if (starterDupRoles.length) {
     if (els.tacticsTotalMessage) {
       els.tacticsTotalMessage.textContent = `전술 저장 실패: 선발 수비에 중복 역할(${starterDupRoles.map((role) => tacticDisplayLabel(role)).join(", ")})이 있습니다.`;
@@ -161,8 +243,10 @@ function renderSchemeOptions(kind) {
     btn.addEventListener("click", () => {
       if (isOff) {
         state.tacticsDraft.offenseScheme = btn.dataset.key;
+        updatePresetOffenseButtonVisibility();
       } else {
         state.tacticsDraft.defenseScheme = btn.dataset.key;
+        updatePresetDefenseButtonVisibility();
         const defRoles = getDefenseRolesForScheme(btn.dataset.key);
         [...state.tacticsDraft.starters, ...state.tacticsDraft.rotation].forEach((row, idx) => {
           if (!defRoles.includes(row.defenseRole)) row.defenseRole = defRoles[idx % defRoles.length];
@@ -274,6 +358,8 @@ function renderTacticsScreen() {
 
   if (els.tacticsOffenseCurrent) els.tacticsOffenseCurrent.textContent = tacticDisplayLabel(tacticsSchemeLabel(TACTICS_OFFENSE_SCHEMES, state.tacticsDraft.offenseScheme));
   if (els.tacticsDefenseCurrent) els.tacticsDefenseCurrent.textContent = tacticDisplayLabel(tacticsSchemeLabel(TACTICS_DEFENSE_SCHEMES, state.tacticsDraft.defenseScheme));
+  updatePresetOffenseButtonVisibility();
+  updatePresetDefenseButtonVisibility();
 
   els.tacticsStarters.innerHTML = state.tacticsDraft.starters.map((r, i) => buildLineupRowHtml("starters", i, r, defRoles, insights)).join("");
   els.tacticsRotation.innerHTML = state.tacticsDraft.rotation.map((r, i) => buildLineupRowHtml("rotation", i, r, defRoles, insights)).join("");
@@ -295,6 +381,8 @@ async function showTacticsScreen() {
   const hasCachedDetail = hasTeamDetailCache(teamId);
   if (!hasCachedDetail) setLoading(true, "전술 데이터를 불러오는 중...");
   try {
+    bindPresetOffenseModalEvents();
+    bindPresetDefenseModalEvents();
     let latestSavedTactics = { tactics: null };
     const tacticsCacheKey = buildCacheKeys(teamId).tactics;
     const savedTacticsPromise = fetchCachedJson({
@@ -341,6 +429,8 @@ export {
   renderTacticsScreen,
   showTacticsScreen,
   toggleTacticsOptions,
+  openPresetOffenseModal,
+  openPresetDefenseModal,
   saveTacticsDraft,
   hasUnsavedTacticsChanges,
 };

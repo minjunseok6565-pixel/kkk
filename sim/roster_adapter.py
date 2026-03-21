@@ -220,6 +220,30 @@ def _apply_default_coach_preset(team_id: str, cfg: TacticsConfig) -> None:
         cfg.context["COACH_PRESET"] = str(preset)
 
 
+
+
+def _sanitize_runtime_context(raw_ctx: Any) -> Dict[str, Any]:
+    """Sanitize runtime tactics context with minimal guard rails.
+
+    - Preserve arbitrary keys for forward compatibility.
+    - Normalize tempo_mult to finite float and clamp to [0.90, 1.12].
+      If conversion fails, tempo_mult is dropped.
+    """
+    if not isinstance(raw_ctx, Mapping):
+        return {}
+    out: Dict[str, Any] = dict(raw_ctx)
+    if "tempo_mult" in out:
+        try:
+            tempo_mult = float(out.get("tempo_mult"))
+            if tempo_mult != tempo_mult or tempo_mult in (float("inf"), float("-inf")):
+                out.pop("tempo_mult", None)
+            else:
+                out["tempo_mult"] = max(0.90, min(1.12, tempo_mult))
+        except Exception:
+            out.pop("tempo_mult", None)
+    return out
+
+
 def _build_tactics_config(raw: Optional[Dict[str, Any]]) -> TacticsConfig:
     if not raw:
         return TacticsConfig()
@@ -248,8 +272,9 @@ def _build_tactics_config(raw: Optional[Dict[str, Any]]) -> TacticsConfig:
 
     # Allow caller to pass arbitrary context (e.g., USER_COACH, ROTATION_POOL_PIDS, etc.)
     raw_ctx = raw.get("context")
-    if isinstance(raw_ctx, dict) and raw_ctx:
-        cfg.context.update(raw_ctx)
+    sanitized_ctx = _sanitize_runtime_context(raw_ctx)
+    if sanitized_ctx:
+        cfg.context.update(sanitized_ctx)
         
     pace = raw.get("pace")
     if pace is not None:

@@ -44,4 +44,12 @@ DEFENSE_SCHEME_MULT: Dict[str, Dict[str, Dict[str, float]]] = {
              "SpotUp": {"SHOT_3_CS": 1.06, "RESET_HUB": 0.98},
              "PostUp": {"SHOT_POST":0.85, "PASS_SKIP":1.15},
              "HornsSet": {"SHOT_MID_CS":1.15}},
+    "Preset_Defense": {
+        # Neutral-safe scaffold for user preset overlay.
+        "PnR": {"SHOT_3_OD": 1.00, "SHOT_MID_PU": 1.00, "PASS_SHORTROLL": 1.00, "SHOT_RIM_LAYUP": 1.00},
+        "PnP": {"SHOT_3_CS": 1.00, "SHOT_MID_CS": 1.00, "PASS_KICKOUT": 1.00},
+        "ISO": {"SHOT_RIM_LAYUP": 1.00, "SHOT_MID_PU": 1.00, "SHOT_3_OD": 1.00},
+        "Drive": {"SHOT_RIM_LAYUP": 1.00, "SHOT_TOUCH_FLOATER": 1.00},
+        "PostUp": {"SHOT_POST": 1.00, "FOUL_DRAW_POST": 1.00},
+    },
 }

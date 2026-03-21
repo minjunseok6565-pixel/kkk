@@ -344,6 +344,7 @@ TACTIC_ALPHA: Dict[str, Tuple[float, float]] = {
     "Post_InsideOut": (0.40, 0.75),
     "Horns_Elbow": (0.40, 0.70),
     "Transition_Early": (0.55, 0.70),
+    "Preset_Offense": (0.01, 0.01),
 }
 
 

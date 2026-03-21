@@ -82,6 +82,8 @@ const state = {
   trainingActiveType: null,
   standingsData: null,
   tacticsDraft: null,
+  presetOffenseDraft: null,
+  presetDefenseDraft: null,
   tacticsDraftTeamId: null,
   tacticsDirty: false,
   tacticsSaving: false,

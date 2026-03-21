@@ -10,6 +10,7 @@ from .action_outcome_priors import ACTION_OUTCOME_PRIORS
 from .action_aliases import ACTION_ALIASES
 from .offense_scheme_mult import OFFENSE_SCHEME_MULT
 from .defense_scheme_mult import DEFENSE_SCHEME_MULT
+from .defense_meta_params import DEFENSE_META_PARAMS
 
 __all__ = [
     'OUTCOME_PROFILES',
@@ -21,4 +22,5 @@ __all__ = [
     'ACTION_ALIASES',
     'OFFENSE_SCHEME_MULT',
     'DEFENSE_SCHEME_MULT',
+    'DEFENSE_META_PARAMS',
 ]

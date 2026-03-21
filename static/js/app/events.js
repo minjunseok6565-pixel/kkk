@@ -11,7 +11,14 @@ import {
   progressTenGamesFromHome,
 } from "../features/main/mainScreen.js";
 import { showMyTeamScreen, rerenderMyTeamBoard } from "../features/myteam/myTeamScreen.js";
-import { showTacticsScreen, toggleTacticsOptions, saveTacticsDraft, hasUnsavedTacticsChanges } from "../features/tactics/tacticsScreen.js";
+import {
+  showTacticsScreen,
+  toggleTacticsOptions,
+  saveTacticsDraft,
+  hasUnsavedTacticsChanges,
+  openPresetOffenseModal,
+  openPresetDefenseModal,
+} from "../features/tactics/tacticsScreen.js";
 import { showScheduleScreen } from "../features/schedule/scheduleScreen.js";
 import { showTrainingScreen } from "../features/training/trainingScreen.js";
 import { showStandingsScreen } from "../features/standings/standingsScreen.js";
@@ -83,6 +90,8 @@ function bindEvents() {
   els.tacticsSaveBtn?.addEventListener("click", () => saveTacticsDraft({ showSuccessMessage: true }).catch((e) => alert(e.message)));
   els.tacticsOffenseBtn.addEventListener("click", () => toggleTacticsOptions("offense"));
   els.tacticsDefenseBtn.addEventListener("click", () => toggleTacticsOptions("defense"));
+  els.presetOffenseOpenBtn?.addEventListener("click", () => openPresetOffenseModal());
+  els.presetDefenseOpenBtn?.addEventListener("click", () => openPresetDefenseModal());
   els.standingsMenuBtn.addEventListener("click", () => showStandingsScreen().catch((e) => alert(e.message)));
   els.collegeMenuBtn.addEventListener("click", () => showCollegeScreen().catch((e) => alert(e.message)));
   els.medicalMenuBtn.addEventListener("click", () => showMedicalScreen().catch((e) => alert(e.message)));

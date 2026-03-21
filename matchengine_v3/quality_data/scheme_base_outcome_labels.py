@@ -707,3 +707,19 @@ SCHEME_BASE_OUTCOME_LABELS: Dict[str, Dict[str, Dict[str, str]]] = {'2-3 존디�
             'SHOT_3_CS': 'weak',
             'SHOT_MID_CS': 'Neutral'},
  'TransitionEarly': {'FOUL_DRAW_RIM': 'Neutral', 'PASS_EXTRA': 'Neutral', 'PASS_KICKOUT': 'Neutral', 'SHOT_3_CS': 'Neutral', 'SHOT_3_OD': 'Neutral', 'SHOT_RIM_CONTACT': 'Neutral', 'SHOT_RIM_DUNK': 'Neutral', 'SHOT_RIM_LAYUP': 'Neutral', 'SHOT_TOUCH_FLOATER': 'Neutral', 'TO_HANDLE_LOSS': 'Neutral'}}}
+
+
+# Preset_Defense slot: neutral labels across known base_action/outcome keys.
+_PRESET_DEFENSE_SCHEME_KEY = "프리셋-수비"
+_all_base_outcome_pairs = {}
+for _scheme_map in SCHEME_BASE_OUTCOME_LABELS.values():
+    if not isinstance(_scheme_map, dict):
+        continue
+    for _base_action, _outcomes in _scheme_map.items():
+        if not isinstance(_outcomes, dict):
+            continue
+        _all_base_outcome_pairs.setdefault(_base_action, set()).update(_outcomes.keys())
+SCHEME_BASE_OUTCOME_LABELS[_PRESET_DEFENSE_SCHEME_KEY] = {
+    _base_action: {_outcome: "neutral" for _outcome in sorted(_outcomes)}
+    for _base_action, _outcomes in sorted(_all_base_outcome_pairs.items())
+}
