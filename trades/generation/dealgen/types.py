@@ -231,13 +231,6 @@ class DealGeneratorConfig:
         "garbage.garbage",
     )
 
-    # --- contract tag routing overlay (optional)
-    # Empty tuple keeps current tier-only routing behavior.
-    # When configured, these IDs are unioned with tier routes in the registry.
-    skeleton_route_contract_overpay: Tuple[str, ...] = tuple()
-    skeleton_route_contract_fair: Tuple[str, ...] = tuple()
-    skeleton_route_contract_value: Tuple[str, ...] = tuple()
-
     # --- sweetener loop
     sweetener_enabled: bool = True
     sweetener_max_additions: int = 2
@@ -548,7 +541,6 @@ class DealGeneratorStats:
     skeleton_id_counts: Dict[str, int] = field(default_factory=dict)
     skeleton_domain_counts: Dict[str, int] = field(default_factory=dict)
     target_tier_counts: Dict[str, int] = field(default_factory=dict)
-    contract_tag_counts: Dict[str, int] = field(default_factory=dict)
     arch_compat_counts: Dict[str, int] = field(default_factory=dict)
     modifier_trace_counts: Dict[str, int] = field(default_factory=dict)
 
@@ -613,7 +605,6 @@ class DealCandidate:
     skeleton_id: str = ""
     skeleton_domain: str = ""
     target_tier: str = ""
-    contract_tag: str = ""
     compat_archetype: str = ""
     modifier_trace: List[str] = field(default_factory=list)
 

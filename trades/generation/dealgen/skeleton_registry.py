@@ -40,7 +40,6 @@ class SkeletonSpec:
     gate_fn: Optional[Callable[[BuildContext], bool]] = None
     default_tags: Tuple[str, ...] = tuple()
     allows_modifiers: bool = True
-    contract_tags: Tuple[str, ...] = ("OVERPAY", "FAIR", "VALUE")
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +56,6 @@ class SkeletonRegistry:
         self,
         *,
         tier_upper: str,
-        contract_upper: str,
         config: DealGeneratorConfig,
         route_phase: str,
     ) -> Tuple[str, ...]:
@@ -91,12 +89,6 @@ class SkeletonRegistry:
             "ROTATION": "skeleton_route_fallback_rotation",
             "GARBAGE": "skeleton_route_fallback_garbage",
         }
-        contract_attr_map = {
-            "OVERPAY": "skeleton_route_contract_overpay",
-            "FAIR": "skeleton_route_contract_fair",
-            "VALUE": "skeleton_route_contract_value",
-        }
-
         rp = normalize_route_phase(route_phase)
 
         def _read_ids(attr_name: str) -> Tuple[str, ...]:
@@ -121,9 +113,6 @@ class SkeletonRegistry:
         else:
             legacy_attr = legacy_attr_map.get(tier_upper)
             route_ids = _read_ids(legacy_attr) if legacy_attr else tuple()
-            contract_attr = contract_attr_map.get(contract_upper)
-            contract_ids = _read_ids(contract_attr) if contract_attr else tuple()
-            route_ids = tuple(dict.fromkeys(list(route_ids) + list(contract_ids)).keys())
 
         return route_ids
 
@@ -133,17 +122,14 @@ class SkeletonRegistry:
         tier: str,
         config: DealGeneratorConfig,
         ctx: Optional[BuildContext] = None,
-        contract_tag: str = "",
         route_phase: str = "combined",
     ) -> List[SkeletonSpec]:
         mode_upper = str(mode).upper()
         tier_upper = str(tier).upper()
-        contract_upper = str(contract_tag).upper().strip()
         phase_norm = normalize_route_phase(route_phase)
 
         route_ids = self._route_ids_for_phase(
             tier_upper=tier_upper,
-            contract_upper=contract_upper,
             config=config,
             route_phase=phase_norm,
         )
@@ -154,8 +140,6 @@ class SkeletonRegistry:
             if mode_upper not in spec.mode_allow:
                 continue
             if tier_upper not in spec.target_tiers:
-                continue
-            if contract_upper and contract_upper not in spec.contract_tags:
                 continue
             if route_id_set and spec.skeleton_id not in route_id_set:
                 continue

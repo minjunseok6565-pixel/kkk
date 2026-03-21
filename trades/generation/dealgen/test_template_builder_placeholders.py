@@ -53,7 +53,7 @@ class TemplateBuilderPlaceholdersTests(unittest.TestCase):
         )
 
     def test_placeholder_templates_are_loaded(self):
-        templates = get_templates_for_tier("MVP", "FAIR")
+        templates = get_templates_for_tier("MVP")
         ids = {t.template_id for t in templates}
         self.assertGreaterEqual(len(templates), 4)
         self.assertIn("tpl_mvp_placeholder_1", ids)

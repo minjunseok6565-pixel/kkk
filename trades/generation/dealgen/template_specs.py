@@ -27,7 +27,6 @@ class PackageTemplate:
 
     template_id: str
     tier_scope: Tuple[str, ...]
-    contract_tags: Tuple[str, ...]
     priority: int
     slots: Tuple[TemplateSlot, ...]
     min_score_ratio: float = 1.0
@@ -44,17 +43,9 @@ ALL_TIERS: Tuple[str, ...] = (
     "ROTATION",
     "GARBAGE",
 )
-ALL_CONTRACT_TAGS: Tuple[str, ...] = ("OVERPAY", "FAIR", "VALUE")
-
-
 def _normalize_tier(tier: str) -> str:
     t = str(tier or "").upper().strip()
     return t if t in ALL_TIERS else "STARTER"
-
-
-def _normalize_tag(tag: str) -> str:
-    t = str(tag or "").upper().strip()
-    return t if t in ALL_CONTRACT_TAGS else "FAIR"
 
 
 def _placeholder_templates_for_tier(tier: str) -> Tuple[PackageTemplate, ...]:
@@ -69,7 +60,6 @@ def _placeholder_templates_for_tier(tier: str) -> Tuple[PackageTemplate, ...]:
         PackageTemplate(
             template_id=f"tpl_{tu.lower()}_placeholder_1",
             tier_scope=(tu,),
-            contract_tags=ALL_CONTRACT_TAGS,
             priority=10,
             slots=(
                 TemplateSlot(
@@ -97,7 +87,6 @@ def _placeholder_templates_for_tier(tier: str) -> Tuple[PackageTemplate, ...]:
         PackageTemplate(
             template_id=f"tpl_{tu.lower()}_placeholder_2",
             tier_scope=(tu,),
-            contract_tags=ALL_CONTRACT_TAGS,
             priority=11,
             slots=(
                 TemplateSlot(
@@ -125,7 +114,6 @@ def _placeholder_templates_for_tier(tier: str) -> Tuple[PackageTemplate, ...]:
         PackageTemplate(
             template_id=f"tpl_{tu.lower()}_placeholder_3",
             tier_scope=(tu,),
-            contract_tags=ALL_CONTRACT_TAGS,
             priority=12,
             slots=(
                 TemplateSlot(
@@ -153,7 +141,6 @@ def _placeholder_templates_for_tier(tier: str) -> Tuple[PackageTemplate, ...]:
         PackageTemplate(
             template_id=f"tpl_{tu.lower()}_placeholder_4",
             tier_scope=(tu,),
-            contract_tags=ALL_CONTRACT_TAGS,
             priority=13,
             slots=(
                 TemplateSlot(
@@ -192,12 +179,10 @@ _TEMPLATE_INDEX: Dict[str, Tuple[PackageTemplate, ...]] = {
 }
 
 
-def get_templates_for_tier(tier: str, contract_tag: str) -> List[PackageTemplate]:
+def get_templates_for_tier(tier: str) -> List[PackageTemplate]:
     tier_u = _normalize_tier(tier)
-    tag_u = _normalize_tag(contract_tag)
-
     candidates = list(_TEMPLATE_INDEX.get(tier_u, tuple()))
-    out = [t for t in candidates if tag_u in set(t.contract_tags)]
+    out = list(candidates)
     out.sort(key=lambda x: (int(x.priority), x.template_id))
     return out
 
@@ -215,7 +200,6 @@ __all__ = [
     "TemplateSlot",
     "PackageTemplate",
     "ALL_TIERS",
-    "ALL_CONTRACT_TAGS",
     "get_templates_for_tier",
     "list_all_templates",
 ]

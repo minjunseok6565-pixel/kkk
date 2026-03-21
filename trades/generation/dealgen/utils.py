@@ -237,49 +237,6 @@ def _tier_from_ovr_hardcut(ovr: Optional[float]) -> str:
     return "GARBAGE"
 
 
-def _resolve_contract_gap_cap_share(focus: Any) -> float:
-    """Resolve contract gap as cap share proxy used for contract tag.
-
-    Priority:
-    1) contract_gap_cap_share (already normalized)
-    2) contract_delta_cap_share (alias)
-    3) 0.0 fallback when unavailable
-    """
-    for key in ("contract_gap_cap_share", "contract_delta_cap_share"):
-        raw = getattr(focus, key, None)
-        if raw is None:
-            continue
-        return _as_float(raw, 0.0)
-    return 0.0
-
-
-def _classify_contract_value_tag(
-    gap_cap_share: float,
-    *,
-    config: Optional[DealGeneratorConfig],
-) -> str:
-    """Classify contract into overpay/fair/value.
-
-    Returns: contract_tag (overpay/fair/value).
-    - fair band around zero defaults to ±0.015
-    - value/overpay hard side boundary defaults to ±0.04
-    """
-    f = abs(_as_float(getattr(config, "target_tier_contract_fair_band", 0.015) if config is not None else 0.015, 0.015))
-    v = abs(_as_float(getattr(config, "target_tier_contract_value_boundary", 0.04) if config is not None else 0.04, 0.04))
-    if v < f:
-        v = f
-    x = _as_float(gap_cap_share, 0.0)
-
-    if x >= v:
-        tag = "value"
-    elif x <= -v:
-        tag = "overpay"
-    else:
-        tag = "fair"
-
-    return tag
-
-
 def classify_target_profile(
     *,
     target: Optional[Any] = None,
@@ -287,31 +244,23 @@ def classify_target_profile(
     match_tag: str = "",
     config: Optional[DealGeneratorConfig] = None,
 ) -> Dict[str, Any]:
-    """Classify focal asset into OVR-hardcut tier + contract value tag.
+    """Classify focal asset into OVR-hardcut 8-tier.
 
     Output keys:
     - tier: MVP/ALL_NBA/ALL_STAR/HIGH_STARTER/STARTER/HIGH_ROTATION/ROTATION/GARBAGE
-    - contract_tag: overpay|fair|value
     """
     _ = match_tag
     focus = target if target is not None else sale_asset
     if focus is None:
         return {
             "tier": "GARBAGE",
-            "contract_tag": "fair",
         }
 
     ovr = _resolve_ovr(focus)
     tier = _tier_from_ovr_hardcut(ovr)
-    gap_cap_share = _resolve_contract_gap_cap_share(focus)
-    contract_tag = _classify_contract_value_tag(
-        gap_cap_share,
-        config=config,
-    )
 
     return {
         "tier": str(tier),
-        "contract_tag": str(contract_tag),
     }
 
 

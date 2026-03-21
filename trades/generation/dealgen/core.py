@@ -261,13 +261,11 @@ def _record_candidate_observability(stats: DealGeneratorStats, cand: DealCandida
     sid = str(getattr(cand, "skeleton_id", "") or "")
     domain = str(getattr(cand, "skeleton_domain", "") or "")
     tier = str(getattr(cand, "target_tier", "") or "")
-    contract_tag = str(getattr(cand, "contract_tag", "") or "")
     arch = str(getattr(cand, "compat_archetype", "") or getattr(cand, "archetype", "") or "")
 
     stats.bump_counter(stats.skeleton_id_counts, sid)
     stats.bump_counter(stats.skeleton_domain_counts, domain)
     stats.bump_counter(stats.target_tier_counts, tier)
-    stats.bump_counter(stats.contract_tag_counts, contract_tag)
     stats.bump_counter(stats.arch_compat_counts, arch)
 
     stats.modifier_candidates += 1

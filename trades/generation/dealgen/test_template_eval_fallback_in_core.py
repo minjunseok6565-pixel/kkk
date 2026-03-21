@@ -74,7 +74,6 @@ def _candidate(stage_tag: str) -> DealCandidate:
         skeleton_id="s1",
         skeleton_domain="template" if stage_tag == "stage:template" else "tier_score",
         target_tier="MVP",
-        contract_tag="FAIR",
         compat_archetype="template_first",
         tags=[stage_tag],
     )
