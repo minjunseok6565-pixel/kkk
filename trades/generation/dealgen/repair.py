@@ -469,18 +469,19 @@ def _clone_candidate(cand: DealCandidate) -> DealCandidate:
         for t, assets in (cand.deal.legs or {}).items()
     }
     deal_new = Deal(
-        teams=tuple(cand.deal.teams or ()),
+        teams=list(cand.deal.teams or ()),
         legs=legs_new,
-        metadata=dict(cand.deal.metadata or {}),
+        meta=dict(cand.deal.meta or {}),
     )
     return DealCandidate(
         deal=deal_new,
+        buyer_id=cand.buyer_id,
+        seller_id=cand.seller_id,
         focal_player_id=cand.focal_player_id,
-        focal_rank=cand.focal_rank,
+        archetype=cand.archetype,
         skeleton_id=cand.skeleton_id,
         skeleton_domain=cand.skeleton_domain,
         target_tier=cand.target_tier,
-        contract_tag=cand.contract_tag,
         compat_archetype=cand.compat_archetype,
         modifier_trace=list(cand.modifier_trace or []),
         tags=list(cand.tags or []),
