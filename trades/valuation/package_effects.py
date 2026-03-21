@@ -149,8 +149,8 @@ def _team_total_grade(tv: TeamValuation) -> float:
 class PackageEffectsConfig:
     # --- 5) Consolidation / dispersion
     consolidation_neutral: float = 0.5  # knobs.consolidation_bias baseline
-    consolidation_scale: float = 0.10   # relative strength vs package totals
-    consolidation_cap_ratio: float = 0.18
+    consolidation_scale: float = 0.07   # relative strength vs package totals
+    consolidation_cap_ratio: float = 0.07
 
     # --- 7) Soft roster slot / rotation waste
     roster_excess_waste_rate: float = 0.85  # fraction of bottom incoming players' value wasted
