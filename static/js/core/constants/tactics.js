@@ -17,7 +17,8 @@ const TACTICS_DEFENSE_SCHEMES = [
   { key: "Hedge_ShowRecover", label: "hedge_show_recover" },
   { key: "Blitz_TrapPnR", label: "blitz_trap" },
   { key: "AtTheLevel", label: "at_the_level" },
-  { key: "Zone", label: "zone" }
+  { key: "Zone", label: "zone" },
+  { key: "Preset_Defense", label: "preset_defense" }
 ];
 
 const TACTICS_OFFENSE_ROLES = [
@@ -26,6 +27,30 @@ const TACTICS_OFFENSE_ROLES = [
   "Roll_Man", "ShortRoll_Hub", "Pop_Threat", "Post_Anchor"
 ];
 
+
+const TACTICS_PRESET_DEFENSE_ACTIONS = [
+  "Cut",
+  "DHO",
+  "Drive",
+  "ISO",
+  "PnP",
+  "PnR",
+  "PostUp",
+  "SpotUp",
+  "TransitionEarly",
+];
+
+const TACTICS_PRESET_DEFENSE_POLICY_SIDE = {
+  NEUTRAL: "neutral",
+  A: "A",
+  B: "B",
+};
+
+const TACTICS_PRESET_DEFENSE_POLICY_LEVEL = {
+  NORMAL: "normal",
+  STRONG: "strong",
+};
+
 const TACTICS_DEFENSE_ROLE_BY_SCHEME = {
   Drop: ["PnR_POA_Defender", "PnR_Cover_Big_Drop", "Lowman_Helper", "Nail_Helper", "Weakside_Rotator"],
   Switch_Everything: ["PnR_POA_Switch", "PnR_Cover_Big_Switch", "Switch_Wing_Strong", "Switch_Wing_Weak", "Backline_Anchor"],
@@ -33,7 +58,16 @@ const TACTICS_DEFENSE_ROLE_BY_SCHEME = {
   Hedge_ShowRecover: ["PnR_POA_Defender", "PnR_Cover_Big_HedgeRecover", "Lowman_Helper", "Nail_Helper", "Weakside_Rotator"],
   Blitz_TrapPnR: ["PnR_POA_Blitz", "PnR_Cover_Big_Blitz", "Lowman_Helper", "Nail_Helper", "Weakside_Rotator"],
   AtTheLevel: ["PnR_POA_AtTheLevel", "PnR_Cover_Big_AtTheLevel", "Lowman_Helper", "Nail_Helper", "Weakside_Rotator"],
-  Zone: ["Zone_Top_Left", "Zone_Top_Right", "Zone_Bottom_Left", "Zone_Bottom_Right", "Zone_Bottom_Center"]
+  Zone: ["Zone_Top_Left", "Zone_Top_Right", "Zone_Bottom_Left", "Zone_Bottom_Right", "Zone_Bottom_Center"],
+  Preset_Defense: ["preset-role-G", "preset-role-W", "preset-role-B"]
 };
 
-export { TACTICS_OFFENSE_SCHEMES, TACTICS_DEFENSE_SCHEMES, TACTICS_OFFENSE_ROLES, TACTICS_DEFENSE_ROLE_BY_SCHEME };
+export {
+  TACTICS_OFFENSE_SCHEMES,
+  TACTICS_DEFENSE_SCHEMES,
+  TACTICS_OFFENSE_ROLES,
+  TACTICS_DEFENSE_ROLE_BY_SCHEME,
+  TACTICS_PRESET_DEFENSE_ACTIONS,
+  TACTICS_PRESET_DEFENSE_POLICY_SIDE,
+  TACTICS_PRESET_DEFENSE_POLICY_LEVEL,
+};

@@ -154,6 +154,139 @@ def build_allowed_sets(game_cfg: "GameConfig") -> AllowedSets:
     )
 
 
+
+
+_DEF_QUALITY_LABEL_OVERRIDES_CTX_KEY = "DEF_QUALITY_LABEL_OVERRIDES_V1"
+_ALLOWED_DEF_QUALITY_LABELS = {"weak", "tight", "neutral"}
+_DEF_QUALITY_LABEL_OVERRIDES_VERSION = 1
+_MAX_DEF_QUALITY_OVERRIDE_ACTIONS = 16
+_MAX_DEF_QUALITY_OVERRIDE_OUTCOMES_PER_ACTION = 64
+_MAX_DEF_QUALITY_OVERRIDE_TOTAL_ENTRIES = 512
+
+
+_PRESET_DEFENSE_OVERRIDE_ALLOWED_ACTIONS = {
+    "Cut",
+    "DHO",
+    "Drive",
+    "ISO",
+    "PnP",
+    "PnR",
+    "PostUp",
+    "SpotUp",
+    "TransitionEarly",
+}
+
+
+def _sanitize_def_quality_label_overrides(
+    raw: Any,
+    *,
+    allowed_actions: set[str],
+    allowed_outcomes: set[str],
+    report: ValidationReport,
+    path: str,
+) -> Dict[str, Any] | None:
+    if not isinstance(raw, Mapping):
+        report.warn(f"{path}: expected dict, got {type(raw).__name__} (ignored)")
+        return None
+
+    version = raw.get("version", _DEF_QUALITY_LABEL_OVERRIDES_VERSION)
+    try:
+        version_i = int(version)
+    except Exception:
+        report.warn(
+            f"{path}.version: non-numeric version '{version}' "
+            f"(expected {_DEF_QUALITY_LABEL_OVERRIDES_VERSION}, ignored)"
+        )
+        return None
+    if version_i != _DEF_QUALITY_LABEL_OVERRIDES_VERSION:
+        report.warn(
+            f"{path}.version: unsupported version '{version}' "
+            f"(expected {_DEF_QUALITY_LABEL_OVERRIDES_VERSION}, ignored)"
+        )
+        return None
+
+    actions_raw = raw.get("actions")
+    if not isinstance(actions_raw, Mapping):
+        report.warn(f"{path}.actions: expected dict, got {type(actions_raw).__name__} (ignored)")
+        return None
+
+    clean_actions: Dict[str, Dict[str, str]] = {}
+    action_count = 0
+    total_entries = 0
+
+    for action, outcome_map in actions_raw.items():
+        if action not in allowed_actions:
+            report.warn(f"{path}.actions: unknown action '{action}' ignored")
+            continue
+        if action_count >= _MAX_DEF_QUALITY_OVERRIDE_ACTIONS:
+            report.warn(
+                f"{path}.actions: too many actions; limit={_MAX_DEF_QUALITY_OVERRIDE_ACTIONS} "
+                "(remaining ignored)"
+            )
+            break
+        if not isinstance(outcome_map, Mapping):
+            report.warn(
+                f"{path}.actions.{action}: expected dict, got {type(outcome_map).__name__} (ignored)"
+            )
+            continue
+
+        clean_outcomes: Dict[str, str] = {}
+        outcome_count = 0
+
+        for outcome, raw_label in outcome_map.items():
+            if outcome not in allowed_outcomes:
+                report.warn(f"{path}.actions.{action}: unknown outcome '{outcome}' ignored")
+                continue
+            if outcome_count >= _MAX_DEF_QUALITY_OVERRIDE_OUTCOMES_PER_ACTION:
+                report.warn(
+                    f"{path}.actions.{action}: too many outcomes; "
+                    f"limit={_MAX_DEF_QUALITY_OVERRIDE_OUTCOMES_PER_ACTION} (remaining ignored)"
+                )
+                break
+            if total_entries >= _MAX_DEF_QUALITY_OVERRIDE_TOTAL_ENTRIES:
+                report.warn(
+                    f"{path}: too many total entries; "
+                    f"limit={_MAX_DEF_QUALITY_OVERRIDE_TOTAL_ENTRIES} (remaining ignored)"
+                )
+                break
+
+            label = str(raw_label).strip().lower()
+            if label not in _ALLOWED_DEF_QUALITY_LABELS:
+                report.warn(
+                    f"{path}.actions.{action}.{outcome}: unknown label '{raw_label}' ignored"
+                )
+                continue
+
+            clean_outcomes[outcome] = label
+            outcome_count += 1
+            total_entries += 1
+
+        if clean_outcomes:
+            clean_actions[action] = clean_outcomes
+            action_count += 1
+
+        if total_entries >= _MAX_DEF_QUALITY_OVERRIDE_TOTAL_ENTRIES:
+            break
+
+    if not clean_actions:
+        return None
+
+    out: Dict[str, Any] = {
+        "version": _DEF_QUALITY_LABEL_OVERRIDES_VERSION,
+        "actions": clean_actions,
+    }
+
+    meta = raw.get("meta")
+    if isinstance(meta, Mapping):
+        clean_meta: Dict[str, str] = {}
+        for mk, mv in list(meta.items())[:16]:
+            clean_meta[str(mk)] = str(mv)[:120]
+        if clean_meta:
+            out["meta"] = clean_meta
+
+    return out
+
+
 def _clamp_mult(v: float, cfg: ValidationConfig) -> float:
     return clamp(v, cfg.mult_lo, cfg.mult_hi)
 
@@ -363,6 +496,22 @@ def sanitize_tactics_config(
             if abs(fvv - fv) > 1e-9:
                 report.warn(f"{label}.context.{k}: clamped {fv:.3f} -> {fvv:.3f}")
             clean_ctx[k] = fvv
+
+        elif k == _DEF_QUALITY_LABEL_OVERRIDES_CTX_KEY:
+            if tac.defense_scheme != "Preset_Defense":
+                report.warn(
+                    f"{label}.context.{k}: ignored because defense_scheme='{tac.defense_scheme}'"
+                )
+                continue
+            clean_override = _sanitize_def_quality_label_overrides(
+                v,
+                allowed_actions=_PRESET_DEFENSE_OVERRIDE_ALLOWED_ACTIONS,
+                allowed_outcomes=allowed.outcomes,
+                report=report,
+                path=f"{label}.context.{k}",
+            )
+            if clean_override is not None:
+                clean_ctx[k] = clean_override
 
         else:
             clean_ctx[k] = v

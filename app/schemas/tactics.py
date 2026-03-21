@@ -12,9 +12,17 @@ class PresetOffenseDraftModel(BaseModel):
         extra = "allow"
 
 
+class PresetDefenseDraftModel(BaseModel):
+    """Optional typed model for preset defense draft snapshot payloads."""
+
+    class Config:
+        extra = "allow"
+
+
 class TacticsContextModel(BaseModel):
     tempo_mult: Optional[float] = None
     USER_PRESET_OFFENSE_DRAFT_V1: Optional[PresetOffenseDraftModel] = None
+    USER_PRESET_DEFENSE_DRAFT_V1: Optional[PresetDefenseDraftModel] = None
 
     class Config:
         extra = "allow"
