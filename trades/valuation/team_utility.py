@@ -214,7 +214,9 @@ class TeamUtilityConfig:
     # - When missing: fall back to legacy absolute-dollar defaults for backward
     #   compatibility (older call sites/tests).
     salary_cap: Optional[float] = None
-    finance_factor_floor: float = 0.55
+    # Player-level finance penalty is intentionally capped to a mild haircut
+    # (at most 5%) so package-level finance effects can carry most of the signal.
+    finance_factor_floor: float = 0.95
     finance_factor_cap: float = 1.00
     # Cap-normalized defaults derived from the legacy 2025 base-cap tuning:
     #   lo=8M, hi=40M at cap=154,647,000
