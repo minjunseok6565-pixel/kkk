@@ -41,7 +41,7 @@ def _focal(ctx: BuildContext) -> Optional[str]:
     return None
 
 
-def _target_profile(ctx: BuildContext, fallback_tier: str) -> Tuple[str, str]:
+def _target_profile(ctx: BuildContext, fallback_tier: str) -> str:
     profile = classify_target_profile(
         target=ctx.target,
         sale_asset=ctx.sale_asset,
@@ -49,10 +49,9 @@ def _target_profile(ctx: BuildContext, fallback_tier: str) -> Tuple[str, str]:
         config=ctx.config,
     )
     tier = str(profile.get("tier") or fallback_tier).upper()
-    contract_tag = str(profile.get("contract_tag") or "FAIR").upper()
     if tier not in TIER_POINTS:
         tier = str(fallback_tier).upper()
-    return tier, contract_tag
+    return tier
 
 
 def _base_deal(ctx: BuildContext, focal_player_id: str) -> Deal:
@@ -378,10 +377,10 @@ def build_template_first_skeletons(
     if out_cat is None:
         return []
 
-    tier_u, contract_tag_u = _target_profile(ctx, tier)
-    required = target_required_score(tier_u, contract_tag_u)
+    tier_u = _target_profile(ctx, tier)
+    required = target_required_score(tier_u)
 
-    templates = get_templates_for_tier(tier_u, contract_tag_u)
+    templates = get_templates_for_tier(tier_u)
     if not templates:
         return []
 
@@ -421,12 +420,10 @@ def build_template_first_skeletons(
                 skeleton_domain="template",
                 compat_archetype="template_first",
                 target_tier=tier_u,
-                contract_tag=contract_tag_u,
                 tags=[
                     f"skeleton:{skeleton_id}",
                     f"template_id:{template_id}",
                     f"target_tier:{tier_u}",
-                    f"contract_tag:{contract_tag_u}",
                     "template:first",
                     "template_stage:primary",
                     "template_result:built",

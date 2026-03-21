@@ -28,13 +28,12 @@ class SkeletonRegistryRoutingTests(unittest.TestCase):
         ids = [s.skeleton_id for s in specs]
         self.assertEqual(ids, ["mvp.player_heavy", "timeline.bluechip_plus_first_plus_swap"])
 
-    def test_contract_route_overlay_filters_specs(self):
+    def test_combined_phase_uses_tier_route_only(self):
         reg = build_default_registry()
         cfg = DealGeneratorConfig(
             skeleton_route_mvp=("mvp.player_heavy", "mvp.pick_heavy"),
-            skeleton_route_contract_overpay=("mvp.pick_heavy",),
         )
-        specs = reg.get_specs_for_mode_and_tier("BUY", "MVP", cfg, contract_tag="OVERPAY")
+        specs = reg.get_specs_for_mode_and_tier("BUY", "MVP", cfg)
         ids = [s.skeleton_id for s in specs]
         self.assertEqual(ids, ["mvp.player_heavy", "mvp.pick_heavy"])
 

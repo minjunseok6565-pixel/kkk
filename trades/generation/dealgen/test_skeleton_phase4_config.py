@@ -30,7 +30,6 @@ class SkeletonPhase4ConfigTests(unittest.TestCase):
         self.assertTrue(hasattr(st, "skeleton_id_counts"))
         self.assertTrue(hasattr(st, "skeleton_domain_counts"))
         self.assertTrue(hasattr(st, "target_tier_counts"))
-        self.assertTrue(hasattr(st, "contract_tag_counts"))
         self.assertTrue(hasattr(st, "arch_compat_counts"))
         self.assertTrue(hasattr(st, "modifier_trace_counts"))
 
@@ -60,8 +59,6 @@ class SkeletonPhase4ConfigTests(unittest.TestCase):
 
         self.assertEqual(high_profile.get("tier"), "GARBAGE")
         self.assertEqual(role_profile.get("tier"), "GARBAGE")
-        self.assertEqual(high_profile.get("contract_tag"), "fair")
-        self.assertEqual(role_profile.get("contract_tag"), "fair")
 
     def test_classify_target_profile_sell_asset(self):
         sale = SellAssetCandidate(
@@ -74,7 +71,6 @@ class SkeletonPhase4ConfigTests(unittest.TestCase):
         )
         sale_profile = classify_target_profile(sale_asset=sale, match_tag="pick_bridge", config=DealGeneratorConfig())
         self.assertEqual(sale_profile.get("tier"), "GARBAGE")
-        self.assertEqual(sale_profile.get("contract_tag"), "fair")
 
     def test_classify_target_profile_ovr_hardcut_boundaries(self):
         class Probe:

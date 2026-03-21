@@ -19,7 +19,6 @@ class TemplateFirstFallbackRoutingTests(unittest.TestCase):
             "BUY",
             "MVP",
             cfg,
-            contract_tag="FAIR",
             route_phase="template_only",
         )
         ids = [s.skeleton_id for s in specs]
@@ -38,7 +37,6 @@ class TemplateFirstFallbackRoutingTests(unittest.TestCase):
             "BUY",
             "MVP",
             cfg,
-            contract_tag="FAIR",
             route_phase="fallback_only",
         )
         ids = [s.skeleton_id for s in specs]
@@ -50,7 +48,6 @@ class TemplateFirstFallbackRoutingTests(unittest.TestCase):
         reg = build_default_registry()
         cfg = DealGeneratorConfig(
             skeleton_route_mvp=("mvp.player_heavy",),
-            skeleton_route_contract_fair=("template.mvp.placeholder_3",),
             skeleton_route_template_mvp=("template.mvp.placeholder_1",),
             skeleton_route_fallback_mvp=("mvp.player_heavy",),
         )
@@ -59,13 +56,12 @@ class TemplateFirstFallbackRoutingTests(unittest.TestCase):
             "BUY",
             "MVP",
             cfg,
-            contract_tag="FAIR",
             route_phase="combined",
         )
         ids = {s.skeleton_id for s in specs}
 
         self.assertIn("mvp.player_heavy", ids)
-        self.assertIn("template.mvp.placeholder_3", ids)
+        self.assertNotIn("template.mvp.placeholder_3", ids)
 
 
 if __name__ == "__main__":
