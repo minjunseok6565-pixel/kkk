@@ -441,19 +441,6 @@ def _generate_buy_mode(
                         opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
                     )
 
-                # --- pick protection decorator (post-pick, deal-local)
-                base_prop, pv_used, pe_used = maybe_apply_pick_protection_variants(
-                    base_prop,
-                    tick_ctx=tick_ctx,
-                    catalog=catalog,
-                    config=config,
-                    budget=budget,
-                    opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
-                    stats=stats,
-                )
-                stats.validations += pv_used
-                stats.evaluations += pe_used
-
                 # filter: 너무 말도 안 되는 손해
                 if _should_discard_prop(base_prop, config):
                     continue
@@ -819,19 +806,6 @@ def _generate_sell_mode(
                         tags=tuple(cand2.tags),
                         opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
                     )
-
-                # --- pick protection decorator (post-pick, deal-local)
-                base_prop, pv_used, pe_used = maybe_apply_pick_protection_variants(
-                    base_prop,
-                    tick_ctx=tick_ctx,
-                    catalog=catalog,
-                    config=config,
-                    budget=budget,
-                    opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
-                    stats=stats,
-                )
-                stats.validations += pv_used
-                stats.evaluations += pe_used
 
                 # filter: 너무 말도 안 되는 손해
                 if _should_discard_prop(base_prop, config):
