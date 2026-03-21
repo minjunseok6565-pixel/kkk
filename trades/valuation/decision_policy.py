@@ -142,11 +142,11 @@ class DecisionPolicyConfig:
 
     # How wide is the "counter corridor" around the acceptance boundary
     # corridor = required_surplus ± corridor_ratio*deal_scale
-    counter_corridor_ratio: float = 0.04
+    counter_corridor_ratio: float = 0.10
 
     # If net is negative but within this fraction of overpay_allowed,
     # we may still COUNTER rather than hard REJECT (if counter_rate favors it).
-    counter_overpay_fraction: float = 0.50
+    counter_overpay_fraction: float = 1.20
 
     # Confidence mapping: larger => sharper transitions
     confidence_slope: float = 3.5
