@@ -80,7 +80,7 @@ class DealGeneratorConfig:
 
     # --- template-first stage toggles
     template_first_enabled: bool = True
-    template_first_max_templates_per_target: int = 4
+    template_first_max_templates_per_target: int = 7
     template_first_fallback_enabled: bool = True
     template_first_min_keep_after_eval: int = 1
     template_first_allow_timeline_in_fallback: bool = True
@@ -140,48 +140,72 @@ class DealGeneratorConfig:
         "template.mvp.placeholder_2",
         "template.mvp.placeholder_3",
         "template.mvp.placeholder_4",
+        "template.mvp.placeholder_5",
+        "template.mvp.placeholder_6",
+        "template.mvp.placeholder_7",
     )
     skeleton_route_template_all_nba: Tuple[str, ...] = (
         "template.all_nba.placeholder_1",
         "template.all_nba.placeholder_2",
         "template.all_nba.placeholder_3",
         "template.all_nba.placeholder_4",
+        "template.all_nba.placeholder_5",
+        "template.all_nba.placeholder_6",
+        "template.all_nba.placeholder_7",
     )
     skeleton_route_template_all_star: Tuple[str, ...] = (
         "template.all_star.placeholder_1",
         "template.all_star.placeholder_2",
         "template.all_star.placeholder_3",
         "template.all_star.placeholder_4",
+        "template.all_star.placeholder_5",
+        "template.all_star.placeholder_6",
+        "template.all_star.placeholder_7",
     )
     skeleton_route_template_high_starter: Tuple[str, ...] = (
         "template.high_starter.placeholder_1",
         "template.high_starter.placeholder_2",
         "template.high_starter.placeholder_3",
         "template.high_starter.placeholder_4",
+        "template.high_starter.placeholder_5",
+        "template.high_starter.placeholder_6",
+        "template.high_starter.placeholder_7",
     )
     skeleton_route_template_starter: Tuple[str, ...] = (
         "template.starter.placeholder_1",
         "template.starter.placeholder_2",
         "template.starter.placeholder_3",
         "template.starter.placeholder_4",
+        "template.starter.placeholder_5",
+        "template.starter.placeholder_6",
+        "template.starter.placeholder_7",
     )
     skeleton_route_template_high_rotation: Tuple[str, ...] = (
         "template.high_rotation.placeholder_1",
         "template.high_rotation.placeholder_2",
         "template.high_rotation.placeholder_3",
         "template.high_rotation.placeholder_4",
+        "template.high_rotation.placeholder_5",
+        "template.high_rotation.placeholder_6",
+        "template.high_rotation.placeholder_7",
     )
     skeleton_route_template_rotation: Tuple[str, ...] = (
         "template.rotation.placeholder_1",
         "template.rotation.placeholder_2",
         "template.rotation.placeholder_3",
         "template.rotation.placeholder_4",
+        "template.rotation.placeholder_5",
+        "template.rotation.placeholder_6",
+        "template.rotation.placeholder_7",
     )
     skeleton_route_template_garbage: Tuple[str, ...] = (
         "template.garbage.placeholder_1",
         "template.garbage.placeholder_2",
         "template.garbage.placeholder_3",
         "template.garbage.placeholder_4",
+        "template.garbage.placeholder_5",
+        "template.garbage.placeholder_6",
+        "template.garbage.placeholder_7",
     )
 
     # --- fallback route split (8-tier)
