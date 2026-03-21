@@ -391,7 +391,7 @@ class PackageEffects:
             wasted = wasted + tv.team_value.scale(cfg.roster_excess_waste_rate)
             detail.append(
                 {
-                    "player_id": p.player_id,
+                    "player_name": str(p.name or p.player_id),
                     "asset_key": tv.asset_key,
                     "team_value_total": tv.team_value.total,
                 }
