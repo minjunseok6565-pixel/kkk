@@ -39,7 +39,7 @@ from league_repo import LeagueRepo
 from derived_formulas import compute_derived
 from team_utils import get_conference_standings
 from config import ALL_TEAM_IDS
-from data.team_situation_config import TEAM_SITUATION_NEED_TAG_CONFIG
+from data.team_situation_config import TEAM_SITUATION_NEED_TAG_CONFIG, TEAM_SITUATION_TIER_MODEL
 
 def _load_trade_rule_helpers():
     """Lazy-load trade-rule helpers to avoid import cycles at module import time.
@@ -1392,35 +1392,37 @@ class TeamSituationEvaluator:
         # 1) competitive score
         season_progress = _safe_float(self.ctx.records_index.get(tid, {}).get("season_progress"), 0.0)
         stat_trust = _early_stat_trust(season_progress)  # 0~0.2 구간: 스타일/효율 신호 영향 완화(최저 0.5)
-
-        perf_score = _compute_perf_score(signals, season_progress)
-        roster_score = 0.62 * signals.star_power + 0.38 * signals.depth
-        composite = _lerp(roster_score, perf_score, _clamp(season_progress, 0.15, 0.85))
+        performance_score = _compute_perf_score(signals, season_progress)
+        overall_score = _compute_overall_strength_score(signals)
+        w_perf = _performance_weight_by_progress(season_progress)
+        w_overall = _overall_weight_by_progress(season_progress)
+        blended = _clamp((w_overall * overall_score) + (w_perf * performance_score), 0.0, 1.0)
 
         # 2) tier
         tier: CompetitiveTier
-        rank = signals.conf_rank
         wp = signals.win_pct
-        nr = signals.net_rating
         tr = signals.trend
         gb6 = signals.gb_to_6th
         gb10 = signals.gb_to_10th
 
-        # "reset" special: strong roster but bad record
-        if composite >= 0.62 and wp < 0.46 and signals.star_power >= 0.70:
-            tier = "RESET"
-        elif (rank is not None and rank <= 4 and wp >= 0.58) or (wp >= 0.64 and nr >= 1.0):
-            tier = "CONTENDER"
-        elif (rank is not None and rank <= 8 and wp >= 0.50) or (wp >= 0.54 and nr >= 0.0):
-            tier = "PLAYOFF_BUYER"
-        elif (rank is not None and rank <= 12 and wp >= 0.42) or (wp >= 0.45 and season_progress > 0.2):
-            tier = "FRINGE"
-        else:
-            # bottom teams: distinguish rebuild vs tank
-            if wp <= 0.34 and (signals.young_core < 0.35) and (signals.star_power < 0.55):
-                tier = "TANK"
-            else:
-                tier = "REBUILD"
+        tier = _map_blended_score_to_tier(blended)
+
+        # Early-season protection: avoid overreacting to noisy records when roster strength is clear.
+        if season_progress <= float(TEAM_SITUATION_TIER_MODEL.early_protection_max_progress):
+            if overall_score >= float(TEAM_SITUATION_TIER_MODEL.early_protection_high_overall_floor):
+                tier = "PLAYOFF_BUYER" if tier in ("FRINGE", "RESET", "REBUILD", "TANK") else tier
+            elif overall_score >= float(TEAM_SITUATION_TIER_MODEL.early_protection_mid_overall_floor):
+                tier = "FRINGE" if tier in ("RESET", "REBUILD", "TANK") else tier
+
+        # "reset" special: strong roster + underperforming results (only after enough sample).
+        if (
+            season_progress >= float(TEAM_SITUATION_TIER_MODEL.reset_min_progress)
+            and w_perf >= float(TEAM_SITUATION_TIER_MODEL.reset_min_perf_weight)
+            and overall_score >= float(TEAM_SITUATION_TIER_MODEL.reset_min_overall_score)
+            and performance_score <= float(TEAM_SITUATION_TIER_MODEL.reset_max_perf_score)
+        ):
+            if tier not in ("REBUILD", "TANK"):
+                tier = "RESET"
 
         # Bubble nuance: near the 6/10 cut lines (especially later season) behaves differently from pure rank buckets.
         # - within ~3GB of 6th late -> treat like a buyer-tier (more realistic "push for playoffs")
@@ -1561,7 +1563,27 @@ class TeamSituationEvaluator:
             urgency = _clamp(float(urgency) * 0.85, 0.0, 1.0)
 
         # 8) reasons (Korean, for player-facing realism)
-        reasons = _build_reasons(tid, tier, horizon, posture, signals, constraints, roster_sig, asset_sig, style_sig, prefs, needs)
+        reasons = _build_reasons(
+            tid,
+            tier,
+            horizon,
+            posture,
+            signals,
+            constraints,
+            roster_sig,
+            asset_sig,
+            style_sig,
+            prefs,
+            needs,
+            tier_diagnostics={
+                "season_progress": float(_clamp(season_progress, 0.0, 1.0)),
+                "overall_score": float(overall_score),
+                "performance_score": float(performance_score),
+                "w_overall": float(w_overall),
+                "w_perf": float(w_perf),
+                "blended": float(blended),
+            },
+        )
         # Add a short transparency note for early season dampening (helps debugging/explanations).
         if stat_trust < 1.0:
             reasons.insert(
@@ -1937,18 +1959,87 @@ def _standings_winpct_map(standings: Dict[str, Any]) -> Dict[str, float]:
 
 
 def _compute_perf_score(sig: TeamSituationSignals, season_progress: float) -> float:
-    # win% is primary; point diff + net rating as stabilizers
+    # In-season performance score. Early/late-season weighting is handled by
+    # _performance_weight_by_progress(), so this function stays focused on
+    # "how well this team is actually performing right now".
     wp = _clamp(sig.win_pct, 0.0, 1.0)
-    pd = sig.point_diff_pg
-    pd_norm = 0.5 + 0.5 * math.tanh(pd / 8.0)
+    pd_norm = 0.5 + 0.5 * math.tanh(sig.point_diff_pg / 8.0)
     nr_norm = 0.5 + 0.5 * math.tanh(sig.net_rating / 8.0)
 
-    # when season is young, trust roster more; still include trend
     trend = _clamp(sig.trend, -0.3, 0.3)
     trend_norm = 0.5 + (trend / 0.6)
 
-    score = 0.58 * wp + 0.20 * pd_norm + 0.12 * nr_norm + 0.10 * trend_norm
+    # Bubble context is only meaningful once the table has stabilized enough.
+    bubble_bonus = 0.0
+    sp = _clamp(_safe_float(season_progress, 0.0), 0.0, 1.0)
+    if sp >= float(TEAM_SITUATION_TIER_MODEL.bubble_bonus_min_progress):
+        gb6 = sig.gb_to_6th
+        gb10 = sig.gb_to_10th
+        if gb6 is not None and gb6 <= float(TEAM_SITUATION_TIER_MODEL.bubble_bonus_gb6_max):
+            bubble_bonus = max(bubble_bonus, float(TEAM_SITUATION_TIER_MODEL.bubble_bonus_gb6_raw))
+        if gb10 is not None and gb10 <= float(TEAM_SITUATION_TIER_MODEL.bubble_bonus_gb10_max):
+            bubble_bonus = max(bubble_bonus, float(TEAM_SITUATION_TIER_MODEL.bubble_bonus_gb10_raw))
+
+    score = (
+        float(TEAM_SITUATION_TIER_MODEL.perf_weight_win_pct) * wp
+        + float(TEAM_SITUATION_TIER_MODEL.perf_weight_net_rating_norm) * nr_norm
+        + float(TEAM_SITUATION_TIER_MODEL.perf_weight_point_diff_norm) * pd_norm
+        + float(TEAM_SITUATION_TIER_MODEL.perf_weight_trend_norm) * trend_norm
+        + float(TEAM_SITUATION_TIER_MODEL.perf_weight_bubble_bonus) * bubble_bonus
+    )
     return float(_clamp(score, 0.0, 1.0))
+
+
+def _compute_overall_strength_score(sig: TeamSituationSignals) -> float:
+    """Compute roster-anchored team strength score (0..1)."""
+    score = (
+        float(TEAM_SITUATION_TIER_MODEL.overall_weight_star_power) * _clamp(sig.star_power, 0.0, 1.0)
+        + float(TEAM_SITUATION_TIER_MODEL.overall_weight_depth) * _clamp(sig.depth, 0.0, 1.0)
+    )
+    return float(_clamp(score, 0.0, 1.0))
+
+
+def _piecewise_linear_weight(progress: float, points: List[Tuple[float, float]]) -> float:
+    """Return y-value at x=progress for piecewise-linear control points."""
+    p = _clamp(_safe_float(progress, 0.0), 0.0, 1.0)
+    if not points:
+        return 0.5
+    if p <= points[0][0]:
+        return float(_clamp(points[0][1], 0.0, 1.0))
+    for i in range(1, len(points)):
+        x0, y0 = points[i - 1]
+        x1, y1 = points[i]
+        if p <= x1:
+            if abs(x1 - x0) <= 1e-9:
+                return float(_clamp(y1, 0.0, 1.0))
+            t = _clamp((p - x0) / (x1 - x0), 0.0, 1.0)
+            return float(_clamp(_lerp(y0, y1, t), 0.0, 1.0))
+    return float(_clamp(points[-1][1], 0.0, 1.0))
+
+
+def _performance_weight_by_progress(season_progress: float) -> float:
+    """Performance weight schedule: low early, high late."""
+    control_points = list(getattr(TEAM_SITUATION_TIER_MODEL, "performance_weight_points", ()) or [])
+    if not control_points:
+        control_points = [(0.00, 0.15), (1.00, 0.80)]
+    return float(_piecewise_linear_weight(season_progress, control_points))
+
+
+def _overall_weight_by_progress(season_progress: float) -> float:
+    return float(_clamp(1.0 - _performance_weight_by_progress(season_progress), 0.0, 1.0))
+
+
+def _map_blended_score_to_tier(blended: float) -> CompetitiveTier:
+    b = _clamp(blended, 0.0, 1.0)
+    if b >= float(TEAM_SITUATION_TIER_MODEL.tier_threshold_contender):
+        return "CONTENDER"
+    if b >= float(TEAM_SITUATION_TIER_MODEL.tier_threshold_playoff_buyer):
+        return "PLAYOFF_BUYER"
+    if b >= float(TEAM_SITUATION_TIER_MODEL.tier_threshold_fringe):
+        return "FRINGE"
+    if b >= float(TEAM_SITUATION_TIER_MODEL.tier_threshold_rebuild):
+        return "REBUILD"
+    return "TANK"
  
  
 def _early_stat_trust(season_progress: float, *, full_at: float = 0.20, min_trust: float = 0.50) -> float:
@@ -2348,6 +2439,7 @@ def _build_reasons(
     style_sig: Dict[str, Any],
     prefs: Dict[str, float],
     needs: List[TeamNeed],
+    tier_diagnostics: Optional[Dict[str, float]] = None,
 ) -> List[str]:
     r: List[str] = []
 
@@ -2414,6 +2506,19 @@ def _build_reasons(
 
     # headline decision
     r.append(f"상황 평가: {tier} / {horizon} / 트레이드 스탠스 {posture}.")
+    if isinstance(tier_diagnostics, dict):
+        sp = _safe_float(tier_diagnostics.get("season_progress"), 0.0)
+        overall = _safe_float(tier_diagnostics.get("overall_score"), 0.0)
+        perf = _safe_float(tier_diagnostics.get("performance_score"), 0.0)
+        w_overall = _safe_float(tier_diagnostics.get("w_overall"), 0.0)
+        w_perf = _safe_float(tier_diagnostics.get("w_perf"), 0.0)
+        blended = _safe_float(tier_diagnostics.get("blended"), 0.0)
+        r.append(
+            "분류 근거 점수: "
+            f"overall {overall:.3f} × {w_overall:.2f} + "
+            f"performance {perf:.3f} × {w_perf:.2f} = blended {blended:.3f} "
+            f"(시즌 진행도 {sp:.0%})."
+        )
 
     # prefs
     r.append(f"선호도(0~1): 즉전감 {prefs.get('WIN_NOW', 0.0):.2f}, 픽/유망주 {prefs.get('PICKS', 0.0):.2f}, 캡유연성 {prefs.get('CAP_FLEX', 0.0):.2f}.")

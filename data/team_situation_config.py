@@ -7,6 +7,7 @@ behavior can be tuned without modifying core logic.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Tuple
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,3 +58,58 @@ class TeamSituationNeedTagConfig:
 
 
 TEAM_SITUATION_NEED_TAG_CONFIG = TeamSituationNeedTagConfig()
+
+
+@dataclass(frozen=True, slots=True)
+class TeamSituationTierModelConfig:
+    """Tunable parameters for season-progress blended tier classification."""
+
+    # overall strength score weights
+    overall_weight_star_power: float = 0.35
+    overall_weight_depth: float = 0.65
+
+    # in-season performance score weights
+    perf_weight_win_pct: float = 0.45
+    perf_weight_net_rating_norm: float = 0.25
+    perf_weight_point_diff_norm: float = 0.15
+    perf_weight_trend_norm: float = 0.10
+    perf_weight_bubble_bonus: float = 0.05
+
+    # bubble bonus gates (used only when progress >= bubble_bonus_min_progress)
+    bubble_bonus_min_progress: float = 0.55
+    bubble_bonus_gb6_max: float = 3.0
+    bubble_bonus_gb10_max: float = 2.0
+    # Raw bonus magnitudes before perf_weight_bubble_bonus multiplier.
+    bubble_bonus_gb6_raw: float = 0.70
+    bubble_bonus_gb10_raw: float = 0.62
+
+    # performance weight schedule by season progress (piecewise linear)
+    # format: ((progress, perf_weight), ...)
+    performance_weight_points: Tuple[Tuple[float, float], ...] = (
+        (0.00, 0.15),
+        (0.18, 0.15),
+        (0.49, 0.40),
+        (0.73, 0.60),
+        (0.85, 0.80),
+        (1.00, 0.80),
+    )
+
+    # blended score -> tier thresholds
+    tier_threshold_contender: float = 0.853
+    tier_threshold_playoff_buyer: float = 0.840
+    tier_threshold_fringe: float = 0.821
+    tier_threshold_rebuild: float = 0.809
+
+    # reset special-case guard
+    reset_min_progress: float = 0.35
+    reset_min_perf_weight: float = 0.30
+    reset_min_overall_score: float = 0.840
+    reset_max_perf_score: float = 0.42
+
+    # early-season protection (prevent premature demotion when roster is strong)
+    early_protection_max_progress: float = 0.18
+    early_protection_high_overall_floor: float = 0.68
+    early_protection_mid_overall_floor: float = 0.58
+
+
+TEAM_SITUATION_TIER_MODEL = TeamSituationTierModelConfig()

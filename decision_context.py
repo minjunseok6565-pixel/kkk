@@ -25,6 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Mapping, Literal, List, Tuple, Callable
 
+import re
 import warnings
 
 from need_attr_profiles import ALL_NEW_NEED_TAGS
@@ -45,10 +46,10 @@ ELASTICITY_BY_TIER: Dict[str, float] = {
     # Reality dominates on the extremes; philosophy dominates in the middle.
     "CONTENDER": 0.25,
     "PLAYOFF_BUYER": 0.35,
-    "FRINGE": 0.55,
-    "RESET": 0.65,
-    "REBUILD": 0.45,
-    "TANK": 0.25,
+    "FRINGE": 0.52,
+    "RESET": 0.56,
+    "REBUILD": 0.50,
+    "TANK": 0.28,
 }
 
 POSTURE_BUY_FACTOR: Dict[str, float] = {
@@ -125,6 +126,39 @@ def _normalize_need_map_from_situation(needs: Any) -> Tuple[Dict[str, float], Li
         need_map[tag] = max(need_map.get(tag, 0.0), w)
         weights.append(w)
     return need_map, weights
+
+
+def _extract_tier_diagnostics_from_reasons(reasons: Any) -> Dict[str, float]:
+    """Best-effort parse of team_situation blended-tier diagnostics from reasons text.
+
+    Expected text example:
+      "분류 근거 점수: overall 0.700 × 0.60 + performance 0.520 × 0.40 = blended 0.628 (시즌 진행도 49%)."
+    """
+    out: Dict[str, float] = {}
+    if not isinstance(reasons, list):
+        return out
+
+    for x in reasons:
+        line = str(x or "").strip()
+        if not line or "분류 근거 점수" not in line:
+            continue
+        # Extract in order, tolerant to spacing/symbol variants.
+        nums = re.findall(r"[-+]?\d*\.?\d+", line)
+        if len(nums) < 6:
+            continue
+        try:
+            out["overall_score"] = clamp01(float(nums[0]))
+            out["w_overall"] = clamp01(float(nums[1]))
+            out["performance_score"] = clamp01(float(nums[2]))
+            out["w_perf"] = clamp01(float(nums[3]))
+            out["blended"] = clamp01(float(nums[4]))
+            # season progress may appear as percentage (e.g., 49)
+            sp_raw = float(nums[5])
+            out["season_progress"] = clamp01(sp_raw / 100.0 if sp_raw > 1.0 else sp_raw)
+            return out
+        except Exception:
+            continue
+    return out
 
 def normalize_team_id(team_id: str) -> str:
     """Best-effort team id normalization.
@@ -436,6 +470,7 @@ def build_decision_context(
         deadline_pressure = clamp01(float(getattr(constraints, "deadline_pressure", 0.0) or 0.0))
 
     cooldown_throttle = 0.55 if cooldown_active else 1.0
+    tier_diag = _extract_tier_diagnostics_from_reasons(getattr(team_situation, "reasons", None))
 
     # -----------------------------------------------------------------
     # Elasticity: shrink/expand how much GM traits can tilt reality.
@@ -443,7 +478,15 @@ def build_decision_context(
     # - Middle tiers -> GM philosophy shows more (higher e)
     # - Urgency/deadline -> reality dominates more (traits matter less)
     # -----------------------------------------------------------------
-    e0 = float(ELASTICITY_BY_TIER.get(tier, 0.55))
+    e0_raw = float(ELASTICITY_BY_TIER.get(tier, 0.55))
+    # If team_situation provided blended-tier diagnostics, use w_perf as a
+    # confidence proxy for tier firmness. Early season (low w_perf) moves
+    # elasticity toward a neutral midpoint to reduce overreaction.
+    diag_w_perf = tier_diag.get("w_perf")
+    if diag_w_perf is not None:
+        e0 = lerp(0.55, e0_raw, clamp01(diag_w_perf))
+    else:
+        e0 = e0_raw
     e = e0 * (0.92 - 0.35 * urgency) * (0.95 - 0.25 * deadline_pressure)
     e = clamp(e, 0.15, 0.70)
 
@@ -687,7 +730,8 @@ def build_decision_context(
         "payroll": payroll,
         "cap_pressure": cap_pressure,
         "strength": dict(s),
-        "elasticity": {"base": e0, "final": e, "tier": tier},
+        "elasticity": {"base_raw": e0_raw, "base": e0, "final": e, "tier": tier, "diag_w_perf": diag_w_perf},
+        "tier_diagnostics": dict(tier_diag),
         "strength_effective": dict(s_eff),
         "overpay_budget": overpay_budget,
         "counter_rate": counter_rate,
