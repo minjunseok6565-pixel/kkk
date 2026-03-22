@@ -1525,8 +1525,6 @@ class TeamSituationEvaluator:
         if season_progress <= float(TEAM_SITUATION_TIER_MODEL.early_protection_max_progress):
             if overall_score >= float(TEAM_SITUATION_TIER_MODEL.early_protection_high_overall_floor):
                 tier = "PLAYOFF_BUYER" if tier in ("FRINGE", "RESET", "REBUILD", "TANK") else tier
-            elif overall_score >= float(TEAM_SITUATION_TIER_MODEL.early_protection_mid_overall_floor):
-                tier = "FRINGE" if tier in ("RESET", "REBUILD", "TANK") else tier
 
         # "reset" special: strong roster + underperforming results (only after enough sample).
         if (

@@ -114,8 +114,7 @@ class TeamSituationTierModelConfig:
 
     # early-season protection (prevent premature demotion when roster is strong)
     early_protection_max_progress: float = 0.18
-    early_protection_high_overall_floor: float = 0.68
-    early_protection_mid_overall_floor: float = 0.58
+    early_protection_high_overall_floor: float = 0.83
 
     def __post_init__(self) -> None:
         total_quota = (
