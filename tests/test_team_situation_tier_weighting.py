@@ -112,20 +112,20 @@ def _classify(progress: float, sig: TeamSituationSignals) -> str:
     return tier
 
 
-def test_early_season_high_overall_losing_streak_is_not_rebuild_or_tank() -> None:
+def test_early_season_high_overall_losing_streak_is_lifted_to_playoff_buyer() -> None:
     sig = _signals(
         win_pct=0.20,
         net_rating=-8.0,
         point_diff_pg=-9.0,
         trend=-0.10,
-        star_power=0.80,
-        depth=0.75,
+        star_power=0.90,
+        depth=0.82,
         role_fit_health=0.78,
     )
 
     tier = _classify(0.10, sig)
 
-    assert tier not in {"REBUILD", "TANK"}
+    assert tier == "PLAYOFF_BUYER"
 
 
 def test_late_season_poor_results_pull_tier_down_vs_early_season() -> None:
