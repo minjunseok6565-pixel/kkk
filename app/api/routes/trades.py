@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
+from dataclasses import asdict, is_dataclass
 
 import hashlib
 import json
@@ -47,11 +48,17 @@ from app.schemas.trades import (
     TradeSubmitCommittedRequest,
     TradeSubmitRequest,
 )
+from app.schemas.trade_lab import (
+    TradeLabAssetPick,
+    TradeLabAssetPlayer,
+    TradeLabTeamAssetsResponse,
+)
 from app.services.cache_facade import _try_ui_cache_refresh_players
 from app.services.contract_facade import _validate_repo_integrity
 from app.services.trade_facade import _trade_error_response
 from app.services.trade_contract_telemetry import emit_trade_contract_violation
 from agency.service import apply_trade_offer_grievances
+from schema import normalize_team_id
 
 router = APIRouter()
 
@@ -281,6 +288,31 @@ def _normalize_trade_block_sort(raw: Any, *, default: str = "priority_desc") -> 
     return str(default).lower()
 
 
+def _normalize_trade_lab_team_id(raw: Any) -> str:
+    tid_raw = str(raw or "").strip()
+    if not tid_raw:
+        raise TradeError(
+            "TRADE_LAB_INVALID_TEAM_ID",
+            "team_id is required",
+            {"team_id": raw},
+        )
+    try:
+        tid = str(normalize_team_id(tid_raw, strict=True)).upper()
+    except Exception:
+        raise TradeError(
+            "TRADE_LAB_INVALID_TEAM_ID",
+            "Invalid team_id",
+            {"team_id": tid_raw},
+        )
+    if tid not in ALL_TEAM_IDS:
+        raise TradeError(
+            "TRADE_LAB_INVALID_TEAM_ID",
+            "Invalid team_id",
+            {"team_id": tid_raw, "normalized_team_id": tid},
+        )
+    return tid
+
+
 def _parse_trade_block_aggregate_query(
     *,
     active_only: Any = True,
@@ -301,6 +333,102 @@ def _parse_trade_block_aggregate_query(
     )
 
 
+def _normalize_pick_protection_payload(raw: Any) -> Optional[Dict[str, Any]]:
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return dict(raw)
+    return None
+
+
+@router.get("/api/trade/lab/team-assets")
+async def api_trade_lab_team_assets(team_id: str):
+    """Return tradable team assets for Trade Lab (players + first-round picks)."""
+    try:
+        tid = _normalize_trade_lab_team_id(team_id)
+        current_date = state.get_current_date_as_date()
+        db_path = state.get_db_path()
+
+        with LeagueRepo(db_path) as repo:
+            roster_rows = repo.get_team_roster(tid) or []
+            draft_picks_map = repo.get_draft_picks_map() or {}
+
+        players: List[TradeLabAssetPlayer] = []
+        for row in roster_rows:
+            attrs = row.get("attrs") if isinstance(row, dict) else {}
+            if not isinstance(attrs, dict):
+                attrs = {}
+            injury = attrs.get("injury")
+            injury_payload = dict(injury) if isinstance(injury, dict) else None
+
+            players.append(
+                TradeLabAssetPlayer(
+                    kind="player",
+                    player_id=str(row.get("player_id") or ""),
+                    name=str(row.get("name") or ""),
+                    pos=str(row.get("pos") or ""),
+                    age=int(_first_number(row.get("age"), default=0)),
+                    ovr=int(_first_number(row.get("ovr"), default=0)),
+                    salary=float(_first_number(row.get("salary_amount"), default=0.0)),
+                    team_id=tid,
+                    injury=injury_payload,
+                )
+            )
+
+        players.sort(
+            key=lambda x: (
+                -int(_first_number(x.ovr, default=0)),
+                int(_first_number(x.age, default=999)),
+                str(x.player_id),
+            )
+        )
+
+        first_round_picks: List[TradeLabAssetPick] = []
+        for pick_id, row in draft_picks_map.items():
+            if not isinstance(row, dict):
+                continue
+
+            owner_team = str(row.get("owner_team") or "").upper()
+            if owner_team != tid:
+                continue
+
+            round_no = int(_first_number(row.get("round"), default=0))
+            if round_no != 1:
+                continue
+
+            first_round_picks.append(
+                TradeLabAssetPick(
+                    kind="pick",
+                    pick_id=str(pick_id),
+                    year=int(_first_number(row.get("year"), default=0)),
+                    round=round_no,
+                    original_team=str(row.get("original_team") or "").upper(),
+                    owner_team=owner_team,
+                    protection=_normalize_pick_protection_payload(row.get("protection")),
+                )
+            )
+
+        first_round_picks.sort(
+            key=lambda x: (
+                int(_first_number(x.year, default=9999)),
+                str(x.pick_id),
+            )
+        )
+
+        response = TradeLabTeamAssetsResponse(
+            ok=True,
+            team_id=tid,
+            current_date=current_date.isoformat(),
+            players=players,
+            first_round_picks=first_round_picks,
+        )
+        return response.dict()
+    except TradeError as exc:
+        return _trade_error_response(exc)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Trade lab team assets failed: {exc}")
+
+
 def _first_number(*values: Any, default: float = 0.0) -> float:
     for v in values:
         try:
@@ -310,6 +438,97 @@ def _first_number(*values: Any, default: float = 0.0) -> float:
         if n == n:  # NaN guard
             return n
     return float(default)
+
+
+def _collect_player_ids_from_deal_obj(deal: Any) -> List[str]:
+    out: List[str] = []
+    legs = getattr(deal, "legs", None)
+    if not isinstance(legs, dict):
+        return out
+    for assets in legs.values():
+        if not isinstance(assets, list):
+            continue
+        for asset in assets:
+            kind = str(getattr(asset, "kind", "")).lower()
+            if kind != "player":
+                continue
+            pid = str(getattr(asset, "player_id", "")).strip()
+            if pid:
+                out.append(pid)
+    return list(dict.fromkeys(out))
+
+
+def _to_jsonable_obj(value: Any) -> Any:
+    if is_dataclass(value):
+        return asdict(value)
+    if isinstance(value, dict):
+        return {str(k): _to_jsonable_obj(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_jsonable_obj(v) for v in value]
+    return value
+
+
+def _build_trade_evaluate_debug_context(*, team_id: str, deal: Any, db_path: str, in_game_date: date) -> Dict[str, Any]:
+    """Best-effort debug context payload for Trade Lab explainability cards."""
+    tid = str(team_id).upper()
+    out: Dict[str, Any] = {
+        "team": {},
+        "players": [],
+        "meta": {"team_id": tid, "current_date": in_game_date.isoformat()},
+    }
+    try:
+        from data.team_situation import build_team_situation_context, TeamSituationEvaluator  # type: ignore
+        from decision_context import build_decision_context, gm_traits_from_profile_json, GMTradeTraits  # type: ignore
+        from trades.valuation.data_context import build_repo_valuation_data_context  # type: ignore
+    except Exception:
+        return out
+
+    # Team context + decision context
+    try:
+        ts_ctx = build_team_situation_context(db_path=db_path, current_date=in_game_date)
+        ts_eval = TeamSituationEvaluator(ctx=ts_ctx, db_path=db_path).evaluate_team(tid)
+
+        gm_profile: Dict[str, Any] = {}
+        try:
+            with LeagueRepo(db_path) as repo:
+                gp = repo.get_gm_profile(tid) or {}
+                gm_profile = dict(gp) if isinstance(gp, dict) else {"value": gp}
+        except Exception:
+            gm_profile = {}
+
+        gm_traits = gm_traits_from_profile_json(gm_profile, default=GMTradeTraits())
+        dctx = build_decision_context(team_situation=ts_eval, gm_traits=gm_traits, team_id=tid)
+        out["team"] = {
+            "team_situation": _to_jsonable_obj(ts_eval),
+            "decision_context": _to_jsonable_obj(dctx),
+            "gm_profile": gm_profile,
+        }
+    except Exception as exc:
+        out["team"] = {"error": f"TEAM_CONTEXT_UNAVAILABLE:{type(exc).__name__}"}
+
+    # Player context (only players participating in current deal)
+    try:
+        player_ids = _collect_player_ids_from_deal_obj(deal)
+        if player_ids:
+            season_year = _get_season_year_from_state(fallback_year=in_game_date.year)
+            provider = build_repo_valuation_data_context(
+                db_path=db_path,
+                current_season_year=int(season_year),
+                current_date_iso=in_game_date.isoformat(),
+            )
+            players_payload: List[Dict[str, Any]] = []
+            for pid in player_ids:
+                try:
+                    snap = provider.get_player_snapshot(pid)
+                    players_payload.append(_to_jsonable_obj(snap))
+                except Exception:
+                    continue
+            out["players"] = players_payload
+    except Exception as exc:
+        out["players"] = []
+        out["meta"]["players_error"] = f"PLAYER_CONTEXT_UNAVAILABLE:{type(exc).__name__}"
+
+    return out
 
 
 def _hydrate_trade_block_player_snapshots(player_ids: List[str], *, db_path: str) -> Dict[str, Dict[str, Any]]:
@@ -2043,12 +2262,20 @@ async def api_trade_evaluate(req: TradeEvaluateRequest):
             validate=False,
         )
 
+        debug_context = _build_trade_evaluate_debug_context(
+            team_id=str(req.team_id),
+            deal=deal,
+            db_path=db_path,
+            in_game_date=in_game_date,
+        )
+
         return {
             "ok": True,
             "team_id": str(req.team_id).upper(),
             "deal": serialize_deal(deal),
             "decision": to_jsonable(decision),
             "evaluation": to_jsonable(evaluation),
+            "debug_context": debug_context,
         }
     except TradeError as exc:
         return _trade_error_response(exc)
