@@ -373,12 +373,12 @@ class TeamUtilityAdjuster:
         # -----------------------------------------------------------------
         value = market.value
 
-        # 1) Apply now/future weights (DecisionContext.knobs)
-        value = self._apply_now_future_weights(value, ctx, team_steps)
-
-        # 2) Asset-type multipliers (DecisionContext.knobs)
+        # 1) Asset-type weighting/multipliers (DecisionContext.knobs)
         if kind in (AssetKind.PICK, AssetKind.SWAP):
+            value = self._apply_pick_timeline_factor(value, ctx, team_steps)
             value = self._apply_pick_preference(value, ctx, team_steps)
+        else:
+            value = self._apply_now_future_weights(value, ctx, team_steps)
 
         out = TeamValuation(
             asset_key=market.asset_key,
@@ -478,6 +478,33 @@ class TeamUtilityAdjuster:
             )
         )
         return _scale_components(v, now_factor=1.0, future_factor=m)
+
+    def _apply_pick_timeline_factor(
+        self,
+        v: ValueComponents,
+        ctx: DecisionContext,
+        steps: List[ValuationStep],
+    ) -> ValueComponents:
+        """
+        Pick timeline factor (requested):
+        factor = 1 + (w_future / 2)
+        - Always non-negative and >= 1.0 under normal w_future in [0,1].
+        - Applied to future component for pick-like assets.
+        """
+        w_fut = _safe_float(ctx.knobs.w_future, 1.0)
+        factor = 1.0 + (w_fut / 2.0)
+        factor = max(0.0, float(factor))
+        steps.append(
+            ValuationStep(
+                stage=ValuationStage.TEAM,
+                mode=StepMode.MUL,
+                code="PICK_TIMELINE_FACTOR",
+                label="픽 타임라인 계수(1 + w_future/2)",
+                factor=factor,
+                meta={"w_future": w_fut},
+            )
+        )
+        return _scale_components(v, now_factor=1.0, future_factor=factor)
 
     # -------------------------------------------------------------------------
     # 2-B) Youth: preference multiplier (players)
