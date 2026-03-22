@@ -640,7 +640,7 @@ def build_decision_context(
     star_premium_exponent = 1.0 + 0.80 * eff_star_focus
     consolidation_bias = eff_star_focus
 
-    fit_scale = lerp(0.60, 1.80, eff_fit_strict)
+    fit_scale = lerp(0.80, 1.60, eff_fit_strict)
     # Fit gate threshold: stricter fit => higher minimum threshold
     min_fit_threshold = lerp(0.45, 0.70, eff_fit_strict)
 

@@ -70,7 +70,7 @@ class FitEngineConfig:
     """
 
     # --- Fit scoring
-    fit_neutral_score: float = 0.50
+    fit_neutral_score: float = 0.666
     fit_factor_floor: float = 0.70
     fit_factor_cap: float = 1.35
     fit_below_threshold_floor: float = 0.35
