@@ -71,6 +71,8 @@ class ContractNegotiationConfig:
     # ---------------------------------------------------------------------
     ask_mult_min: float = 0.85
     ask_mult_max: float = 1.45
+    # Absolute ask cap as share of salary cap (applies to all players when salary_cap is known).
+    ask_aav_cap_pct_of_salary_cap: float = 0.30
 
     floor_mult_min: float = 0.78
     floor_mult_max: float = 1.35

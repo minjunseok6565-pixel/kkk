@@ -179,6 +179,15 @@ def build_player_position(
     ask_aav = round_salary(float(market_aav) * float(ask_mult), cfg=cfg)
     floor_aav = round_salary(float(market_aav) * float(floor_mult), cfg=cfg)
 
+    # Absolute ask cap (global): e.g. 30% of salary cap for all players.
+    cap = safe_float(getattr(cfg, "salary_cap", None), 0.0)
+    ask_cap_pct = safe_float(getattr(cfg, "ask_aav_cap_pct_of_salary_cap", None), 0.0)
+    if cap > 1e-9 and ask_cap_pct > 0.0:
+        ask_cap_abs = round_salary(float(cap) * float(ask_cap_pct), cfg=cfg)
+        ask_aav = min(float(ask_aav), float(ask_cap_abs))
+        # Keep invariant floor <= ask after capping.
+        floor_aav = min(float(floor_aav), float(ask_aav))
+
     # --- Years preferences
     ideal_years = _infer_ideal_years(age)
 
