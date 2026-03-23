@@ -33,7 +33,7 @@ from .utils import clamp, clamp01, mental_norm, norm_date_iso, safe_float, safe_
 
 AgencyEventType = Literal[
     "MINUTES_COMPLAINT",
-    "HELP_DEMAND",
+    "TEAM_AGENT",
     "TRADE_REQUEST",
     "TRADE_REQUEST_PUBLIC",
 
@@ -80,9 +80,8 @@ ResponseType = Literal[
     "PROMISE_LOAD",
     "PROMISE_EXTENSION_TALKS",
 
-    # Help demand
+    # Team support request
     "PROMISE_HELP",
-    "REFUSE_HELP",
 
     # Trade request
     "SHOP_TRADE",
@@ -114,7 +113,6 @@ class ResponseConfig:
     trust_acknowledge: float = 0.03
     trust_promise: float = 0.06
     trust_dismiss_penalty: float = 0.06
-    trust_refuse_help_penalty: float = 0.06
     trust_refuse_trade_penalty: float = 0.10
 
     # Frustration deltas (base; scaled)
@@ -928,73 +926,6 @@ def apply_user_response(
                 state=state,
             )
 
-    elif et == "HELP_DEMAND":
-        if rt == "PROMISE_HELP":
-            ask_tags = ep.get("need_tags") if isinstance(ep.get("need_tags"), list) else []
-            offer_tags = payload.get("need_tags") if isinstance(payload.get("need_tags"), list) else ask_tags
-            due = due_month_from_now(now_d, int(rcfg.promise_help_due_months))
-            offer = Offer(
-                promise_type="HELP",
-                axis="TEAM",
-                due_month=due,
-                target_value=None,
-                target_json={"ask_need_tags": ask_tags, "offer_need_tags": offer_tags, "need_tags": offer_tags},
-            )
-            decision = evaluate_offer(offer=offer, state=state, mental=mental, cfg=cfg, round_index=0, max_rounds=2)
-            negotiation_meta = dict(getattr(decision, "meta", {}) or {})
-            negotiation_meta["decision"] = getattr(decision, "to_dict", lambda: {})()
-            verdict = str(getattr(decision, "verdict", "")).upper()
-
-            st_updates, st_meta = _apply_offer_decision_stances(
-                state={"stance_skepticism": sk1, "stance_resentment": rs1, "stance_hardball": hb1},
-                mental=mental,
-                verdict=verdict,
-                insulting=bool(getattr(decision, "insulting", False)),
-                base_scale=float(impact * sev_mult),
-                cfg=cfg,
-            )
-            _apply_stance_updates(st_updates)
-            if st_meta:
-                negotiation_meta.setdefault("stance", st_meta)
-
-            if verdict == "ACCEPT":
-                promise = PromiseSpec(promise_type="HELP", due_month=due, target={"need_tags": offer_tags})
-                trust1 = float(clamp01(trust1 + rcfg.trust_promise * impact * pos_mult * sev_mult))
-                tfr1 = float(clamp01(tfr1 - rcfg.team_relief_promise * impact * pos_mult * sev_mult))
-                reasons.append({"code": "PROMISE_HELP_ACCEPTED"})
-            else:
-                tp, fb = _neg_penalties(verdict)
-                trust1 = float(clamp01(trust1 - tp * impact * neg_mult * sev_mult))
-                tfr1 = float(clamp01(tfr1 + fb * impact * neg_mult * sev_mult))
-                reasons.append({"code": "PROMISE_HELP_NEGOTIATION", "evidence": {"verdict": verdict}})
-                fu = _maybe_make_negotiation_followup(decision=decision, offer=offer, event=event, now_date_iso=now_d, cfg=cfg)
-                if fu:
-                    follow_up_events.append(fu)
-                tone_override = "FIRM" if verdict in {"COUNTER", "REJECT"} else "ANGRY"
-                reply_override = "Prove it."
-
-        else:
-            trust1, _mfr_tmp, tfr1, _tr_tmp, promise, reasons = _apply_help_demand(
-                rt,
-                payload,
-                now_d,
-                trust0=trust0,
-                mfr0=mfr0,
-                tfr0=tfr0,
-                tr_level0=tr_level0,
-                lev=lev,
-                ego=ego,
-                amb=amb,
-                loy=loy,
-                coach=coach,
-                impact=impact,
-                pos_mult=pos_mult,
-                neg_mult=neg_mult,
-                sev_mult=sev_mult,
-                rcfg=rcfg,
-                event=event,
-            )
-
     elif et in {"TRADE_REQUEST", "TRADE_REQUEST_PUBLIC"}:
         trust1, mfr1, tfr1, tr_level1, promise, reasons = _apply_trade_request(
             et,
@@ -1403,8 +1334,6 @@ def _allowed_responses_for_event(event_type: str, event_payload: Optional[Mappin
 
     if et == "MINUTES_COMPLAINT":
         return {"ACKNOWLEDGE", "PROMISE_MINUTES", "DISMISS"}
-    if et == "HELP_DEMAND":
-        return {"ACKNOWLEDGE", "PROMISE_HELP", "REFUSE_HELP"}
     if et in {"TRADE_REQUEST", "TRADE_REQUEST_PUBLIC"}:
         return {"ACKNOWLEDGE", "SHOP_TRADE", "REFUSE_TRADE", "PROMISE_COMPETE"}
 
@@ -1527,7 +1456,7 @@ def _player_reply(event_type: str, response_type: str, tone: str) -> str:
     if rt == "END_TALKS":
         return "We're done here." if tone == "ANGRY" else "Fine."
 
-    if rt in {"DISMISS", "REFUSE_HELP", "REFUSE_TRADE"}:
+    if rt in {"DISMISS", "REFUSE_TRADE"}:
         return "So that's how it is." if tone != "ANGRY" else "This is disrespectful."
 
     return "Understood."
@@ -1728,97 +1657,6 @@ def _apply_minutes_complaint(
             reasons.append({"code": "DISMISS_ESCALATED_TRADE_PRESSURE", "evidence": {"trade_request_level": tr_level1}})
 
         reasons.append({"code": "DISMISSED_MINUTES", "evidence": {"trust_delta": dt}})
-
-    return trust1, mfr1, tfr1, tr_level1, promise, reasons
-
-
-def _apply_help_demand(
-    rt: str,
-    payload: Mapping[str, Any],
-    now_date_iso: str,
-    *,
-    trust0: float,
-    mfr0: float,
-    tfr0: float,
-    tr_level0: int,
-    lev: float,
-    ego: float,
-    amb: float,
-    loy: float,
-    coach: float,
-    impact: float,
-    pos_mult: float,
-    neg_mult: float,
-    sev_mult: float,
-    rcfg: ResponseConfig,
-    event: Mapping[str, Any],
-) -> tuple[float, float, float, int, Optional[PromiseSpec], List[Dict[str, Any]]]:
-    reasons: List[Dict[str, Any]] = []
-    trust1, mfr1, tfr1 = trust0, mfr0, tfr0
-    tr_level1 = tr_level0
-    promise: Optional[PromiseSpec] = None
-
-    if rt == "ACKNOWLEDGE":
-        dt = float(rcfg.trust_acknowledge) * impact * pos_mult * sev_mult * 0.70
-        trust1 += dt
-        tfr1 -= float(rcfg.team_relief_acknowledge) * impact * sev_mult
-        reasons.append({"code": "ACKNOWLEDGED_HELP", "evidence": {"trust_delta": dt}})
-
-    elif rt == "PROMISE_HELP":
-        dt = float(rcfg.trust_promise) * impact * pos_mult * sev_mult * 0.85
-        trust1 += dt
-        tfr1 -= float(rcfg.team_relief_promise) * impact * sev_mult
-
-        due = due_month_from_now(now_date_iso, int(rcfg.promise_help_due_months))
-      
-        need_tags = payload.get("need_tags")
-        need_tag = payload.get("need_tag")
-
-        if (not isinstance(need_tags, list) or not need_tags) and (need_tag is None or not str(need_tag).strip()):
-            evp = event.get("payload")
-            if isinstance(evp, Mapping):
-                if not isinstance(need_tags, list) or not need_tags:
-                    need_tags = evp.get("need_tags")
-                if need_tag is None:
-                    need_tag = evp.get("need_tag")
-
-        norm_tags: List[str] = []
-        if isinstance(need_tags, list):
-            for t in need_tags:
-                if t is None:
-                    continue
-                s = str(t).strip().upper()
-                if s:
-                    norm_tags.append(s)
-
-        if not norm_tags and need_tag is not None:
-            s = str(need_tag).strip().upper()
-            if s:
-                norm_tags = [s]
-      
-        target: Dict[str, Any] = {}
-        if norm_tags:
-            target["need_tags"] = norm_tags
-
-        promise = PromiseSpec(
-            promise_type="HELP",
-            due_month=due,
-            target_value=None,
-            target=target,
-        )
-        reasons.append({"code": "PROMISE_HELP_CREATED", "evidence": {"due_month": due, "need_tags": norm_tags or None}})
-
-    elif rt == "REFUSE_HELP":
-        dt = -float(rcfg.trust_refuse_help_penalty) * impact * neg_mult * sev_mult
-        trust1 += dt
-        tfr1 += float(rcfg.team_bump_refuse_help) * impact * (0.60 + 0.40 * amb) * sev_mult
-
-        # Strong stars may move towards trade talk when team refuses help.
-        if lev >= 0.70 and amb >= 0.70 and trust1 < 0.40:
-            tr_level1 = max(tr_level1, 1)
-            reasons.append({"code": "REFUSE_HELP_INCREASED_TRADE_PRESSURE", "evidence": {"trade_request_level": tr_level1}})
-
-        reasons.append({"code": "REFUSED_HELP", "evidence": {"trust_delta": dt}})
 
     return trust1, mfr1, tfr1, tr_level1, promise, reasons
 

@@ -237,7 +237,7 @@ class EventConfig:
     locker_room_contagion_threshold: float = 0.50
     locker_room_contagion_strength: float = 0.06
 
-    # v2: team direction concern (pre-help-demand)
+    # v2: team direction concern (agent-stage)
     team_issue_threshold: float = 0.56
     team_issue_softness: float = 0.20
     team_issue_min_leverage: float = 0.55
@@ -250,11 +250,11 @@ class EventConfig:
     minutes_complaint_softness: float = 0.12  # how "probabilistic" the trigger is
     cooldown_minutes_days: int = 28
 
-    # Help demand ("get help" roster request)
-    help_demand_min_leverage: float = 0.70
-    help_demand_ambition_threshold: float = 0.65
-    help_demand_team_frustration_threshold: float = 0.55
-    help_demand_softness: float = 0.15
+    # Team-agent demand ("get help" roster request)
+    team_agent_min_leverage: float = 0.70
+    team_agent_ambition_threshold: float = 0.65
+    team_agent_team_frustration_threshold: float = 0.55
+    team_agent_softness: float = 0.15
     cooldown_help_days: int = 60
 
     help_need_rotation_top_n: int = 8
@@ -501,7 +501,6 @@ class AgencyConfig:
     event_types: Dict[str, str] = field(
         default_factory=lambda: {
             "minutes_complaint": "MINUTES_COMPLAINT",
-            "help_demand": "HELP_DEMAND",
             "trade_request": "TRADE_REQUEST",
             "trade_request_public": "TRADE_REQUEST_PUBLIC",
             "trade_targeted_offer_public": "TRADE_TARGETED_OFFER_PUBLIC",
@@ -522,6 +521,7 @@ class AgencyConfig:
             "health_public": "HEALTH_PUBLIC",
 
             "team_private": "TEAM_PRIVATE",
+            "team_agent": "TEAM_AGENT",
             "team_public": "TEAM_PUBLIC",
 
             "chemistry_private": "CHEMISTRY_PRIVATE",
