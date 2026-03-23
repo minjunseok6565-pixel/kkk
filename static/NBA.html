@@ -863,34 +863,58 @@
 
       <div class="training-top-tabs">
         <button id="team-training-tab-btn" type="button" class="btn btn-secondary is-active">팀 훈련</button>
-        <button id="player-training-tab-btn" type="button" class="btn btn-secondary" disabled aria-disabled="true">개인 훈련 (준비중)</button>
+        <button id="player-training-tab-btn" type="button" class="btn btn-secondary">개인 훈련</button>
       </div>
 
-      <section id="training-summary-strip" class="training-summary-strip" aria-live="polite"></section>
+      <div id="team-training-panel">
+        <section id="training-summary-strip" class="training-summary-strip" aria-live="polite"></section>
 
-      <div class="training-layout">
-        <div class="training-main-col">
-          <section class="training-calendar-panel">
-            <div id="training-calendar-grid" class="training-calendar-grid"></div>
-          </section>
+        <div class="training-layout">
+          <div class="training-main-col">
+            <section class="training-calendar-panel">
+              <div id="training-calendar-grid" class="training-calendar-grid"></div>
+            </section>
 
-          <div class="training-type-buttons" id="training-type-buttons">
-            <button type="button" data-training-type="OFF_TACTICS" class="btn btn-secondary">⚔ 공격 전술</button>
-            <button type="button" data-training-type="DEF_TACTICS" class="btn btn-secondary">🛡 수비 전술</button>
-            <button type="button" data-training-type="FILM" class="btn btn-secondary">🎬 필름/영상</button>
-            <button type="button" data-training-type="SCRIMMAGE" class="btn btn-secondary">🏀 청백전</button>
-            <button type="button" data-training-type="RECOVERY" class="btn btn-secondary">🧊 회복 훈련</button>
-            <button type="button" data-training-type="REST" class="btn btn-secondary">⏸ 훈련 없음</button>
+            <div class="training-type-buttons" id="training-type-buttons">
+              <button type="button" data-training-type="OFF_TACTICS" class="btn btn-secondary">⚔ 공격 전술</button>
+              <button type="button" data-training-type="DEF_TACTICS" class="btn btn-secondary">🛡 수비 전술</button>
+              <button type="button" data-training-type="FILM" class="btn btn-secondary">🎬 필름/영상</button>
+              <button type="button" data-training-type="SCRIMMAGE" class="btn btn-secondary">🏀 청백전</button>
+              <button type="button" data-training-type="RECOVERY" class="btn btn-secondary">🧊 회복 훈련</button>
+              <button type="button" data-training-type="REST" class="btn btn-secondary">⏸ 훈련 없음</button>
+            </div>
           </div>
+
+          <aside id="training-context-panel" class="training-context-panel" aria-live="polite">
+            <p class="empty-copy">캘린더에서 날짜를 선택하면 일정 맥락과 추천 훈련이 표시됩니다.</p>
+          </aside>
         </div>
 
-        <aside id="training-context-panel" class="training-context-panel" aria-live="polite">
-          <p class="empty-copy">캘린더에서 날짜를 선택하면 일정 맥락과 추천 훈련이 표시됩니다.</p>
-        </aside>
+        <section id="training-detail-panel" class="training-detail-panel">
+          <p class="empty-copy">캘린더에서 날짜를 선택하고 훈련 버튼을 눌러 세부 설정을 확인하세요.</p>
+        </section>
       </div>
 
-      <section id="training-detail-panel" class="training-detail-panel">
-        <p class="empty-copy">캘린더에서 날짜를 선택하고 훈련 버튼을 눌러 세부 설정을 확인하세요.</p>
+      <section id="player-training-panel" class="player-training-panel hidden" aria-hidden="true">
+        <div class="player-training-layout">
+          <section class="player-training-list-panel">
+            <h3 class="training-section-title">팀 선수 명단</h3>
+            <div id="player-training-list" class="player-training-list">
+              <p class="empty-copy">선수 목록을 불러오는 중...</p>
+            </div>
+          </section>
+
+          <section class="player-training-detail-panel">
+            <h3 class="training-section-title">개인 훈련 설정</h3>
+            <div id="player-training-detail">
+              <p class="empty-copy">왼쪽 선수 목록에서 선수를 선택하면 개인 훈련 설정이 표시됩니다.</p>
+            </div>
+            <div class="player-training-actions">
+              <button id="player-training-save-btn" type="button" class="btn btn-primary" disabled aria-disabled="true">개인 훈련 저장</button>
+              <p id="player-training-status" class="player-training-status" aria-live="polite"></p>
+            </div>
+          </section>
+        </div>
       </section>
     </section>
 

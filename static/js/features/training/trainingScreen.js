@@ -6,6 +6,7 @@ import { CACHE_TTL_MS, buildCacheKeys } from "../../app/cachePolicy.js";
 import { fetchInGameDate } from "../main/mainScreen.js";
 import { buildCalendar4Weeks, renderTrainingCalendar } from "./trainingCalendar.js";
 import { renderTrainingSummaryStrip, renderTrainingContextPanel, refreshTrainingTypeButtonsState } from "./trainingDetail.js";
+import { activateTrainingTab } from "./playerTrainingTab.js";
 
 const TRAINING_SESSION_FETCH_CONCURRENCY = 4;
 const TRAINING_SESSION_RENDER_BATCH_MS = 120;
@@ -189,6 +190,7 @@ async function prefetchTrainingCoreData({
     staleWhileRevalidate: true,
   });
   state.trainingRoster = teamDetail.roster || [];
+  state.playerTrainingRoster = state.trainingRoster.map((row) => ({ ...row }));
 
   const [offFam, defFam] = await Promise.all([
     fetchCachedJson({
@@ -266,6 +268,12 @@ async function showTrainingScreen() {
   try {
     state.trainingSelectedDates = new Set();
     state.trainingActiveType = null;
+    state.trainingTab = "team";
+    state.playerTrainingSelectedPlayerId = null;
+    state.playerTrainingPlansByPlayerId = {};
+    state.playerTrainingDraft = { primary: "BALANCED", secondary: "", intensity: "MED" };
+    state.playerTrainingSaving = false;
+    state.playerTrainingStatus = { tone: "", message: "" };
     const rerenderTrainingScreen = () => {
       if (requestSeq !== trainingRequestSeq) return;
       renderTrainingSummaryStrip();
@@ -282,6 +290,7 @@ async function showTrainingScreen() {
     if (requestSeq !== trainingRequestSeq) return;
     rerenderTrainingScreen();
     els.trainingDetailPanel.innerHTML = '<p class="empty-copy">캘린더에서 날짜를 선택하고 훈련 버튼을 눌러 세부 설정을 확인하세요.</p>';
+    await activateTrainingTab("team");
     activateScreen(els.trainingScreen);
   } finally {
     if (requestSeq === trainingRequestSeq) setLoading(false);

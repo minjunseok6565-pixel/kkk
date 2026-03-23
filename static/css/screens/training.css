@@ -112,6 +112,137 @@
   box-shadow: 0 0 0 2px rgba(47, 79, 143, 0.18) inset;
 }
 
+.player-training-panel {
+  margin-top: 6px;
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  background: var(--card-bg);
+  padding: 14px;
+}
+
+.player-training-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.4fr);
+  gap: 14px;
+}
+
+.player-training-list-panel,
+.player-training-detail-panel {
+  min-width: 0;
+}
+
+.player-training-list {
+  display: grid;
+  gap: 8px;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.player-training-row {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+  padding: 10px;
+  cursor: pointer;
+}
+
+.player-training-row:hover {
+  border-color: rgba(37, 99, 235, 0.45);
+}
+
+.player-training-row.is-selected {
+  border-color: rgba(37, 99, 235, 0.75);
+  background: rgba(219, 234, 254, 0.48);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.16) inset;
+}
+
+.player-training-row-main {
+  display: grid;
+  gap: 4px;
+}
+
+.player-training-row-main span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.player-training-player-card {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.player-training-player-card h4 {
+  margin: 0 0 3px;
+  color: #0f172a;
+}
+
+.player-training-player-card .subtitle {
+  margin: 0;
+}
+
+.player-training-badge {
+  display: inline-flex;
+  margin-top: 6px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.12);
+  color: #1e3a8a;
+  font-size: 12px;
+}
+
+.player-training-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.player-training-field {
+  display: grid;
+  gap: 6px;
+}
+
+.player-training-field span {
+  font-size: 12px;
+  color: #475569;
+}
+
+.player-training-field select {
+  min-height: 36px;
+  padding: 6px 8px;
+}
+
+.player-training-note {
+  margin: 12px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.player-training-actions {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.player-training-status {
+  margin: 0;
+  min-height: 18px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.player-training-status.is-ok {
+  color: #166534;
+}
+
+.player-training-status.is-warn {
+  color: #b91c1c;
+}
+
 .training-calendar-panel {
   border: 1px solid var(--card-border);
   border-radius: 14px;
