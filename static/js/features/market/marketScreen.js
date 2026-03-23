@@ -2062,26 +2062,54 @@ function closeTradeBlockRosterModal() {
   document.body.classList.remove("is-modal-open");
 }
 
+function getTradeBlockRosterSelectedIds() {
+  return Array.isArray(state.marketTradeBlockSelectedRosterPlayerIds)
+    ? state.marketTradeBlockSelectedRosterPlayerIds.map((id) => String(id || "")).filter(Boolean)
+    : [];
+}
+
+function updateTradeBlockRosterSelectionUi() {
+  const selectedIds = getTradeBlockRosterSelectedIds();
+  if (els.marketTradeBlockRosterSelectionCount) {
+    els.marketTradeBlockRosterSelectionCount.textContent = `선택된 선수 ${selectedIds.length}명`;
+  }
+  if (els.marketTradeBlockRosterModalConfirm) {
+    els.marketTradeBlockRosterModalConfirm.disabled = selectedIds.length === 0;
+  }
+}
+
+function toggleTradeBlockRosterSelection(playerId) {
+  const pid = String(playerId || "");
+  if (!pid) return;
+  const current = new Set(getTradeBlockRosterSelectedIds());
+  if (current.has(pid)) current.delete(pid);
+  else current.add(pid);
+  state.marketTradeBlockSelectedRosterPlayerIds = Array.from(current);
+}
+
 function renderTradeBlockRosterModalList(rows) {
   if (!els.marketTradeBlockRosterList) return;
-  const selected = String(state.marketTradeBlockSelectedRosterPlayerId || "");
+  const selected = new Set(getTradeBlockRosterSelectedIds());
   const listed = new Set((state.marketTradeBlockMyRows || []).map((row) => String(row?.player_id || "")));
   if (!rows.length) {
     els.marketTradeBlockRosterList.innerHTML = '<p class="college-inline-meta">로스터 데이터가 없습니다.</p>';
+    updateTradeBlockRosterSelectionUi();
     return;
   }
 
   els.marketTradeBlockRosterList.innerHTML = rows.map((row) => {
     const pid = String(row?.player_id || "");
     const disabled = listed.has(pid);
+    const isSelected = selected.has(pid);
     return `
-      <button type="button" class="college-player-option ${selected === pid ? "is-selected" : ""}" data-market-roster-pid="${pid}" ${disabled ? "disabled" : ""}>
+      <button type="button" class="college-player-option market-trade-block-roster-option ${isSelected ? "is-selected" : ""}" data-market-roster-pid="${pid}" role="option" aria-selected="${isSelected ? "true" : "false"}" aria-pressed="${isSelected ? "true" : "false"}" ${disabled ? "disabled" : ""}>
         <strong>${row?.name || "-"}</strong>
-        <span>${row?.pos || "-"} · OVR ${Math.round(num(row?.overall, 0))}</span>
+        <span>${row?.pos || "-"}</span>
         ${disabled ? '<em>이미 등록됨</em>' : ""}
       </button>
     `;
   }).join("");
+  updateTradeBlockRosterSelectionUi();
 }
 
 async function loadMyTeamRosterForTradeBlock() {
@@ -2097,9 +2125,10 @@ async function loadMyTeamRosterForTradeBlock() {
 
 async function openTradeBlockRosterModal() {
   if (!els.marketTradeBlockRosterModal) return;
-  state.marketTradeBlockSelectedRosterPlayerId = null;
+  state.marketTradeBlockSelectedRosterPlayerIds = [];
   const rosterRows = await loadMyTeamRosterForTradeBlock();
   renderTradeBlockRosterModalList(rosterRows);
+  updateTradeBlockRosterSelectionUi();
   state.marketTradeBlockRosterModalOpen = true;
   els.marketTradeBlockRosterModal.classList.remove("hidden");
   document.body.classList.add("is-modal-open");
@@ -2119,6 +2148,15 @@ async function listPlayerToTradeBlock(playerId) {
     }),
   });
   invalidateTradeBlockCaches();
+}
+
+async function listPlayersToTradeBlock(playerIds) {
+  const targets = Array.from(new Set((playerIds || []).map((id) => String(id || "")).filter(Boolean)));
+  if (!targets.length) throw new Error("등록할 선수를 선택해주세요.");
+  const results = await Promise.allSettled(targets.map((playerId) => listPlayerToTradeBlock(playerId)));
+  const successCount = results.filter((item) => item.status === "fulfilled").length;
+  const failCount = results.length - successCount;
+  return { successCount, failCount, totalCount: results.length };
 }
 
 async function unlistPlayerFromTradeBlock(playerId) {
@@ -2613,16 +2651,32 @@ async function showMarketScreen() {
       if (!option) return;
       const pid = String(option.getAttribute("data-market-roster-pid") || "");
       if (!pid || option.hasAttribute("disabled")) return;
-      state.marketTradeBlockSelectedRosterPlayerId = pid;
+      toggleTradeBlockRosterSelection(pid);
       renderTradeBlockRosterModalList(state.marketTradeBlockRosterRows || []);
+      updateTradeBlockRosterSelectionUi();
     });
     els.marketTradeBlockRosterModalConfirm?.addEventListener("click", () => {
+      const selectedIds = getTradeBlockRosterSelectedIds();
+      if (!selectedIds.length) {
+        alert("등록할 선수를 선택해주세요.");
+        updateTradeBlockRosterSelectionUi();
+        return;
+      }
       setLoading(true, "트레이드 블록에 등록하는 중...");
-      listPlayerToTradeBlock(state.marketTradeBlockSelectedRosterPlayerId)
-        .then(() => loadTradeBlockMineList())
+      let batchResult = null;
+      listPlayersToTradeBlock(selectedIds)
+        .then((result) => {
+          batchResult = result;
+          return loadTradeBlockMineList();
+        })
         .then(() => {
+          state.marketTradeBlockSelectedRosterPlayerIds = [];
           closeTradeBlockRosterModal();
-          alert("트레이드 블록 등록이 완료되었습니다.");
+          if ((batchResult?.failCount || 0) > 0) {
+            alert(`트레이드 블록 등록 완료: ${batchResult?.successCount || 0}명 성공, ${batchResult?.failCount || 0}명 실패`);
+            return;
+          }
+          alert(`트레이드 블록 등록이 완료되었습니다. (${batchResult?.successCount || 0}명)`);
         })
         .catch((e) => alert(e.message || "트레이드 블록 등록에 실패했습니다."))
         .finally(() => setLoading(false));

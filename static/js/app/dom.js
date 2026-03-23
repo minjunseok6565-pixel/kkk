@@ -107,6 +107,7 @@ const els = {
   marketTradeBlockRosterModalBackdrop: document.getElementById("market-trade-block-roster-modal-backdrop"),
   marketTradeBlockRosterModalTitle: document.getElementById("market-trade-block-roster-modal-title"),
   marketTradeBlockRosterModalBody: document.getElementById("market-trade-block-roster-modal-body"),
+  marketTradeBlockRosterSelectionCount: document.getElementById("market-trade-block-roster-selection-count"),
   marketTradeBlockRosterList: document.getElementById("market-trade-block-roster-list"),
   marketTradeBlockRosterModalCancel: document.getElementById("market-trade-block-roster-modal-cancel"),
   marketTradeBlockRosterModalConfirm: document.getElementById("market-trade-block-roster-modal-confirm"),

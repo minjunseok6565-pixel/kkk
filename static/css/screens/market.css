@@ -619,6 +619,156 @@
   outline-offset: 2px;
 }
 
+/* --- Trade Block Registration Modal (light market tone) --- */
+#market-trade-block-roster-modal .confirm-modal-backdrop {
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(4px);
+}
+
+#market-trade-block-roster-modal .confirm-modal-panel {
+  width: min(720px, calc(100vw - 28px));
+  border-radius: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(59, 130, 246, 0.16), transparent 42%),
+    linear-gradient(180deg, #ffffff, #f8fbff);
+  color: #0f172a;
+  box-shadow: 0 30px 64px rgba(15, 23, 42, 0.24);
+  padding: 22px 22px 18px;
+}
+
+#market-trade-block-roster-modal .confirm-modal-eyebrow {
+  margin-bottom: 8px;
+  color: #1d4ed8;
+}
+
+#market-trade-block-roster-modal .confirm-modal-title {
+  color: #0f172a;
+}
+
+#market-trade-block-roster-modal .confirm-modal-body {
+  margin-top: 8px;
+  color: #475569;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-head {
+  display: grid;
+  gap: 2px;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-selection-count {
+  margin: 8px 0 0;
+  font-size: .92rem;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-list-wrap {
+  margin-top: 14px;
+  max-height: min(54vh, 420px);
+  overflow: auto;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: linear-gradient(180deg, #f8fbff, #f1f5fb);
+}
+
+#market-trade-block-roster-modal .college-scout-options-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-option {
+  position: relative;
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 12px;
+  padding: 10px 14px 10px 42px;
+  color: #0f172a;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease, background-color .16s ease;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-option::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.72);
+  background: #fff;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-option:hover:not(:disabled),
+#market-trade-block-roster-modal .market-trade-block-roster-option:focus-visible {
+  border-color: rgba(59, 130, 246, 0.5);
+  background: linear-gradient(180deg, #ffffff, #edf4ff);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.12);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-option strong {
+  display: block;
+  font-size: .98rem;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-option span {
+  color: #475569;
+  font-weight: 600;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-option em {
+  color: #64748b;
+  font-style: normal;
+  font-size: .82rem;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-option.is-selected {
+  border-color: rgba(59, 130, 246, 0.7);
+  background: linear-gradient(180deg, #eff6ff, #e5efff);
+  box-shadow: 0 12px 26px rgba(59, 130, 246, 0.18);
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-option.is-selected::before {
+  background: linear-gradient(180deg, #2563eb, #1d4ed8);
+  border-color: rgba(37, 99, 235, 0.92);
+  box-shadow: inset 0 0 0 3px #eaf2ff;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-option:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-actions {
+  margin-top: 16px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-actions .btn {
+  min-width: 136px;
+  min-height: 46px;
+  border-radius: 12px;
+}
+
+#market-trade-block-roster-modal .market-trade-block-roster-actions .btn:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
 @media (max-width: 1366px) {
   .market-trade-inbox-item,
   .market-trade-inbox-card {
@@ -686,5 +836,20 @@
 
   .market-trade-deal-tabs .btn[role="tab"] {
     flex: 1 1 calc(50% - 6px);
+  }
+
+  #market-trade-block-roster-modal .confirm-modal-panel {
+    width: min(94vw, 640px);
+    padding: 18px 16px 14px;
+  }
+
+  #market-trade-block-roster-modal .market-trade-block-roster-list-wrap {
+    max-height: min(58vh, 360px);
+    padding: 5px;
+  }
+
+  #market-trade-block-roster-modal .market-trade-block-roster-actions .btn {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
   }
 }
