@@ -12,6 +12,18 @@ let currentDraft = createDefaultPresetDefenseDraft();
 let onApplyHandler = null;
 let isBound = false;
 
+const PRESET_DEFENSE_GROUP_NAMES = {
+  Cut: { A: "직접 마무리", B: "컷 파생" },
+  DHO: { A: "페인트 압박", B: "점퍼" },
+  Drive: { A: "림 돌파", B: "점퍼 + 킥아웃" },
+  ISO: { A: "림 돌파", B: "점퍼 + 킥아웃" },
+  PnP: { A: "페인트 압박", B: "팝 점퍼" },
+  PnR: { A: "롤맨 림 런", B: "볼 핸들러 점퍼" },
+  PostUp: { A: "직접 득점", B: "파생" },
+  SpotUp: { A: "클로즈 아웃 강하게", B: "체크만" },
+  TransitionEarly: { A: "림 압박", B: "퀵 점퍼" },
+};
+
 function _modalEl() {
   return els.presetDefenseModal || document.getElementById("preset-defense-modal");
 }
@@ -86,7 +98,9 @@ function _actionLabel(action) {
 
 function _groupLabel(action, groupKey) {
   const spec = PRESET_DEFENSE_ACTION_TABLE[action];
-  if (!spec) return groupKey;
+  if (!spec) return groupKey === "A" ? "묶음 A" : "묶음 B";
+  const named = PRESET_DEFENSE_GROUP_NAMES[action];
+  if (named && groupKey in named) return named[groupKey];
   return groupKey === "A" ? "묶음 A" : "묶음 B";
 }
 
