@@ -6,6 +6,7 @@ import random
 
 from ..generation_tick import TradeGenerationTickContext
 from ..asset_catalog import TradeAssetCatalog
+from .template_fallback_policy import normalize_route_phase, select_specs_by_route_phase
 from .types import DealCandidate, DealGeneratorBudget, DealGeneratorConfig, SellAssetCandidate, TargetCandidate
 
 
@@ -51,25 +52,87 @@ class SkeletonRegistry:
         out.sort(key=lambda s: (int(s.priority), s.skeleton_id))
         return out
 
+    def _route_ids_for_phase(
+        self,
+        *,
+        tier_upper: str,
+        config: DealGeneratorConfig,
+        route_phase: str,
+    ) -> Tuple[str, ...]:
+        legacy_attr_map = {
+            "MVP": "skeleton_route_mvp",
+            "ALL_NBA": "skeleton_route_all_nba",
+            "ALL_STAR": "skeleton_route_all_star",
+            "HIGH_STARTER": "skeleton_route_high_starter",
+            "STARTER": "skeleton_route_starter",
+            "HIGH_ROTATION": "skeleton_route_high_rotation",
+            "ROTATION": "skeleton_route_rotation",
+            "GARBAGE": "skeleton_route_garbage",
+        }
+        template_attr_map = {
+            "MVP": "skeleton_route_template_mvp",
+            "ALL_NBA": "skeleton_route_template_all_nba",
+            "ALL_STAR": "skeleton_route_template_all_star",
+            "HIGH_STARTER": "skeleton_route_template_high_starter",
+            "STARTER": "skeleton_route_template_starter",
+            "HIGH_ROTATION": "skeleton_route_template_high_rotation",
+            "ROTATION": "skeleton_route_template_rotation",
+            "GARBAGE": "skeleton_route_template_garbage",
+        }
+        fallback_attr_map = {
+            "MVP": "skeleton_route_fallback_mvp",
+            "ALL_NBA": "skeleton_route_fallback_all_nba",
+            "ALL_STAR": "skeleton_route_fallback_all_star",
+            "HIGH_STARTER": "skeleton_route_fallback_high_starter",
+            "STARTER": "skeleton_route_fallback_starter",
+            "HIGH_ROTATION": "skeleton_route_fallback_high_rotation",
+            "ROTATION": "skeleton_route_fallback_rotation",
+            "GARBAGE": "skeleton_route_fallback_garbage",
+        }
+        rp = normalize_route_phase(route_phase)
+
+        def _read_ids(attr_name: str) -> Tuple[str, ...]:
+            return tuple(getattr(config, attr_name, tuple()) or tuple())
+
+        route_ids: Tuple[str, ...] = tuple()
+
+        if rp == "template_only":
+            attr = template_attr_map.get(tier_upper)
+            route_ids = _read_ids(attr) if attr else tuple()
+        elif rp == "fallback_only":
+            attr = fallback_attr_map.get(tier_upper)
+            route_ids = _read_ids(attr) if attr else tuple()
+            # compatibility fallback: route_fallback_*가 비어 있으면 legacy route를 사용
+            if not route_ids:
+                legacy_attr = legacy_attr_map.get(tier_upper)
+                route_ids = _read_ids(legacy_attr) if legacy_attr else tuple()
+
+            # optional timeline exclusion in fallback stage
+            if not bool(getattr(config, "template_first_allow_timeline_in_fallback", True)):
+                route_ids = tuple(x for x in route_ids if not str(x).startswith("timeline."))
+        else:
+            legacy_attr = legacy_attr_map.get(tier_upper)
+            route_ids = _read_ids(legacy_attr) if legacy_attr else tuple()
+
+        return route_ids
+
     def get_specs_for_mode_and_tier(
         self,
         mode: str,
         tier: str,
         config: DealGeneratorConfig,
         ctx: Optional[BuildContext] = None,
+        route_phase: str = "combined",
     ) -> List[SkeletonSpec]:
         mode_upper = str(mode).upper()
         tier_upper = str(tier).upper()
+        phase_norm = normalize_route_phase(route_phase)
 
-        route_attr_map = {
-            "ROLE": "skeleton_route_role",
-            "STARTER": "skeleton_route_starter",
-            "HIGH_STARTER": "skeleton_route_high_starter",
-            "STAR": "skeleton_route_high_starter",
-            "PICK_ONLY": "skeleton_route_pick_only",
-        }
-        route_attr = route_attr_map.get(tier_upper, "skeleton_route_starter")
-        route_ids = tuple(getattr(config, route_attr, tuple()) or tuple())
+        route_ids = self._route_ids_for_phase(
+            tier_upper=tier_upper,
+            config=config,
+            route_phase=phase_norm,
+        )
         route_id_set = set(route_ids)
 
         out: List[SkeletonSpec] = []
@@ -84,6 +147,7 @@ class SkeletonRegistry:
                 continue
             out.append(spec)
 
+        out = list(select_specs_by_route_phase(out, phase_norm))
         out.sort(
             key=lambda s: (
                 int(s.priority),
@@ -94,203 +158,106 @@ class SkeletonRegistry:
         return out
 
 
-ALL_TARGET_TIERS: Tuple[str, ...] = ("ROLE", "STARTER", "HIGH_STARTER", "STAR", "PICK_ONLY")
+ALL_TARGET_TIERS: Tuple[str, ...] = ("MVP", "ALL_NBA", "ALL_STAR", "HIGH_STARTER", "STARTER", "HIGH_ROTATION", "ROTATION", "GARBAGE")
 
 
 def build_default_registry() -> SkeletonRegistry:
-    from .skeleton_builders_compat import (
-        build_buy_consolidate_2_for_1,
-        build_buy_p4p_salary,
-        build_buy_picks_only,
-        build_buy_young_plus_pick,
-        build_sell_buyer_consolidate,
-        build_sell_buyer_p4p,
-        build_sell_buyer_picks,
-        build_sell_buyer_young_plus_pick,
+    from .skeleton_builders_mvp import build_mvp_mixed, build_mvp_pick_heavy, build_mvp_player_heavy
+    from .skeleton_builders_all_nba import build_all_nba_mixed, build_all_nba_pick_heavy, build_all_nba_player_heavy
+    from .skeleton_builders_all_star import build_all_star_mixed, build_all_star_pick_heavy, build_all_star_player_heavy
+    from .skeleton_builders_high_starter import (
+        build_high_starter_mixed,
+        build_high_starter_pick_heavy,
+        build_high_starter_player_heavy,
     )
-    from .skeleton_builders_player_swap import (
-        build_bench_bundle_for_role,
-        build_change_of_scenery_young,
-        build_fit_swap_2_for_2,
-        build_one_for_two_depth,
-        build_role_swap_small_delta,
-        build_star_lateral_plus_delta,
-        build_starter_for_two_rotation,
-        build_three_for_one_upgrade,
+    from .skeleton_builders_starter import build_starter_mixed, build_starter_pick_heavy, build_starter_player_heavy
+    from .skeleton_builders_high_rotation import (
+        build_high_rotation_mixed,
+        build_high_rotation_pick_heavy,
+        build_high_rotation_player_heavy,
     )
+    from .skeleton_builders_rotation import build_rotation_mixed, build_rotation_pick_heavy, build_rotation_player_heavy
+    from .skeleton_builders_garbage import build_garbage_garbage
+    from .skeleton_builders_template import build_template_first_skeletons
     from .skeleton_builders_timeline import (
         build_bluechip_plus_first_plus_swap,
         build_veteran_for_young,
         build_veteran_for_young_plus_protected_first,
     )
-    from .skeleton_builders_salary_cleanup import (
-        build_bad_money_swap,
-        build_partial_dump_for_expiring,
-        build_pure_absorb_for_asset,
-        build_rental_expiring_plus_second,
-    )
-    from .skeleton_builders_pick_engineering import (
-        build_first_split,
-        build_second_ladder_to_protected_first,
-        build_swap_purchase,
-        build_swap_substitute_for_first,
-    )
+
+    def _single_template_build_fn(tier: str, template_id: str, placeholder_idx: int) -> Callable[[BuildContext], List[DealCandidate]]:
+        tier_u = str(tier).upper()
+        expected_tag = f"template_id:tpl_{tier_u.lower()}_placeholder_{int(placeholder_idx)}"
+
+        def _build(ctx: BuildContext) -> List[DealCandidate]:
+            max_candidates = max(1, int(getattr(ctx.config, "template_first_max_templates_per_target", 7) or 7))
+            built = build_template_first_skeletons(
+                ctx,
+                tier=tier_u,
+                skeleton_id_prefix="",
+                max_candidates=max_candidates,
+            )
+            out: List[DealCandidate] = []
+            for cand in built:
+                tags = list(getattr(cand, "tags", []) or [])
+                if expected_tag not in tags:
+                    continue
+                cand.skeleton_id = str(template_id)
+                if f"skeleton:{template_id}" not in tags:
+                    tags.append(f"skeleton:{template_id}")
+                cand.tags = tags
+                out.append(cand)
+            return out
+
+        return _build
+
+    template_specs: List[SkeletonSpec] = []
+    for tier in ALL_TARGET_TIERS:
+        t = str(tier).lower()
+        for idx, pri in enumerate(range(10, 17), start=1):
+            sid = f"template.{t}.placeholder_{idx}"
+            template_specs.append(
+                SkeletonSpec(
+                    skeleton_id=sid,
+                    domain="template",
+                    compat_archetype="template_first",
+                    mode_allow=("BUY", "SELL"),
+                    target_tiers=(tier,),
+                    priority=pri,
+                    build_fn=_single_template_build_fn(tier, sid, idx),
+                )
+            )
 
     specs: Tuple[SkeletonSpec, ...] = (
-        SkeletonSpec(
-            skeleton_id="compat.picks_only",
-            domain="compat",
-            compat_archetype="picks_only",
-            mode_allow=("BUY",),
-            target_tiers=ALL_TARGET_TIERS,
-            priority=10,
-            build_fn=build_buy_picks_only,
-        ),
-        SkeletonSpec(
-            skeleton_id="compat.young_plus_pick",
-            domain="compat",
-            compat_archetype="young_plus_pick",
-            mode_allow=("BUY",),
-            target_tiers=("ROLE", "STARTER", "HIGH_STARTER", "STAR"),
-            priority=20,
-            build_fn=build_buy_young_plus_pick,
-        ),
-        SkeletonSpec(
-            skeleton_id="compat.p4p_salary",
-            domain="compat",
-            compat_archetype="p4p_salary",
-            mode_allow=("BUY",),
-            target_tiers=("ROLE", "STARTER", "HIGH_STARTER", "STAR"),
-            priority=30,
-            build_fn=build_buy_p4p_salary,
-        ),
-        SkeletonSpec(
-            skeleton_id="compat.consolidate_2_for_1",
-            domain="compat",
-            compat_archetype="consolidate_2_for_1",
-            mode_allow=("BUY",),
-            target_tiers=("STARTER", "HIGH_STARTER", "STAR"),
-            priority=40,
-            build_fn=build_buy_consolidate_2_for_1,
-        ),
-        SkeletonSpec(
-            skeleton_id="compat.buyer_picks",
-            domain="compat",
-            compat_archetype="buyer_picks",
-            mode_allow=("SELL",),
-            target_tiers=ALL_TARGET_TIERS,
-            priority=10,
-            build_fn=build_sell_buyer_picks,
-        ),
-        SkeletonSpec(
-            skeleton_id="compat.buyer_young_plus_pick",
-            domain="compat",
-            compat_archetype="buyer_young_plus_pick",
-            mode_allow=("SELL",),
-            target_tiers=("ROLE", "STARTER", "HIGH_STARTER", "STAR"),
-            priority=20,
-            build_fn=build_sell_buyer_young_plus_pick,
-        ),
-        SkeletonSpec(
-            skeleton_id="compat.buyer_p4p",
-            domain="compat",
-            compat_archetype="buyer_p4p",
-            mode_allow=("SELL",),
-            target_tiers=("ROLE", "STARTER", "HIGH_STARTER", "STAR"),
-            priority=30,
-            build_fn=build_sell_buyer_p4p,
-        ),
-        SkeletonSpec(
-            skeleton_id="compat.buyer_consolidate",
-            domain="compat",
-            compat_archetype="buyer_consolidate",
-            mode_allow=("SELL",),
-            target_tiers=("STARTER", "HIGH_STARTER", "STAR"),
-            priority=40,
-            build_fn=build_sell_buyer_consolidate,
-        ),
-        SkeletonSpec(
-            skeleton_id="player_swap.role_swap_small_delta",
-            domain="player_swap",
-            compat_archetype="p4p_salary",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=("ROLE", "STARTER", "HIGH_STARTER", "STAR"),
-            priority=50,
-            build_fn=build_role_swap_small_delta,
-        ),
-        SkeletonSpec(
-            skeleton_id="player_swap.fit_swap_2_for_2",
-            domain="player_swap",
-            compat_archetype="consolidate_2_for_1",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=("STARTER", "HIGH_STARTER", "STAR"),
-            priority=51,
-            build_fn=build_fit_swap_2_for_2,
-        ),
-        SkeletonSpec(
-            skeleton_id="player_swap.starter_for_two_rotation",
-            domain="player_swap",
-            compat_archetype="consolidate_2_for_1",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=("STARTER", "HIGH_STARTER", "STAR"),
-            priority=52,
-            build_fn=build_starter_for_two_rotation,
-            default_tags=("shape:1_for_2", "depth:return_two"),
-        ),
-        SkeletonSpec(
-            skeleton_id="player_swap.one_for_two_depth",
-            domain="player_swap",
-            compat_archetype="consolidate_2_for_1",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=("ROLE", "STARTER", "HIGH_STARTER"),
-            priority=53,
-            build_fn=build_one_for_two_depth,
-            gate_fn=lambda ctx: bool(ctx.target is not None or ctx.sale_asset is not None),
-            default_tags=("shape:1_for_2", "intensity:low"),
-            allows_modifiers=True,
-        ),
-        SkeletonSpec(
-            skeleton_id="player_swap.three_for_one_upgrade",
-            domain="player_swap",
-            compat_archetype="consolidate_2_for_1",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=("STARTER", "HIGH_STARTER", "STAR"),
-            priority=54,
-            build_fn=build_three_for_one_upgrade,
-        ),
-        SkeletonSpec(
-            skeleton_id="player_swap.bench_bundle_for_role",
-            domain="player_swap",
-            compat_archetype="consolidate_2_for_1",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=("ROLE", "STARTER"),
-            priority=55,
-            build_fn=build_bench_bundle_for_role,
-        ),
-        SkeletonSpec(
-            skeleton_id="player_swap.change_of_scenery_young",
-            domain="player_swap",
-            compat_archetype="young_plus_pick",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=("ROLE", "STARTER"),
-            priority=56,
-            build_fn=build_change_of_scenery_young,
-        ),
-        SkeletonSpec(
-            skeleton_id="player_swap.star_lateral_plus_delta",
-            domain="player_swap",
-            compat_archetype="p4p_salary",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=("HIGH_STARTER", "STAR"),
-            priority=57,
-            build_fn=build_star_lateral_plus_delta,
-        ),
+        *tuple(template_specs),
+        SkeletonSpec("mvp.player_heavy", "tier_score", "player_heavy", ("BUY", "SELL"), ("MVP",), 20, build_mvp_player_heavy),
+        SkeletonSpec("mvp.pick_heavy", "tier_score", "pick_heavy", ("BUY", "SELL"), ("MVP",), 21, build_mvp_pick_heavy),
+        SkeletonSpec("mvp.mixed", "tier_score", "mixed", ("BUY", "SELL"), ("MVP",), 22, build_mvp_mixed),
+        SkeletonSpec("all_nba.player_heavy", "tier_score", "player_heavy", ("BUY", "SELL"), ("ALL_NBA",), 23, build_all_nba_player_heavy),
+        SkeletonSpec("all_nba.pick_heavy", "tier_score", "pick_heavy", ("BUY", "SELL"), ("ALL_NBA",), 24, build_all_nba_pick_heavy),
+        SkeletonSpec("all_nba.mixed", "tier_score", "mixed", ("BUY", "SELL"), ("ALL_NBA",), 25, build_all_nba_mixed),
+        SkeletonSpec("all_star.player_heavy", "tier_score", "player_heavy", ("BUY", "SELL"), ("ALL_STAR",), 26, build_all_star_player_heavy),
+        SkeletonSpec("all_star.pick_heavy", "tier_score", "pick_heavy", ("BUY", "SELL"), ("ALL_STAR",), 27, build_all_star_pick_heavy),
+        SkeletonSpec("all_star.mixed", "tier_score", "mixed", ("BUY", "SELL"), ("ALL_STAR",), 28, build_all_star_mixed),
+        SkeletonSpec("high_starter.player_heavy", "tier_score", "player_heavy", ("BUY", "SELL"), ("HIGH_STARTER",), 29, build_high_starter_player_heavy),
+        SkeletonSpec("high_starter.pick_heavy", "tier_score", "pick_heavy", ("BUY", "SELL"), ("HIGH_STARTER",), 30, build_high_starter_pick_heavy),
+        SkeletonSpec("high_starter.mixed", "tier_score", "mixed", ("BUY", "SELL"), ("HIGH_STARTER",), 31, build_high_starter_mixed),
+        SkeletonSpec("starter.player_heavy", "tier_score", "player_heavy", ("BUY", "SELL"), ("STARTER",), 32, build_starter_player_heavy),
+        SkeletonSpec("starter.pick_heavy", "tier_score", "pick_heavy", ("BUY", "SELL"), ("STARTER",), 33, build_starter_pick_heavy),
+        SkeletonSpec("starter.mixed", "tier_score", "mixed", ("BUY", "SELL"), ("STARTER",), 34, build_starter_mixed),
+        SkeletonSpec("high_rotation.player_heavy", "tier_score", "player_heavy", ("BUY", "SELL"), ("HIGH_ROTATION",), 35, build_high_rotation_player_heavy),
+        SkeletonSpec("high_rotation.pick_heavy", "tier_score", "pick_heavy", ("BUY", "SELL"), ("HIGH_ROTATION",), 36, build_high_rotation_pick_heavy),
+        SkeletonSpec("high_rotation.mixed", "tier_score", "mixed", ("BUY", "SELL"), ("HIGH_ROTATION",), 37, build_high_rotation_mixed),
+        SkeletonSpec("rotation.player_heavy", "tier_score", "player_heavy", ("BUY", "SELL"), ("ROTATION",), 38, build_rotation_player_heavy),
+        SkeletonSpec("rotation.pick_heavy", "tier_score", "pick_heavy", ("BUY", "SELL"), ("ROTATION",), 39, build_rotation_pick_heavy),
+        SkeletonSpec("rotation.mixed", "tier_score", "mixed", ("BUY", "SELL"), ("ROTATION",), 40, build_rotation_mixed),
+        SkeletonSpec("garbage.garbage", "tier_score", "mixed", ("BUY", "SELL"), ("GARBAGE",), 41, build_garbage_garbage),
         SkeletonSpec(
             skeleton_id="timeline.veteran_for_young",
             domain="timeline",
             compat_archetype="young_plus_pick",
             mode_allow=("BUY", "SELL"),
-            target_tiers=("ROLE", "STARTER", "HIGH_STARTER"),
+            target_tiers=("HIGH_STARTER", "STARTER", "HIGH_ROTATION", "ROTATION", "GARBAGE"),
             priority=60,
             build_fn=build_veteran_for_young,
         ),
@@ -299,7 +266,7 @@ def build_default_registry() -> SkeletonRegistry:
             domain="timeline",
             compat_archetype="young_plus_pick",
             mode_allow=("BUY", "SELL"),
-            target_tiers=("STARTER", "HIGH_STARTER", "STAR"),
+            target_tiers=("MVP", "ALL_NBA", "ALL_STAR", "HIGH_STARTER", "STARTER"),
             priority=61,
             build_fn=build_veteran_for_young_plus_protected_first,
         ),
@@ -308,81 +275,9 @@ def build_default_registry() -> SkeletonRegistry:
             domain="timeline",
             compat_archetype="young_plus_pick",
             mode_allow=("BUY", "SELL"),
-            target_tiers=("HIGH_STARTER", "STAR"),
+            target_tiers=("MVP", "ALL_NBA", "ALL_STAR", "HIGH_STARTER"),
             priority=62,
             build_fn=build_bluechip_plus_first_plus_swap,
-        ),
-        SkeletonSpec(
-            skeleton_id="salary_cleanup.rental_expiring_plus_second",
-            domain="salary_cleanup",
-            compat_archetype="p4p_salary",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=("ROLE", "STARTER"),
-            priority=70,
-            build_fn=build_rental_expiring_plus_second,
-        ),
-        SkeletonSpec(
-            skeleton_id="salary_cleanup.pure_absorb_for_asset",
-            domain="salary_cleanup",
-            compat_archetype="picks_only",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=ALL_TARGET_TIERS,
-            priority=71,
-            build_fn=build_pure_absorb_for_asset,
-        ),
-        SkeletonSpec(
-            skeleton_id="salary_cleanup.partial_dump_for_expiring",
-            domain="salary_cleanup",
-            compat_archetype="p4p_salary",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=("ROLE", "STARTER", "HIGH_STARTER", "STAR"),
-            priority=72,
-            build_fn=build_partial_dump_for_expiring,
-        ),
-        SkeletonSpec(
-            skeleton_id="salary_cleanup.bad_money_swap",
-            domain="salary_cleanup",
-            compat_archetype="p4p_salary",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=("ROLE", "STARTER", "HIGH_STARTER", "STAR"),
-            priority=73,
-            build_fn=build_bad_money_swap,
-        ),
-        SkeletonSpec(
-            skeleton_id="pick_engineering.first_split",
-            domain="pick_engineering",
-            compat_archetype="picks_only",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=ALL_TARGET_TIERS,
-            priority=80,
-            build_fn=build_first_split,
-        ),
-        SkeletonSpec(
-            skeleton_id="pick_engineering.second_ladder_to_protected_first",
-            domain="pick_engineering",
-            compat_archetype="picks_only",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=ALL_TARGET_TIERS,
-            priority=81,
-            build_fn=build_second_ladder_to_protected_first,
-        ),
-        SkeletonSpec(
-            skeleton_id="pick_engineering.swap_purchase",
-            domain="pick_engineering",
-            compat_archetype="picks_only",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=ALL_TARGET_TIERS,
-            priority=82,
-            build_fn=build_swap_purchase,
-        ),
-        SkeletonSpec(
-            skeleton_id="pick_engineering.swap_substitute_for_first",
-            domain="pick_engineering",
-            compat_archetype="picks_only",
-            mode_allow=("BUY", "SELL"),
-            target_tiers=ALL_TARGET_TIERS,
-            priority=83,
-            build_fn=build_swap_substitute_for_first,
         ),
     )
     return SkeletonRegistry(specs=specs)

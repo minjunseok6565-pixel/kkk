@@ -21,7 +21,7 @@ This module MUST NOT:
 
 from dataclasses import replace
 from datetime import date
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import random
 
@@ -37,6 +37,7 @@ from .deal_evaluator import evaluate_deal_for_team as _evaluate_deal_for_team
 from .env import ValuationEnv
 from .market_pricing import MarketPricingConfig
 from .team_utility import TeamUtilityConfig
+from .package_effects import PackageEffectsConfig
 from .decision_policy import decide_deal as _decide_deal
 from .types import DealDecision, TeamDealEvaluation, TeamSideValuation
 
@@ -109,6 +110,15 @@ def _safe_date(d: Any) -> date:
                 details={"exc_type": type(exc).__name__},
             )
     raise TradeError(code="MISSING_GAME_DATE", message="In-game current_date is required (OS clock disabled).")
+
+
+def _safe_float(x: Any, default: float = 0.0) -> float:
+    try:
+        if x is None:
+            return float(default)
+        return float(x)
+    except Exception:
+        return float(default)
 
 
 def _safe_db_path(db_path: Optional[str]) -> str:
@@ -211,6 +221,281 @@ def _extract_trade_rules_from_league_ctx(team_situation_ctx: Any) -> Optional[Di
         return None
 
 
+def _safe_bool(x: Any, default: bool) -> bool:
+    if isinstance(x, bool):
+        return x
+    if isinstance(x, (int, float)):
+        return bool(int(x))
+    if isinstance(x, str):
+        t = x.strip().lower()
+        if t in ("1", "true", "t", "yes", "y", "on"):
+            return True
+        if t in ("0", "false", "f", "no", "n", "off"):
+            return False
+    return bool(default)
+
+
+def _trade_rule_get(trade_rules: Mapping[str, Any], *keys: str) -> Any:
+    """Best-effort getter supporting flat keys and valuation.* namespaces."""
+    if not isinstance(trade_rules, Mapping):
+        return None
+
+    valuation = trade_rules.get("valuation")
+    valuation_dict = valuation if isinstance(valuation, Mapping) else {}
+
+    for k in keys:
+        if k in trade_rules:
+            return trade_rules.get(k)
+        if k in valuation_dict:
+            return valuation_dict.get(k)
+    return None
+
+
+
+
+def _extract_injury_injection_settings(trade_rules: Mapping[str, Any]) -> Tuple[int, Optional[Sequence[str]], Dict[str, Any], Dict[str, Any]]:
+    """Extract optional injury knobs for valuation data/context + config wiring.
+
+    Supported keys (flat or valuation.* namespace):
+    - injury_lookback_days
+    - critical_body_parts
+    """
+    lookback_raw = _trade_rule_get(trade_rules, "injury_lookback_days")
+    try:
+        lookback_days = int(lookback_raw) if lookback_raw is not None else 365
+    except Exception:
+        lookback_days = 365
+    lookback_days = max(1, lookback_days)
+
+    critical_raw = _trade_rule_get(trade_rules, "critical_body_parts")
+    critical_parts: Optional[Sequence[str]]
+    if isinstance(critical_raw, Sequence) and not isinstance(critical_raw, (str, bytes, bytearray)):
+        normalized = [str(x).strip().upper() for x in critical_raw if str(x).strip()]
+        critical_parts = normalized or None
+    else:
+        critical_parts = None
+
+    market_keys = (
+        # current injury
+        "inj_current_t30_days",
+        "inj_current_t180_days",
+        "inj_current_s30_days",
+        "inj_current_s180_days",
+        "inj_current_weight_30",
+        "inj_current_weight_180",
+        "inj_current_returning_multiplier",
+        "inj_current_factor_floor",
+        # history injury
+        "inj_hist_recent_kr",
+        "inj_hist_critical_kc",
+        "inj_hist_repeat_kp",
+        "inj_hist_severity_ks",
+        "inj_hist_weight_recent",
+        "inj_hist_weight_critical",
+        "inj_hist_weight_repeat",
+        "inj_hist_weight_severity",
+        "inj_hist_penalty_cap",
+        "inj_hist_factor_floor",
+        # health credit
+        "health_credit_availability_ref",
+        "health_credit_availability_scale",
+        "health_credit_base_scale",
+        "health_credit_no_critical_bonus",
+        "health_credit_cap",
+    )
+
+    team_keys = (
+        "risk_base_weight_age_term",
+        "risk_injury_hist_weight",
+        "risk_injury_current_weight",
+        "risk_squash_center",
+        "risk_squash_scale",
+        "risk_scale_multiplier",
+        "risk_injury_soft_k_recent",
+        "risk_injury_soft_k_critical",
+        "risk_injury_soft_k_repeat",
+        "risk_injury_soft_k_severity",
+        "risk_injury_hist_weight_recent",
+        "risk_injury_hist_weight_critical",
+        "risk_injury_hist_weight_repeat",
+        "risk_injury_hist_weight_severity",
+        "risk_current_status_weight",
+        "risk_current_critical_part_bonus",
+        "risk_current_severity_scale",
+        "risk_current_days_weight",
+        "risk_current_days_t30",
+        "risk_current_days_t180",
+        "risk_current_days_s30",
+        "risk_current_days_s180",
+        "risk_current_out_multiplier",
+        "risk_current_returning_multiplier",
+        "risk_current_severity_max",
+        "risk_health_relief_weight",
+        "risk_health_relief_availability_ref",
+        "risk_health_relief_availability_scale",
+        "risk_health_relief_low_critical_ref",
+        "risk_health_relief_low_repeat_ref",
+        "risk_health_relief_cap",
+    )
+
+    market_overrides: Dict[str, Any] = {}
+    for k in market_keys:
+        v = _trade_rule_get(trade_rules, k)
+        if v is not None:
+            market_overrides[k] = v
+
+    team_overrides: Dict[str, Any] = {}
+    for k in team_keys:
+        v = _trade_rule_get(trade_rules, k)
+        if v is not None:
+            team_overrides[k] = v
+
+    # shared critical body parts can affect both injection payload and team current-risk logic
+    if critical_parts is not None:
+        team_overrides["risk_critical_body_parts"] = tuple(str(x).upper() for x in critical_parts)
+
+    return lookback_days, critical_parts, market_overrides, team_overrides
+
+
+def _build_market_config(*, salary_cap: Optional[float], trade_rules: Mapping[str, Any], market_overrides: Mapping[str, Any]) -> MarketPricingConfig:
+    base = MarketPricingConfig(salary_cap=salary_cap) if salary_cap is not None else MarketPricingConfig()
+    allowed = set(base.__dataclass_fields__.keys())
+    updates: Dict[str, Any] = {}
+    for k, raw in dict(market_overrides).items():
+        if k not in allowed:
+            continue
+        default = getattr(base, k)
+        if isinstance(default, bool):
+            updates[k] = _safe_bool(raw, default)
+        elif isinstance(default, int):
+            try:
+                updates[k] = int(raw)
+            except Exception:
+                updates[k] = default
+        elif isinstance(default, float):
+            updates[k] = _safe_float(raw, default)
+        else:
+            updates[k] = raw
+    return replace(base, **updates) if updates else base
+
+def _build_team_config(*, salary_cap: Optional[float], trade_rules: Mapping[str, Any]) -> TeamUtilityConfig:
+    base = TeamUtilityConfig(salary_cap=salary_cap) if salary_cap is not None else TeamUtilityConfig()
+
+    fit_cfg = base.fit
+    fit_cfg = replace(
+        fit_cfg,
+        supply_gate_enabled=_safe_bool(
+            _trade_rule_get(trade_rules, "fit_supply_gate_enabled", "supply_gate_enabled"),
+            fit_cfg.supply_gate_enabled,
+        ),
+        supply_gate_threshold_min=_safe_float(
+            _trade_rule_get(trade_rules, "fit_supply_gate_threshold_min", "supply_gate_threshold_min"),
+            fit_cfg.supply_gate_threshold_min,
+        ),
+        supply_gate_threshold_max=_safe_float(
+            _trade_rule_get(trade_rules, "fit_supply_gate_threshold_max", "supply_gate_threshold_max"),
+            fit_cfg.supply_gate_threshold_max,
+        ),
+        supply_gate_hard_floor_cap=_safe_float(
+            _trade_rule_get(trade_rules, "fit_supply_gate_hard_floor_cap", "supply_gate_hard_floor_cap"),
+            fit_cfg.supply_gate_hard_floor_cap,
+        ),
+        supply_gate_soft_width=_safe_float(
+            _trade_rule_get(trade_rules, "fit_supply_gate_soft_width", "supply_gate_soft_width"),
+            fit_cfg.supply_gate_soft_width,
+        ),
+    )
+    team_risk_updates: Dict[str, Any] = {}
+    allowed = set(base.__dataclass_fields__.keys())
+    for key in (
+        "risk_base_weight_age_term",
+        "risk_injury_hist_weight",
+        "risk_injury_current_weight",
+        "risk_squash_center",
+        "risk_squash_scale",
+        "risk_scale_multiplier",
+        "risk_injury_soft_k_recent",
+        "risk_injury_soft_k_critical",
+        "risk_injury_soft_k_repeat",
+        "risk_injury_soft_k_severity",
+        "risk_injury_hist_weight_recent",
+        "risk_injury_hist_weight_critical",
+        "risk_injury_hist_weight_repeat",
+        "risk_injury_hist_weight_severity",
+        "risk_current_status_weight",
+        "risk_current_critical_part_bonus",
+        "risk_current_severity_scale",
+        "risk_current_days_weight",
+        "risk_current_days_t30",
+        "risk_current_days_t180",
+        "risk_current_days_s30",
+        "risk_current_days_s180",
+        "risk_current_out_multiplier",
+        "risk_current_returning_multiplier",
+        "risk_current_severity_max",
+        "risk_health_relief_weight",
+        "risk_health_relief_availability_ref",
+        "risk_health_relief_availability_scale",
+        "risk_health_relief_low_critical_ref",
+        "risk_health_relief_low_repeat_ref",
+        "risk_health_relief_cap",
+        "risk_critical_body_parts",
+    ):
+        if key not in allowed:
+            continue
+        raw = _trade_rule_get(trade_rules, key)
+        if raw is None:
+            continue
+        default = getattr(base, key)
+        if key == "risk_critical_body_parts":
+            if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
+                vals = tuple(str(x).strip().upper() for x in raw if str(x).strip())
+                if vals:
+                    team_risk_updates[key] = vals
+            continue
+        if isinstance(default, bool):
+            team_risk_updates[key] = _safe_bool(raw, default)
+        elif isinstance(default, int):
+            try:
+                team_risk_updates[key] = int(raw)
+            except Exception:
+                team_risk_updates[key] = default
+        elif isinstance(default, float):
+            team_risk_updates[key] = _safe_float(raw, default)
+
+    out = replace(base, fit=fit_cfg)
+    if team_risk_updates:
+        out = replace(out, **team_risk_updates)
+    return out
+
+
+def _build_package_config(*, trade_rules: Mapping[str, Any]) -> PackageEffectsConfig:
+    base = PackageEffectsConfig()
+    return replace(
+        base,
+        need_supply_gate_enabled=_safe_bool(
+            _trade_rule_get(trade_rules, "need_supply_gate_enabled", "package_need_supply_gate_enabled"),
+            base.need_supply_gate_enabled,
+        ),
+        need_supply_gate_threshold_min=_safe_float(
+            _trade_rule_get(trade_rules, "need_supply_gate_threshold_min", "package_need_supply_gate_threshold_min"),
+            base.need_supply_gate_threshold_min,
+        ),
+        need_supply_gate_threshold_max=_safe_float(
+            _trade_rule_get(trade_rules, "need_supply_gate_threshold_max", "package_need_supply_gate_threshold_max"),
+            base.need_supply_gate_threshold_max,
+        ),
+        need_supply_gate_hard_floor_cap=_safe_float(
+            _trade_rule_get(trade_rules, "need_supply_gate_hard_floor_cap", "package_need_supply_gate_hard_floor_cap"),
+            base.need_supply_gate_hard_floor_cap,
+        ),
+        need_supply_gate_soft_width=_safe_float(
+            _trade_rule_get(trade_rules, "need_supply_gate_soft_width", "package_need_supply_gate_soft_width"),
+            base.need_supply_gate_soft_width,
+        ),
+    )
+
+
 def _strip_breakdown(side: TeamSideValuation, evaluation: TeamDealEvaluation) -> Tuple[TeamSideValuation, TeamDealEvaluation]:
     """
     Remove step-by-step breakdown tuples to reduce payload size when requested.
@@ -244,7 +529,6 @@ def evaluate_deal_for_team(
     allow_counter: bool = True,
     rng: Optional[random.Random] = None,
     rng_seed: Optional[int] = None,
-    allow_locked_by_deal_id: Optional[str] = None,
     validate: bool = True,
 ) -> Tuple[DealDecision, TeamDealEvaluation]:
     """
@@ -277,8 +561,6 @@ def evaluate_deal_for_team(
         Whether the decision policy is allowed to return COUNTER.
     rng / rng_seed:
         Control the (optional) stochastic edge behavior for counter decisions.
-    allow_locked_by_deal_id:
-        Pass-through to validate_deal for committed-deal lock exceptions.
     validate:
         If True, runs validate_deal first. (Recommended for server usage.)
     """
@@ -330,7 +612,6 @@ def evaluate_deal_for_team(
             validate_deal(
                 deal,
                 current_date=cd,
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
                 db_path=dbp,
                 tick_ctx=rule_tick_ctx,
             )
@@ -338,7 +619,6 @@ def evaluate_deal_for_team(
             validate_deal(
                 deal,
                 current_date=cd,
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
                 db_path=dbp,
             )
 
@@ -400,6 +680,8 @@ def evaluate_deal_for_team(
         ctx = build_decision_context(team_situation=ts_eval, gm_traits=gm_traits, team_id=tid)
 
     # 4) Build valuation provider (trade assets + contract ledger + pick expectations)
+    trade_rules = _extract_trade_rules_from_league_ctx(ts_ctx) or {}
+    injury_lookback_days, injury_critical_body_parts, market_overrides, team_overrides = _extract_injury_injection_settings(trade_rules)
     if tick_ctx is not None:
         provider = getattr(tick_ctx, "provider", None)
         # Optional override path (debug/experiments): if caller provides expectations/order explicitly,
@@ -418,6 +700,8 @@ def evaluate_deal_for_team(
                 repo=repo_obj,
                 assets_snapshot=(assets_snap if isinstance(assets_snap, dict) else None),
                 contract_ledger=(ledger_snap if isinstance(ledger_snap, dict) else None),
+                injury_lookback_days=int(injury_lookback_days),
+                injury_critical_body_parts=injury_critical_body_parts,
             )
     else:
         order = standings_order_worst_to_best or _build_standings_order_worst_to_best(ts_ctx)
@@ -427,12 +711,13 @@ def evaluate_deal_for_team(
             current_date_iso=cd.isoformat(),
             standings_order_worst_to_best=order,
             pick_expectations=pick_expectations,
+            injury_lookback_days=int(injury_lookback_days),
+            injury_critical_body_parts=injury_critical_body_parts,
         )
 
     # 5) Pure valuation (market -> team utility -> package effects)
     #
     # SSOT: build valuation runtime env once and pass it down the pure pipeline.
-    trade_rules = _extract_trade_rules_from_league_ctx(ts_ctx) or {}
     env = ValuationEnv.from_trade_rules(trade_rules, current_season_year=int(season_year))
 
     # Cap-normalized valuation: keep config.salary_cap populated for legacy
@@ -446,8 +731,13 @@ def evaluate_deal_for_team(
         except Exception:
             salary_cap = None
             
-    market_cfg = MarketPricingConfig(salary_cap=salary_cap) if salary_cap is not None else MarketPricingConfig()
-    team_cfg = TeamUtilityConfig(salary_cap=salary_cap) if salary_cap is not None else TeamUtilityConfig()
+    # merge extracted team overrides into trade_rules-like mapping for unified builder path
+    merged_team_rules = dict(trade_rules)
+    merged_team_rules.update(team_overrides)
+
+    market_cfg = _build_market_config(salary_cap=salary_cap, trade_rules=trade_rules, market_overrides=market_overrides)
+    team_cfg = _build_team_config(salary_cap=salary_cap, trade_rules=merged_team_rules)
+    package_cfg = _build_package_config(trade_rules=trade_rules)
     side, evaluation = _evaluate_deal_for_team(
         deal=deal,
         team_id=tid,
@@ -458,6 +748,7 @@ def evaluate_deal_for_team(
         attach_leg_metadata=True,
         market_config=market_cfg,
         team_config=team_cfg,
+        package_config=package_cfg,
     )
 
     # 6) Decision

@@ -5,7 +5,7 @@ from typing import Optional, TYPE_CHECKING
 
 from .errors import TradeError, DEAL_INVALIDATED
 from .models import Deal, canonicalize_deal
-from .rules import build_trade_context, validate_all
+from .rules import build_trade_context, get_default_registry, validate_all
 
 if TYPE_CHECKING:
     from .rules.tick_context import TradeRuleTickContext
@@ -14,16 +14,10 @@ if TYPE_CHECKING:
 def validate_deal(
     deal: Deal,
     current_date: Optional[date] = None,
-    allow_locked_by_deal_id: Optional[str] = None,
     db_path: Optional[str] = None,
     tick_ctx: Optional["TradeRuleTickContext"] = None,
     integrity_check: Optional[bool] = None,
 ) -> None:
-    # Avoid frame inspection inside build_trade_context; pass the lock exception explicitly.
-    extra = None
-    if allow_locked_by_deal_id is not None:
-        extra = {"allow_locked_by_deal_id": str(allow_locked_by_deal_id)}
-
     ctx = None
     try:
         deal = canonicalize_deal(deal)
@@ -33,7 +27,6 @@ def validate_deal(
             current_date=current_date,
             db_path=db_path,
             tick_ctx=tick_ctx,
-            extra=extra,
         )
         if integrity_check is None:
             # Default: validate integrity once for standalone calls,
@@ -52,7 +45,13 @@ def validate_deal(
                     pass
 
         prepared_rules = getattr(tick_ctx, "prepared_rules", None) if tick_ctx is not None else None
-        validate_all(deal, ctx, prepared_rules=prepared_rules)
+        if prepared_rules is not None:
+            validate_all(deal, ctx, prepared_rules=prepared_rules)
+        else:
+            league = ctx.game_state.get("league") if isinstance(ctx.game_state, dict) else {}
+            trade_rules = league.get("trade_rules") if isinstance(league, dict) and isinstance(league.get("trade_rules"), dict) else {}
+            registry = get_default_registry(trade_rules=trade_rules)
+            validate_all(deal, ctx, registry=registry)
     except TradeError:
         raise
     except Exception as exc:

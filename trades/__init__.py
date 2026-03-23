@@ -8,7 +8,6 @@ from .agreements import (
     create_committed_deal,
     verify_committed_deal,
     mark_executed,
-    release_locks_for_deal,
     gc_expired_agreements,
 )
 
@@ -25,6 +24,5 @@ __all__ = [
     "create_committed_deal",
     "verify_committed_deal",
     "mark_executed",
-    "release_locks_for_deal",
     "gc_expired_agreements",
 ]

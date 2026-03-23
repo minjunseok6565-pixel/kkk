@@ -202,7 +202,7 @@ def score_deal(
     config: DealGeneratorConfig,
     opponent_repeat_count: int,
 ) -> float:
-    """게임용 점수: (양팀) ACCEPT에 가까울수록, 단순할수록, 시장 다양할수록 높은 점수.
+    """게임용 점수: (양팀) ACCEPT에 가까울수록, 시장 다양할수록 높은 점수.
 
     원칙
     - 최우선: 양팀이 ACCEPT 가능한 딜

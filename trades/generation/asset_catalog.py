@@ -15,7 +15,6 @@ Design
 - Built once per generation tick (uses TradeGenerationTickContext).
 - Deterministic ordering (stable sorting + player_id tie-breaks).
 - Uses existing SSOT logic:
-  - locks: same semantics as AssetLockRule (expires_at + allow_locked_by_deal_id)
   - player bans: same policy helpers used by rules/team_situation
   - contract terms: contracts/terms.py SSOT (remaining years / salary schedule)
   - fit: FitEngine SSOT
@@ -166,13 +165,6 @@ class MarketValueSummary:
         return MarketValueSummary(now=now, future=fut, total=now + fut)
 
 
-@dataclass(frozen=True, slots=True)
-class LockInfo:
-    is_locked: bool
-    expires_at: Optional[str] = None
-    deal_id: Optional[str] = None
-
-
 BucketId = Literal[
     "FILLER_BAD_CONTRACT",
     "FILLER_CHEAP",
@@ -200,7 +192,6 @@ class PlayerTradeCandidate:
     remaining_years: float
     is_expiring: bool
 
-    lock: LockInfo
     recent_signing_banned_until: Optional[str]
     aggregation_banned_until: Optional[str]
     aggregation_solo_only: bool
@@ -240,7 +231,6 @@ class PickTradeCandidate:
     snap: PickSnapshot
     market: MarketValueSummary
 
-    lock: LockInfo
     within_max_years: bool
 
     stepien_safe_if_traded_alone: bool
@@ -258,8 +248,6 @@ class SwapTradeCandidate:
     owner_team: str
 
     snap: SwapSnapshot
-    lock: LockInfo
-
     def as_asset(self, to_team: Optional[str] = None) -> SwapAsset:
         return SwapAsset(
             kind="swap",
@@ -298,6 +286,8 @@ class IncomingPlayerRef:
     contract_gap_cap_share: float = 0.0
     expected_cap_share_avg: float = 0.0
     actual_cap_share_avg: float = 0.0
+    # optional OVR passthrough for OVR-only target tiering
+    ovr: Optional[float] = None
     # multi-tag supply profile for need-similarity scoring (tag, strength in [0,1])
     supply_items: Tuple[Tuple[str, float], ...] = tuple()
 
@@ -640,31 +630,6 @@ def _compute_protection_signals(
     }
 
 
-def _lock_info_for_asset_key(
-    *,
-    asset_key_value: str,
-    asset_locks: Mapping[str, Any],
-    current_date: date,
-    allow_locked_by_deal_id: Optional[str] = None,
-) -> LockInfo:
-    lock = asset_locks.get(asset_key_value) if isinstance(asset_locks, Mapping) else None
-    if not isinstance(lock, Mapping):
-        return LockInfo(is_locked=False, expires_at=None, deal_id=None)
-
-    deal_id = lock.get("deal_id")
-    expires_at_raw = lock.get("expires_at")
-    expires_at_date = _parse_iso_date(expires_at_raw)
-    expires_at_iso = _to_iso(expires_at_date) if expires_at_date else (str(expires_at_raw) if expires_at_raw else None)
-
-    if expires_at_date is not None and current_date > expires_at_date:
-        return LockInfo(is_locked=False, expires_at=expires_at_iso, deal_id=str(deal_id) if deal_id else None)
-
-    if allow_locked_by_deal_id and deal_id is not None and str(deal_id) == str(allow_locked_by_deal_id):
-        return LockInfo(is_locked=False, expires_at=expires_at_iso, deal_id=str(deal_id))
-
-    return LockInfo(is_locked=True, expires_at=expires_at_iso, deal_id=str(deal_id) if deal_id else None)
-
-
 def _extract_player_value_breakdown(mv: MarketValuation) -> Dict[str, float]:
     out = {
         "basketball_total": 0.0,
@@ -830,7 +795,6 @@ def build_trade_asset_catalog(
     *,
     tick_ctx: Any,
     bucket_caps_override: Optional[Dict[str, int]] = None,
-    allow_locked_by_deal_id: Optional[str] = None,
 ) -> TradeAssetCatalog:
     """Build TradeAssetCatalog from an existing TradeGenerationTickContext."""
 
@@ -863,10 +827,6 @@ def build_trade_asset_catalog(
     if draft_year <= 0:
         # Fallback (should not happen once state.export_trade_context_snapshot includes draft_year)
         draft_year = season_year + 1
-
-    asset_locks = ctx_state_base.get("asset_locks", {}) or {}
-    if not isinstance(asset_locks, Mapping):
-        asset_locks = {}
 
     provider = getattr(tick_ctx, "provider", None)
     if provider is None:
@@ -960,14 +920,6 @@ def build_trade_asset_catalog(
             if not pid:
                 continue
 
-            # Lock info (same as AssetLockRule)
-            lock = _lock_info_for_asset_key(
-                asset_key_value=_asset_key(PlayerAsset(kind="player", player_id=pid)),
-                asset_locks=asset_locks,
-                current_date=current_date,
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
-            )
-
             meta = players_meta.get(pid) or {}
             if not isinstance(meta, Mapping):
                 meta = {}
@@ -1049,7 +1001,6 @@ def build_trade_asset_catalog(
                 salary_m=salary_m,
                 remaining_years=float(remaining_years),
                 is_expiring=is_expiring,
-                lock=lock,
                 recent_signing_banned_until=recent_until_iso,
                 aggregation_banned_until=aggregation_until_iso,
                 aggregation_solo_only=bool(aggregation_active),
@@ -1061,12 +1012,11 @@ def build_trade_asset_catalog(
             per_team_candidates.append(cand)
 
         # --- Compute per-team bucket memberships
-        # Exclude locked and recent-signing-banned players from outgoing lists by default.
+        # Exclude recent-signing-banned players from outgoing lists by default.
         eligible_for_outgoing = [
             c
             for c in per_team_candidates
-            if not c.lock.is_locked
-            and not (c.recent_signing_banned_until and _parse_iso_date(c.recent_signing_banned_until) and current_date < _parse_iso_date(c.recent_signing_banned_until))  # type: ignore[arg-type]
+            if not (c.recent_signing_banned_until and _parse_iso_date(c.recent_signing_banned_until) and current_date < _parse_iso_date(c.recent_signing_banned_until))  # type: ignore[arg-type]
         ]
         eligible_ids = {c.player_id for c in eligible_for_outgoing}
 
@@ -1202,7 +1152,6 @@ def build_trade_asset_catalog(
                 salary_m=c.salary_m,
                 remaining_years=c.remaining_years,
                 is_expiring=c.is_expiring,
-                lock=c.lock,
                 recent_signing_banned_until=c.recent_signing_banned_until,
                 aggregation_banned_until=c.aggregation_banned_until,
                 aggregation_solo_only=c.aggregation_solo_only,
@@ -1288,7 +1237,6 @@ def build_trade_asset_catalog(
                     salary_m=c.salary_m,
                     remaining_years=c.remaining_years,
                     is_expiring=c.is_expiring,
-                    lock=c.lock,
                     recent_signing_banned_until=c.recent_signing_banned_until,
                     aggregation_banned_until=c.aggregation_banned_until,
                     aggregation_solo_only=c.aggregation_solo_only,
@@ -1310,7 +1258,7 @@ def build_trade_asset_catalog(
                 selected.add(pid)
             outgoing_player_ids_by_bucket[b] = tuple(out)
 
-        # --- Picks (movable, locks + max_years + Stepien "safe alone")
+        # --- Picks (movable + max_years + Stepien "safe alone")
         picks: Dict[str, PickTradeCandidate] = {}
         pick_ids_by_bucket: Dict[PickBucketId, List[str]] = {"FIRST_SAFE": [], "FIRST_SENSITIVE": [], "SECOND": []}
         draft_picks_map = getattr(provider, "draft_picks_map", {}) or {}
@@ -1324,15 +1272,6 @@ def build_trade_asset_catalog(
 
             # SSOT: trade-locked picks (draft_picks.trade_locked) are not tradable assets.
             if bool(pick_state.get("trade_locked")):
-                continue
-
-            lock = _lock_info_for_asset_key(
-                asset_key_value=_asset_key(PickAsset(kind="pick", pick_id=pid)),
-                asset_locks=asset_locks,
-                current_date=current_date,
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
-            )
-            if lock.is_locked:
                 continue
 
             try:
@@ -1362,7 +1301,6 @@ def build_trade_asset_catalog(
                     owner_team=tid,
                     snap=snap_pick,
                     market=market,
-                    lock=lock,
                     within_max_years=within_max,
                     stepien_safe_if_traded_alone=True,
                     stepien_sensitive=False,
@@ -1379,7 +1317,6 @@ def build_trade_asset_catalog(
                 owner_team=tid,
                 snap=snap_pick,
                 market=market,
-                lock=lock,
                 within_max_years=within_max,
                 stepien_safe_if_traded_alone=bool(safe_alone),
                 stepien_sensitive=bool(not safe_alone),
@@ -1419,15 +1356,6 @@ def build_trade_asset_catalog(
                 continue
             sid = str(swap_id)
 
-            lock = _lock_info_for_asset_key(
-                asset_key_value=_asset_key(SwapAsset(kind="swap", swap_id=sid, pick_id_a=str(swap_state.get("pick_id_a") or ""), pick_id_b=str(swap_state.get("pick_id_b") or ""))),
-                asset_locks=asset_locks,
-                current_date=current_date,
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
-            )
-            if lock.is_locked:
-                continue
-
             try:
                 snap_swap = provider.get_swap_snapshot(sid)
             except Exception:
@@ -1437,7 +1365,6 @@ def build_trade_asset_catalog(
                 swap_id=sid,
                 owner_team=tid,
                 snap=snap_swap,
-                lock=lock,
             )
             swaps[sid] = cand
             swap_ids.append(sid)
@@ -1455,11 +1382,9 @@ def build_trade_asset_catalog(
         )
 
         # --- League-wide incoming indices contribution
-        # Eligible incoming (by default): not locked, not recent-signing banned.
+        # Eligible incoming (by default): not recent-signing banned.
         for c in players.values():
             if c.team_id != tid:
-                continue
-            if c.lock.is_locked:
                 continue
             if c.recent_signing_banned_until:
                 d_ban = _parse_iso_date(c.recent_signing_banned_until)
@@ -1497,6 +1422,7 @@ def build_trade_asset_catalog(
                 contract_gap_cap_share=float((incoming_player_value_by_id.get(c.player_id) or {}).get("contract_gap_cap_share", 0.0) or 0.0),
                 expected_cap_share_avg=float((incoming_player_value_by_id.get(c.player_id) or {}).get("expected_cap_share_avg", 0.0) or 0.0),
                 actual_cap_share_avg=float((incoming_player_value_by_id.get(c.player_id) or {}).get("actual_cap_share_avg", 0.0) or 0.0),
+                ovr=_safe_float(getattr(c.snap, "ovr", None), None),
                 supply_items=tuple(supply_items_t),
             )
             incoming_all_players_by_id[c.player_id] = all_ref

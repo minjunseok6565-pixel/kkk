@@ -108,6 +108,21 @@ def _vc(now: float = 0.0, future: float = 0.0) -> ValueComponents:
     return ValueComponents(float(now), float(future))
 
 
+def _soft_count(x: float, k: float) -> float:
+    xv = max(_safe_float(x, 0.0), 0.0)
+    kv = max(_safe_float(k, 0.0), 0.0)
+    if kv <= 0.0:
+        return 0.0
+    return 1.0 - math.exp(-kv * xv)
+
+
+def _normalize_option_type(value: Any) -> str:
+    v = str(value or "").strip().upper()
+    if v in {"TEAM", "PLAYER", "ETO"}:
+        return v
+    return "PLAYER"
+
+
 # =============================================================================
 # Config: curves & weights (tunable, deterministic)
 # =============================================================================
@@ -119,22 +134,30 @@ class MarketPricingConfig:
     """
 
     # --- Player base pricing
-    player_ovr_center: float = 75.0
-    player_ovr_scale: float = 6.0
-    player_ovr_now_max: float = 25.0  # OVR 기반 now 상한(화폐 단위)
+    player_ovr_center: float = 91.5
+    player_ovr_scale: float = 5.5
+    player_ovr_now_max: float = 60.0  # OVR 기반 now 상한(화폐 단위)
     player_ovr_now_min: float = 0.0
 
     # OVR 증가가 상위 구간에서 더 비싸지도록(비선형)
-    player_star_softplus_scale: float = 0.55
-    player_star_softplus_shift: float = 86.0
+    player_star_softplus_scale: float = 1.3
+    player_star_softplus_shift: float = 91.0
 
     # --- Age / horizon split (market-level expectation)
-    age_peak: float = 27.0
+    age_peak_start: float = 27.0
+    age_peak_end: float = 29.0
     age_now_decay_per_year: float = 0.06
-    age_future_growth_per_year_under_peak: float = 0.07
-    age_future_decay_per_year_over_peak: float = 0.05
-    age_future_floor: float = 0.20
-    age_future_cap: float = 1.40
+    future_dev_age_min: float = 18.0
+    future_upside_max: float = 22.0
+    future_gap_ref: float = 16.0
+    future_pre_peak_age_exp: float = 1.10
+    future_pre_peak_gap_exp: float = 0.65
+    future_post_peak_decline_age: float = 38.0
+    future_post_peak_max_discount: float = 10.0
+    future_post_peak_age_exp: float = 1.35
+    future_post_peak_ovr_lo: float = 74.0
+    future_post_peak_ovr_hi: float = 98.0
+    future_post_peak_ovr_floor_weight: float = 0.20
 
     # --- Contract efficiency (market-level)
     # expected salary as function of ovr -> compare vs actual to compute contract factor
@@ -161,10 +184,10 @@ class MarketPricingConfig:
 
     # Fair salary curve (cap%-based).
     # - Designed to cover max salary ranges (superstars can be underpaid even at max).
-    fair_salary_pct_lo: float = 0.02
-    fair_salary_pct_hi: float = 0.47
-    fair_salary_ovr_center: float = 86.0
-    fair_salary_ovr_scale: float = 7.0
+    fair_salary_pct_lo: float = 0.010
+    fair_salary_pct_hi: float = 0.350
+    fair_salary_ovr_center: float = 83.5
+    fair_salary_ovr_scale: float = 3.8
 
     # Contract surplus (fair - actual) is converted into value units and ADDED to player value.
     # This allows truly bad contracts to become negative assets.
@@ -173,13 +196,54 @@ class MarketPricingConfig:
     contract_value_abs_cap: float = 40.0
     contract_fallback_years_cap: int = 6
 
+    # Contract option value (added on top of contract surplus delta).
+    # TEAM option: always + (team-favorable control)
+    # PLAYER/ETO option: always - (team-side uncertainty), with salary mismatch shaping magnitude.
+    option_value_base_units: float = 0.30
+    option_pending_probability: float = 0.75
+    option_mismatch_alpha: float = 0.45
+    option_mismatch_beta_cap_share: float = 0.05
+    option_mismatch_min_mult: float = 0.65
+    option_mismatch_max_mult: float = 1.45
+    option_value_abs_cap: float = 2.0
+
     contract_efficiency_factor_floor: float = 0.70
     contract_efficiency_factor_cap: float = 1.35
     contract_years_penalty_per_year: float = 0.03  # 긴 계약은 market에서 살짝 할인
 
+    # --- Injury-aware market adjustments (players)
+    # A) current injury discount (soft gates around 30/180 days)
+    inj_current_t30_days: float = 30.0
+    inj_current_t180_days: float = 180.0
+    inj_current_s30_days: float = 10.0
+    inj_current_s180_days: float = 24.0
+    inj_current_weight_30: float = 0.08
+    inj_current_weight_180: float = 0.16
+    inj_current_returning_multiplier: float = 0.50
+    inj_current_factor_floor: float = 0.82
+
+    # B) injury history discount (soft-count saturating signals)
+    inj_hist_recent_kr: float = 0.28
+    inj_hist_critical_kc: float = 0.65
+    inj_hist_repeat_kp: float = 0.72
+    inj_hist_severity_ks: float = 0.45
+    inj_hist_weight_recent: float = 0.26
+    inj_hist_weight_critical: float = 0.36
+    inj_hist_weight_repeat: float = 0.28
+    inj_hist_weight_severity: float = 0.10
+    inj_hist_penalty_cap: float = 0.22
+    inj_hist_factor_floor: float = 0.78
+
+    # C) health credit (counterbalance; intentionally smaller than discounts)
+    health_credit_availability_ref: float = 0.90
+    health_credit_availability_scale: float = 0.06
+    health_credit_base_scale: float = 0.020
+    health_credit_no_critical_bonus: float = 1.20
+    health_credit_cap: float = 0.06
+
     # --- Pick base pricing
-    pick_round1_base_future: float = 14.0
-    pick_round2_base_future: float = 3.5
+    pick_round1_base_future: float = 8.0
+    pick_round2_base_future: float = 1.0
 
     # pick number -> value curve
     pick_num_best: int = 1
@@ -187,7 +251,7 @@ class MarketPricingConfig:
     pick_num_curve_power: float = 1.65  # 상위픽 프리미엄(비선형)
 
     # year discount (멀수록 가치 감소)
-    pick_year_discount_rate: float = 0.10  # 1년당 할인
+    pick_year_discount_rate: float = 0.08  # 1년당 할인
 
     # --- Protection expectation (TOP_N)
     protection_logit_k: float = 0.85  # convey probability sharpness
@@ -220,6 +284,20 @@ class MarketPricer:
     _cache_pick: Dict[Tuple[str, int, str], MarketValuation] = field(default_factory=dict, init=False)
     _cache_swap: Dict[Tuple[str, int], MarketValuation] = field(default_factory=dict, init=False)
     _cache_fixed: Dict[Tuple[str, int], MarketValuation] = field(default_factory=dict, init=False)
+    _potential_ceiling: Dict[str, float] = field(
+        default_factory=lambda: {
+            "C-": 60.0,
+            "C": 65.0,
+            "C+": 70.0,
+            "B-": 75.0,
+            "B": 80.0,
+            "B+": 85.0,
+            "A-": 90.0,
+            "A": 95.0,
+            "A+": 99.0,
+        },
+        init=False,
+    )
 
     # -------------------------------------------------------------------------
     # Public API
@@ -343,36 +421,37 @@ class MarketPricer:
                 )
             )
 
-        base_now = now_base + star_bonus
+        base_now_raw = now_base + star_bonus
 
-        # 3) Age -> future multiplier (market-level expected horizon)
-        age_future_factor = self._age_to_future_factor(age)
-        steps.append(
-            ValuationStep(
-                stage=ValuationStage.MARKET,
-                mode=StepMode.MUL,
-                code="AGE_FUTURE_FACTOR",
-                label="나이 기반 미래가치 배율",
-                factor=age_future_factor,
-                delta=_vc(0.0, 0.0),
-                meta={"age": age},
+        # 3) Age -> now decay (post-peak decline in current impact)
+        now_decay = self._age_to_now_decay_factor(age)
+        if abs(now_decay - 1.0) > cfg.eps:
+            steps.append(
+                ValuationStep(
+                    stage=ValuationStage.MARKET,
+                    mode=StepMode.MUL,
+                    code="AGE_NOW_DECAY",
+                    label="나이 기반 현재가치 감쇠",
+                    factor=now_decay,
+                    delta=_vc(0.0, 0.0),
+                    meta={"age": age},
+                )
             )
-        )
+        base_now = base_now_raw * now_decay
 
-        # We create a future component from current base using the factor.
-        future_from_age = base_now * (age_future_factor - 1.0)
+        # 4) Future component (potential/age/headroom-based absolute value)
+        future_component, future_meta = self._player_future_component(snap=snap, age=age, ovr=ovr)
         steps.append(
             ValuationStep(
                 stage=ValuationStage.MARKET,
                 mode=StepMode.ADD,
-                code="AGE_FUTURE_COMPONENT",
-                label="나이 기반 미래가치 구성",
-                delta=_vc(now=0.0, future=future_from_age),
-                meta={"age": age, "factor": age_future_factor},
+                code="PLAYER_FUTURE_COMPONENT",
+                label="포텐셜/나이/헤드룸 기반 미래가치",
+                delta=_vc(now=0.0, future=future_component),
+                meta=future_meta,
             )
         )
-
-        basketball_value = _vc(now=base_now, future=future_from_age)
+        basketball_value = _vc(now=base_now, future=future_component)
 
         # 4) Position scarcity (market-level) -> applies to basketball value only.
         pos_factor, pos_meta = self._position_scarcity_factor(snap)
@@ -388,6 +467,54 @@ class MarketPricer:
                 )
             )
             basketball_value = basketball_value.scale(pos_factor)
+
+        # -----------------------------------------------------------------
+        # Injury-aware market adjustments on basketball component.
+        # - CURRENT injury discount (soft-gated around 30/180 days): MUL
+        # - HISTORY injury discount (recent/critical/repeat/severity): MUL
+        # - HEALTH credit bonus (availability upside): ADD
+        # -----------------------------------------------------------------
+        injury_payload, injury_payload_meta = self._safe_injury_payload(snap)
+
+        current_factor, current_meta = self._inj_current_penalty_factor(injury_payload)
+        steps.append(
+            ValuationStep(
+                stage=ValuationStage.MARKET,
+                mode=StepMode.MUL,
+                code="INJURY_CURRENT_DISCOUNT",
+                label="현재 부상 할인(소프트 게이트)",
+                factor=current_factor,
+                meta={**injury_payload_meta, **current_meta},
+            )
+        )
+        basketball_value = basketball_value.scale(current_factor)
+
+        history_factor, history_meta = self._inj_history_penalty_factor(injury_payload)
+        steps.append(
+            ValuationStep(
+                stage=ValuationStage.MARKET,
+                mode=StepMode.MUL,
+                code="INJURY_HISTORY_DISCOUNT",
+                label="부상 이력 할인(최근/치명/반복)",
+                factor=history_factor,
+                meta={**injury_payload_meta, **history_meta},
+            )
+        )
+        basketball_value = basketball_value.scale(history_factor)
+
+        health_credit_delta, health_meta = self._health_credit_bonus(injury_payload, basketball_value)
+        if abs(health_credit_delta.now) + abs(health_credit_delta.future) > cfg.eps:
+            steps.append(
+                ValuationStep(
+                    stage=ValuationStage.MARKET,
+                    mode=StepMode.ADD,
+                    code="HEALTH_CREDIT",
+                    label="건강 보너스(가용성 반대급부)",
+                    delta=health_credit_delta,
+                    meta={**injury_payload_meta, **health_meta},
+                )
+            )
+            basketball_value = basketball_value + health_credit_delta
 
         # -----------------------------------------------------------------
         # Contract value (fair salary - actual salary), ADDED as a separate component.
@@ -417,6 +544,13 @@ class MarketPricer:
                     "now": basketball_value.now,
                     "future": basketball_value.future,
                     "total": basketball_value.total,
+                },
+                "injury": {
+                    "current_factor": float(current_factor),
+                    "history_factor": float(history_factor),
+                    "health_credit_now": float(health_credit_delta.now),
+                    "health_credit_future": float(health_credit_delta.future),
+                    "health_credit_total": float(health_credit_delta.total),
                 },
                 "contract": {
                     "now": contract_delta.now,
@@ -547,7 +681,13 @@ class MarketPricer:
                 }
             )
 
-        delta = ValueComponents(now_units, fut_units)
+        base_delta = ValueComponents(now_units, fut_units)
+        option_delta, option_rows = self._contract_option_value_delta(
+            snap,
+            env=env,
+            fair_pct=float(fair_pct),
+        )
+        delta = base_delta + option_delta
         delta = self._clamp_abs_mass(delta, cfg.contract_value_abs_cap)
 
         meta = {
@@ -556,9 +696,89 @@ class MarketPricer:
             "fair_salary_pct": fair_pct,
             "terms_meta": terms.meta,
             "rows": rows,
+            "base_delta": {"now": base_delta.now, "future": base_delta.future, "total": base_delta.total},
+            "option_rows": option_rows,
+            "option_delta": {"now": option_delta.now, "future": option_delta.future, "total": option_delta.total},
             "delta": {"now": delta.now, "future": delta.future, "total": delta.total},
         }
         return delta, meta
+
+    def _contract_option_value_delta(
+        self,
+        snap: PlayerSnapshot,
+        *,
+        env: ValuationEnv,
+        fair_pct: float,
+    ) -> Tuple[ValueComponents, List[Dict[str, Any]]]:
+        cfg = self.config
+        c = snap.contract
+        if c is None or not c.options:
+            return ValueComponents.zero(), []
+
+        if cfg.option_value_base_units <= cfg.eps:
+            return ValueComponents.zero(), []
+
+        cur = int(env.current_season_year)
+        now_units = 0.0
+        fut_units = 0.0
+        rows: List[Dict[str, Any]] = []
+
+        for opt in c.options:
+            year = int(_safe_int(getattr(opt, "season_year", 0), 0))
+            if year < cur:
+                continue
+
+            raw_status = str(getattr(opt, "status", "") or "").strip().upper()
+            if raw_status == "DECLINED":
+                p_active = 0.0
+            elif raw_status == "EXERCISED":
+                p_active = 1.0
+            else:
+                p_active = float(_clamp(cfg.option_pending_probability, 0.0, 1.0))
+            if p_active <= cfg.eps:
+                continue
+
+            opt_type = _normalize_option_type(getattr(opt, "type", ""))
+            sign = 1.0 if opt_type == "TEAM" else -1.0
+
+            cap_y = float(env.cap_model.salary_cap_for_season(int(year)))
+            if cap_y <= cfg.eps:
+                continue
+            salary_y = float(_safe_float(c.salary_by_year.get(int(year)), 0.0))
+            fair_y = cap_y * float(fair_pct)
+            mismatch_cap_share = (salary_y - fair_y) / max(cap_y, cfg.eps)
+            beta = max(float(cfg.option_mismatch_beta_cap_share), cfg.eps)
+            gm = 1.0 + float(cfg.option_mismatch_alpha) * math.tanh(float(mismatch_cap_share) / beta)
+            gm = _clamp(gm, float(cfg.option_mismatch_min_mult), float(cfg.option_mismatch_max_mult))
+
+            years_ahead = max(int(year) - int(cur), 0)
+            disc = (1.0 - cfg.contract_year_discount_rate) ** years_ahead
+            disc = _clamp(disc, 0.35, 1.00)
+
+            units = sign * float(cfg.option_value_base_units) * float(gm) * float(p_active) * float(disc)
+            if int(year) == int(cur):
+                now_units += units
+            else:
+                fut_units += units
+
+            rows.append(
+                {
+                    "year": int(year),
+                    "type": str(opt_type),
+                    "status": str(raw_status or "PENDING"),
+                    "cap": cap_y,
+                    "salary": salary_y,
+                    "fair_salary": fair_y,
+                    "mismatch_cap_share": mismatch_cap_share,
+                    "mismatch_mult": gm,
+                    "p_active": p_active,
+                    "disc": disc,
+                    "units": units,
+                }
+            )
+
+        out = self._clamp_abs_mass(ValueComponents(now_units, fut_units), float(cfg.option_value_abs_cap))
+        return out, rows
 
 
     def _ovr_to_now_value(self, ovr: float) -> float:
@@ -574,72 +794,94 @@ class MarketPricer:
         x = (ovr - cfg.player_star_softplus_shift) * cfg.player_star_softplus_scale
         return _softplus(x) * 0.9  # bonus magnitude is tunable; keep deterministic
 
-    def _age_to_future_factor(self, age: float) -> float:
+    def _age_to_now_decay_factor(self, age: float) -> float:
         cfg = self.config
-        # below peak -> growth, above peak -> decay, both clamped
-        if age <= cfg.age_peak:
-            diff = cfg.age_peak - age
-            factor = 1.0 + diff * cfg.age_future_growth_per_year_under_peak
-        else:
-            diff = age - cfg.age_peak
-            factor = 1.0 - diff * cfg.age_future_decay_per_year_over_peak
-        return _clamp(factor, cfg.age_future_floor, cfg.age_future_cap)
+        if age <= cfg.age_peak_end:
+            return 1.0
+        diff = age - cfg.age_peak_end
+        factor = 1.0 - diff * cfg.age_now_decay_per_year
+        return _clamp(factor, 0.35, 1.0)
 
-    def _contract_efficiency_factor(self, snap: PlayerSnapshot) -> Tuple[float, Dict[str, Any]]:
-        """
-        contract efficiency는 '시장가'에 속한다:
-        - 같은 선수라도 싼 계약이면 시장가가 올라가고, 비싼 계약이면 내려간다.
-        """
+    def _resolve_player_potential(self, snap: PlayerSnapshot) -> str:
+        # priority
+        # 1) snap.potential (if schema expanded externally)
+        # 2) snap.meta["potential"]
+        # 3) snap.attrs["Potential"] (ratings payload convention)
+        # 4) default "B"
+        raw = None
+        if hasattr(snap, "potential"):
+            raw = getattr(snap, "potential", None)
+        if raw is None and isinstance(snap.meta, dict):
+            raw = snap.meta.get("potential")
+        if raw is None and isinstance(snap.attrs, dict):
+            raw = snap.attrs.get("Potential")
+        token = str(raw or "").strip().upper()
+        return token if token in self._potential_ceiling else "B"
+
+    def _potential_to_ceiling(self, potential: str) -> float:
+        token = str(potential or "").strip().upper()
+        return float(self._potential_ceiling.get(token, self._potential_ceiling["B"]))
+
+    def _player_future_component(self, *, snap: PlayerSnapshot, age: float, ovr: float) -> Tuple[float, Dict[str, Any]]:
         cfg = self.config
-        ovr = _safe_float(snap.ovr, 70.0)
+        potential = self._resolve_player_potential(snap)
+        ceiling = self._potential_to_ceiling(potential)
+        gap = max(float(ceiling - ovr), 0.0)
 
-        # actual salary for the current season: prefer roster salary_amount, else contract meta
-        actual_salary = _safe_float(snap.salary_amount, 0.0)
-        contract_years = 0
+        if age < cfg.age_peak_start:
+            age_den = max(cfg.age_peak_start - cfg.future_dev_age_min + 1.0, cfg.eps)
+            age_raw = (cfg.age_peak_start - age + 1.0) / age_den
+            age_term = _clamp(age_raw, 0.0, 1.0) ** max(cfg.future_pre_peak_age_exp, cfg.eps)
 
-        if snap.contract is not None:
-            contract_years = _safe_int(snap.contract.years, 0)
-            # contract salary_by_year may exist; but without current season injection,
-            # we keep roster.salary_amount as the primary actual_salary signal.
-            if actual_salary <= cfg.eps:
-                # fallback to any known salary
-                if isinstance(snap.contract.salary_by_year, dict) and snap.contract.salary_by_year:
-                    # pick the smallest positive salary as proxy to avoid weird jumps
-                    vals = [v for v in snap.contract.salary_by_year.values() if _safe_float(v, 0.0) > 0]
-                    if vals:
-                        actual_salary = float(sorted(vals)[0])
+            pot_norm = _clamp((ceiling - 75.0) / (99.0 - 75.0), 0.0, 1.0)
+            pot_term = 0.10 + 0.90 * (pot_norm ** 1.15)
 
-        expected_salary, expected_salary_meta = self._expected_salary_from_ovr(ovr)
-        if actual_salary <= cfg.eps:
-            # if we truly don't know, neutral
-            return 1.0, {"ovr": ovr, "expected_salary": expected_salary, "expected_salary_meta": expected_salary_meta, "actual_salary": None, "years": contract_years}
+            gap_ref = max(cfg.future_gap_ref, cfg.eps)
+            gap_term = _clamp(gap / gap_ref, 0.0, 1.0) ** max(cfg.future_pre_peak_gap_exp, cfg.eps)
 
-        ratio = expected_salary / max(actual_salary, cfg.eps)
-        # ratio > 1 => underpaid => value up
-        # ratio < 1 => overpaid => value down
-        factor = _clamp(ratio, cfg.contract_efficiency_factor_floor, cfg.contract_efficiency_factor_cap)
+            future = cfg.future_upside_max * age_term * pot_term * gap_term
+            return float(future), {
+                "branch": "pre_peak_upside",
+                "age": float(age),
+                "ovr": float(ovr),
+                "potential": potential,
+                "ceiling": float(ceiling),
+                "gap": float(gap),
+                "age_term": float(age_term),
+                "pot_term": float(pot_term),
+                "gap_term": float(gap_term),
+            }
 
-        # long contracts: slight market discount (not "risk", just price of immobility)
-        if contract_years > 0:
-            years_pen = 1.0 - cfg.contract_years_penalty_per_year * max(contract_years - 1, 0)
-            years_pen = _clamp(years_pen, 0.75, 1.0)
-            factor *= years_pen
+        if age <= cfg.age_peak_end:
+            return 0.0, {
+                "branch": "peak_neutral",
+                "age": float(age),
+                "ovr": float(ovr),
+                "potential": potential,
+                "ceiling": float(ceiling),
+                "gap": float(gap),
+            }
 
-       # Helpful debug metadata (kept deterministic)
-        salary_cap = _safe_float(getattr(cfg, "salary_cap", None), 0.0)
-        actual_pct = (actual_salary / salary_cap) if salary_cap > cfg.eps else None
-        expected_pct = (expected_salary / salary_cap) if salary_cap > cfg.eps else None
+        decline_den = max(cfg.future_post_peak_decline_age - cfg.age_peak_end, cfg.eps)
+        decline_raw = (age - cfg.age_peak_end) / decline_den
+        decline_age_term = _clamp(decline_raw, 0.0, 1.0) ** max(cfg.future_post_peak_age_exp, cfg.eps)
 
-        return float(factor), {
-            "ovr": ovr,
-            "expected_salary": expected_salary,
-            "expected_salary_meta": expected_salary_meta,
-            "actual_salary": actual_salary,
-            "salary_ratio": ratio,
-            "years": contract_years,
-            "salary_cap": (salary_cap if salary_cap > cfg.eps else None),
-            "actual_salary_cap_pct": actual_pct,
-            "expected_salary_cap_pct": expected_pct,
+        ovr_den = max(cfg.future_post_peak_ovr_hi - cfg.future_post_peak_ovr_lo, cfg.eps)
+        ovr_term = _clamp((ovr - cfg.future_post_peak_ovr_lo) / ovr_den, 0.0, 1.0)
+        floor_w = _clamp(cfg.future_post_peak_ovr_floor_weight, 0.0, 1.0)
+        ability_term = floor_w + (1.0 - floor_w) * ovr_term
+
+        future = -cfg.future_post_peak_max_discount * decline_age_term * ability_term
+        return float(future), {
+            "branch": "post_peak_decline",
+            "age": float(age),
+            "ovr": float(ovr),
+            "potential": potential,
+            "ceiling": float(ceiling),
+            "gap": float(gap),
+            "decline_age_term": float(decline_age_term),
+            "ovr_term": float(ovr_term),
+            "ability_term": float(ability_term),
         }
 
     def _resolve_expected_salary_scale(self) -> Tuple[float, float, Dict[str, Any]]:
@@ -719,6 +961,151 @@ class MarketPricer:
         if "SF" in pos and "SG" in pos:
             return 1.02, {"pos": pos, "bucket": "wing_combo"}
         return 1.0, {"pos": pos, "bucket": "neutral"}
+
+    def _safe_injury_payload(self, snap: PlayerSnapshot) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        meta = snap.meta if isinstance(snap.meta, dict) else {}
+        payload = meta.get("injury") if isinstance(meta, dict) else None
+        if not isinstance(payload, dict):
+            return {}, {"injury_payload_present": False, "fallback_used": True}
+        flags = payload.get("flags") if isinstance(payload.get("flags"), dict) else {}
+        return payload, {
+            "injury_payload_present": True,
+            "fallback_used": bool(flags.get("fallback_used", False)),
+        }
+
+    def _inj_current_penalty_factor(self, injury_payload: Mapping[str, Any]) -> Tuple[float, Dict[str, Any]]:
+        cfg = self.config
+        cur = injury_payload.get("current") if isinstance(injury_payload.get("current"), Mapping) else {}
+
+        status = str(cur.get("status") or "UNKNOWN").upper()
+        is_out = bool(cur.get("is_out", status == "OUT"))
+        is_returning = bool(cur.get("is_returning", status == "RETURNING"))
+        days_to_return = max(_safe_float(cur.get("days_to_return"), 0.0), 0.0)
+        body_part = cur.get("body_part")
+        severity = _safe_int(cur.get("severity"), 0)
+
+        if not (is_out or is_returning):
+            return 1.0, {
+                "status": status,
+                "is_out": bool(is_out),
+                "is_returning": bool(is_returning),
+                "days_to_return": float(days_to_return),
+                "body_part": body_part,
+                "severity": int(severity),
+                "current_penalty": 0.0,
+                "current_factor": 1.0,
+            }
+
+        t30 = max(_safe_float(cfg.inj_current_t30_days, 30.0), 1.0)
+        t180 = max(_safe_float(cfg.inj_current_t180_days, 180.0), t30 + 1.0)
+        s30 = max(_safe_float(cfg.inj_current_s30_days, 10.0), cfg.eps)
+        s180 = max(_safe_float(cfg.inj_current_s180_days, 24.0), cfg.eps)
+        w30 = _clamp(_safe_float(cfg.inj_current_weight_30, 0.08), 0.0, 1.0)
+        w180 = _clamp(_safe_float(cfg.inj_current_weight_180, 0.16), 0.0, 1.0)
+
+        g30 = _sigmoid((days_to_return - t30) / s30)
+        g180 = _sigmoid((days_to_return - t180) / s180)
+        mid = _clamp((days_to_return - t30) / max(t180 - t30, cfg.eps), 0.0, 1.0)
+
+        penalty = (w30 * g30 * mid) + (w180 * g180)
+        status_mult = 1.0 if is_out else _clamp(_safe_float(cfg.inj_current_returning_multiplier, 0.50), 0.0, 1.0)
+        penalty = _clamp(penalty * status_mult, 0.0, 0.95)
+        factor = _clamp(1.0 - penalty, _clamp(cfg.inj_current_factor_floor, 0.0, 1.0), 1.0)
+        return factor, {
+            "status": status,
+            "is_out": bool(is_out),
+            "is_returning": bool(is_returning),
+            "days_to_return": float(days_to_return),
+            "body_part": body_part,
+            "severity": int(severity),
+            "g30": float(g30),
+            "g180": float(g180),
+            "mid": float(mid),
+            "w30": float(w30),
+            "w180": float(w180),
+            "status_mult": float(status_mult),
+            "current_penalty": float(penalty),
+            "current_factor": float(factor),
+        }
+
+    def _inj_history_penalty_factor(self, injury_payload: Mapping[str, Any]) -> Tuple[float, Dict[str, Any]]:
+        cfg = self.config
+        hist = injury_payload.get("history") if isinstance(injury_payload.get("history"), Mapping) else {}
+
+        recent_180 = max(_safe_float(hist.get("recent_count_180d"), 0.0), 0.0)
+        critical_365 = max(_safe_float(hist.get("critical_count_365d"), 0.0), 0.0)
+        repeat_same = max(_safe_float(hist.get("same_part_repeat_365d_max"), 0.0) - 1.0, 0.0)
+        weighted_severity = max(_safe_float(hist.get("weighted_severity_365d"), 0.0), 0.0)
+        sev_signal = max(weighted_severity - 1.0, 0.0)
+
+        fr = _soft_count(recent_180, cfg.inj_hist_recent_kr)
+        fc = _soft_count(critical_365, cfg.inj_hist_critical_kc)
+        fp = _soft_count(repeat_same, cfg.inj_hist_repeat_kp)
+        fs = _soft_count(sev_signal, cfg.inj_hist_severity_ks)
+
+        ar = _clamp(_safe_float(cfg.inj_hist_weight_recent, 0.26), 0.0, 1.0)
+        ac = _clamp(_safe_float(cfg.inj_hist_weight_critical, 0.36), 0.0, 1.0)
+        ap = _clamp(_safe_float(cfg.inj_hist_weight_repeat, 0.28), 0.0, 1.0)
+        asv = _clamp(_safe_float(cfg.inj_hist_weight_severity, 0.10), 0.0, 1.0)
+        weight_sum = max(ar + ac + ap + asv, cfg.eps)
+
+        mix = (ar * fr + ac * fc + ap * fp + asv * fs) / weight_sum
+        penalty_cap = _clamp(_safe_float(cfg.inj_hist_penalty_cap, 0.22), 0.0, 0.95)
+        penalty = _clamp(penalty_cap * mix, 0.0, 0.95)
+        factor = _clamp(1.0 - penalty, _clamp(cfg.inj_hist_factor_floor, 0.0, 1.0), 1.0)
+
+        return factor, {
+            "recent_180": float(recent_180),
+            "critical_365": float(critical_365),
+            "repeat_same": float(repeat_same),
+            "weighted_severity_365d": float(weighted_severity),
+            "fr": float(fr),
+            "fc": float(fc),
+            "fp": float(fp),
+            "fs": float(fs),
+            "history_penalty": float(penalty),
+            "history_factor": float(factor),
+        }
+
+    def _health_credit_bonus(
+        self,
+        injury_payload: Mapping[str, Any],
+        basketball_value: ValueComponents,
+    ) -> Tuple[ValueComponents, Dict[str, Any]]:
+        cfg = self.config
+        hist = injury_payload.get("history") if isinstance(injury_payload.get("history"), Mapping) else {}
+        health = (
+            injury_payload.get("health_credit_inputs")
+            if isinstance(injury_payload.get("health_credit_inputs"), Mapping)
+            else {}
+        )
+
+        availability_rate = _clamp(_safe_float(health.get("availability_rate_365d"), 1.0), 0.0, 1.0)
+        critical_365 = max(_safe_float(hist.get("critical_count_365d"), 0.0), 0.0)
+
+        ref = _clamp(_safe_float(cfg.health_credit_availability_ref, 0.90), 0.0, 1.0)
+        scale = max(_safe_float(cfg.health_credit_availability_scale, 0.06), cfg.eps)
+        base_scale = max(_safe_float(cfg.health_credit_base_scale, 0.020), 0.0)
+        no_critical_bonus = max(_safe_float(cfg.health_credit_no_critical_bonus, 1.20), 0.0)
+        cap = _clamp(_safe_float(cfg.health_credit_cap, 0.06), 0.0, 0.30)
+
+        gate = _sigmoid((availability_rate - ref) / scale)
+        mult = no_critical_bonus if critical_365 <= 0.0 else 1.0
+        bonus_pct = _clamp(base_scale * gate * mult, 0.0, cap)
+
+        base_now = max(_safe_float(basketball_value.now, 0.0), 0.0)
+        base_future = max(_safe_float(basketball_value.future, 0.0), 0.0)
+        bonus = ValueComponents(base_now * bonus_pct, base_future * bonus_pct)
+
+        return bonus, {
+            "availability_rate": float(availability_rate),
+            "availability_ref": float(ref),
+            "availability_gate": float(gate),
+            "critical_365": float(critical_365),
+            "health_credit_pct": float(bonus_pct),
+            "health_credit_cap": float(cap),
+            "health_credit": float(bonus.total),
+        }
 
     # -------------------------------------------------------------------------
     # Pick pricing
@@ -1067,4 +1454,3 @@ class MarketPricer:
             steps=tuple(steps),
             meta={"label": snap.label, "owner_team": snap.owner_team, "source_pick_id": snap.source_pick_id},
         )
-

@@ -12,18 +12,6 @@ from . import rule_player_meta
 if TYPE_CHECKING:
     from .base import Rule
 
-class _ReadOnlyDict(dict):
-    """
-    A dict subtype that raises on mutation.
-    Used to enforce tick snapshot immutability while preserving isinstance(x, dict) checks.
-    """
-
-    def _ro(self, *a, **k):
-        raise TypeError("TradeRuleTickContext snapshot is read-only")
-
-    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = _ro
-
-
 def _canonical_player_id(value: object) -> str:
     return str(normalize_player_id(value, strict=False, allow_legacy_numeric=True))
 
@@ -194,15 +182,6 @@ def build_trade_rule_tick_context(
     ctx_state_base = state.export_trade_context_snapshot(repo=repo) or {}
     assets_snapshot = state.export_trade_assets_snapshot(repo=repo) or {}
 
-    # Enforce immutability for known-mutable submaps to avoid cross-deal contamination.
-    # (Rules should be pure; maintenance/cleanup happens at tick boundaries.)
-    try:
-        al = ctx_state_base.get("asset_locks")
-        if isinstance(al, dict) and not isinstance(al, _ReadOnlyDict):
-            ctx_state_base["asset_locks"] = _ReadOnlyDict(al)
-    except Exception:
-        pass
-
     league = (ctx_state_base or {}).get("league")
     if not isinstance(league, dict):
         if owns_repo:
@@ -223,7 +202,8 @@ def build_trade_rule_tick_context(
         raise RuntimeError(f"Invalid trade context snapshot: league.season_year invalid: {y!r}") from exc
 
     # Prepare sorted enabled rules once (avoid per-deal registry build + sort)
-    registry = get_default_registry()
+    trade_rules = league.get("trade_rules") if isinstance(league.get("trade_rules"), dict) else {}
+    registry = get_default_registry(trade_rules=trade_rules)
     enabled = [r for r in registry.list_rules() if getattr(r, "enabled", False)]
     prepared_rules = sorted(enabled, key=lambda r: (getattr(r, "priority", 0), getattr(r, "rule_id", "")))
 

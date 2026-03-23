@@ -436,7 +436,6 @@ def maybe_apply_pick_protection_variants(
     catalog: TradeAssetCatalog,
     config: DealGeneratorConfig,
     budget: DealGeneratorBudget,
-    allow_locked_by_deal_id: Optional[str],
     opponent_repeat_count: int,
     stats: Optional[DealGeneratorStats] = None,
 ) -> Tuple[DealProposal, int, int]:
@@ -547,7 +546,7 @@ def maybe_apply_pick_protection_variants(
 
         # validate (no repair)
         try:
-            tick_ctx.validate_deal(d2, allow_locked_by_deal_id=allow_locked_by_deal_id)
+            tick_ctx.validate_deal(d2)
             used_v += 1
         except TradeError as err:
             used_v += 1

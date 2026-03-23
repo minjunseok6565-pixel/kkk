@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from state_modules.state_constants import DEFAULT_TRADE_RULES, _DEFAULT_TRADE_MARKET, _DEFAULT_TRADE_MEMORY
 
-STATE_SCHEMA_VERSION = "4.3"
+STATE_SCHEMA_VERSION = "4.4"
 ALLOWED_PHASES = {"regular", "preseason", "play_in", "playoffs"}
 NON_REGULAR_PHASES = {"preseason", "play_in", "playoffs"}
 ALLOWED_TOP_LEVEL_KEYS = {
@@ -25,7 +25,6 @@ ALLOWED_TOP_LEVEL_KEYS = {
     "standings_cache",
     "trade_agreements",
     "negotiations",
-    "asset_locks",
     "trade_market",
     "trade_memory",
     "postseason",
@@ -205,7 +204,6 @@ def create_default_game_state() -> Dict[str, Any]:
         },
         "trade_agreements": {},  # deal_id -> committed deal data
         "negotiations": {},  # session_id -> negotiation sessions
-        "asset_locks": {},  # asset_key -> {deal_id, expires_at}
         "trade_market": dict(_DEFAULT_TRADE_MARKET),
         "trade_memory": dict(_DEFAULT_TRADE_MEMORY),
         "_migrations": {
@@ -303,7 +301,6 @@ def validate_game_state(state: dict) -> None:
     standings_cache = _require_container(state, "standings_cache", dict, "dict")
     _require_container(state, "trade_agreements", dict, "dict")
     _require_container(state, "negotiations", dict, "dict")
-    _require_container(state, "asset_locks", dict, "dict")
     trade_market = _require_container(state, "trade_market", dict, "dict")
     _require_container(state, "trade_memory", dict, "dict")
     migrations = _require_container(state, "_migrations", dict, "dict")

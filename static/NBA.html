@@ -67,6 +67,7 @@
           <button type="button" id="standings-menu-btn" class="top-league-tab">순위</button>
           <button type="button" id="college-menu-btn" class="top-league-tab">대학</button>
           <button type="button" id="market-menu-btn" class="top-league-tab">시장</button>
+          <button type="button" id="trade-lab-menu-btn" class="top-league-tab">Trade Lab</button>
           <button type="button" id="medical-menu-btn" class="top-league-tab">메디컬 센터</button>
         </nav>
       </header>
@@ -136,6 +137,60 @@
           <div class="home-panel-head"><h3>2주 일정/리스크 캘린더</h3></div>
           <div id="home-risk-calendar" class="home-risk-calendar"></div>
         </section>
+      </section>
+    </section>
+
+    <section id="trade-lab-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row">
+        <div>
+          <p class="eyebrow">TRADE TEST MACHINE</p>
+          <h2>Trade Lab</h2>
+          <p class="subtitle">양 팀 자산을 구성하고 팀별 관점으로 밸류에이션을 비교하세요.</p>
+        </div>
+        <button id="trade-lab-back-btn" class="btn btn-secondary" type="button">메인으로</button>
+      </div>
+
+      <section class="trade-lab-controls" aria-label="트레이드 랩 팀 선택">
+        <article class="trade-lab-control-card">
+          <h3>좌측 팀</h3>
+          <select id="trade-lab-left-team-select" class="trade-lab-team-select"></select>
+        </article>
+        <article class="trade-lab-control-card">
+          <h3>우측 팀</h3>
+          <select id="trade-lab-right-team-select" class="trade-lab-team-select"></select>
+        </article>
+      </section>
+
+      <section class="trade-lab-assets-grid" aria-label="자산 선택">
+        <article class="trade-lab-team-panel">
+          <h3 id="trade-lab-left-title">좌측 팀 자산</h3>
+          <div class="trade-lab-subhead">선수</div>
+          <ul id="trade-lab-left-players" class="trade-lab-asset-list"></ul>
+          <div class="trade-lab-subhead">1라운드 픽</div>
+          <ul id="trade-lab-left-picks" class="trade-lab-asset-list"></ul>
+        </article>
+        <article class="trade-lab-team-panel">
+          <h3 id="trade-lab-right-title">우측 팀 자산</h3>
+          <div class="trade-lab-subhead">선수</div>
+          <ul id="trade-lab-right-players" class="trade-lab-asset-list"></ul>
+          <div class="trade-lab-subhead">1라운드 픽</div>
+          <ul id="trade-lab-right-picks" class="trade-lab-asset-list"></ul>
+        </article>
+      </section>
+
+      <section class="trade-lab-package-grid" aria-label="트레이드 패키지">
+        <article class="trade-lab-team-panel">
+          <h3>좌측 팀 Outgoing 패키지</h3>
+          <ul id="trade-lab-left-package" class="trade-lab-package-list"></ul>
+          <button id="trade-lab-evaluate-left-btn" class="btn btn-primary" type="button" disabled>좌측 팀 관점 밸류에이션</button>
+          <div id="trade-lab-left-result" class="trade-lab-result"></div>
+        </article>
+        <article class="trade-lab-team-panel">
+          <h3>우측 팀 Outgoing 패키지</h3>
+          <ul id="trade-lab-right-package" class="trade-lab-package-list"></ul>
+          <button id="trade-lab-evaluate-right-btn" class="btn btn-primary" type="button" disabled>우측 팀 관점 밸류에이션</button>
+          <div id="trade-lab-right-result" class="trade-lab-result"></div>
+        </article>
       </section>
     </section>
 
