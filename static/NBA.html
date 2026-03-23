@@ -134,6 +134,25 @@
           </article>
         </section>
 
+        <section class="home-panel home-attention-preview-panel" aria-label="확인 필요 미리보기">
+          <div class="home-panel-head">
+            <h3>확인 필요</h3>
+            <button type="button" id="home-attention-open-all-btn" class="btn btn-secondary">전체 보기</button>
+          </div>
+          <ul id="home-attention-preview" class="home-activity-feed">
+            <li class="home-empty">확인이 필요한 이슈가 없습니다.</li>
+          </ul>
+        </section>
+
+        <section id="home-attention-panel" class="home-panel home-attention-panel hidden" aria-label="확인 필요 전체 이슈" aria-hidden="true">
+          <div class="home-panel-head">
+            <h3>확인 필요 전체 이슈</h3>
+          </div>
+          <ul id="home-attention-list" class="home-activity-feed">
+            <li class="home-empty">아직 이슈가 없습니다.</li>
+          </ul>
+        </section>
+
         <section class="home-panel" aria-label="2주 리스크 캘린더">
           <div class="home-panel-head"><h3>2주 일정/리스크 캘린더</h3></div>
           <div id="home-risk-calendar" class="home-risk-calendar"></div>

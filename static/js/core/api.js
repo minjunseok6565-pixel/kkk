@@ -256,6 +256,21 @@ async function fetchStateSummary({ signal = undefined } = {}) {
   return fetchJson("/api/state/summary", { signal });
 }
 
+async function fetchHomeAttention(
+  teamId,
+  { limit = 50, offset = 0 } = {},
+  { signal = undefined } = {},
+) {
+  const normalizedTeamId = String(teamId || "").trim().toUpperCase();
+  if (!normalizedTeamId) throw new Error("team_id가 필요합니다.");
+
+  const params = new URLSearchParams({
+    limit: String(Number.isFinite(Number(limit)) ? Number(limit) : 50),
+    offset: String(Number.isFinite(Number(offset)) ? Number(offset) : 0),
+  });
+  return fetchJson(`/api/home/attention/${encodeURIComponent(normalizedTeamId)}?${params.toString()}`, { signal });
+}
+
 async function fetchTradeLabTeamAssets({ teamId, signal = undefined } = {}) {
   const normalizedTeamId = String(teamId || "").trim().toUpperCase();
   if (!normalizedTeamId) throw new Error("team_id가 필요합니다.");
@@ -643,6 +658,7 @@ export {
   commitTradeNegotiationSession,
   submitCommittedTradeDeal,
   fetchStateSummary,
+  fetchHomeAttention,
   fetchTradeLabTeamAssets,
   evaluateTradeDealForTeam,
   fetchCachedJson,

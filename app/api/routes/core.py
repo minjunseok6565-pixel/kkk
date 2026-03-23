@@ -44,6 +44,21 @@ TEAM_FULL_NAMES: Dict[str, str] = {
     "UTA": "Utah Jazz", "WAS": "Washington Wizards",
 }
 
+ATTENTION_DISSATISFACTION_TEXTS: Dict[str, str] = {
+    "MINUTES": "{player} (이)가 출전 시간에 대해 불만을 제기했습니다.",
+    "ROLE": "{player} (이)가 자신의 코트 위 역할에 대해 불만을 제기했습니다.",
+    "CONTRACT": "{player} (이)가 계약 관련 불만을 표출했습니다.",
+    "HEALTH": "{player} (이)가 몸 상태 관련 불만을 제기했습니다.",
+    "TEAM": "{player} (이)가 팀 전력에 관한 불만을 제기했습니다.",
+    "CHEMISTRY": "{player} (이)가 라커룸 상황에 대한 불만을 제기했습니다.",
+    "TRADE": "{player} (이)가 자신을 트레이드 해줄 것을 요청했습니다.",
+    "LOCKER_ROOM_MEETING": "선수단이 현재 팀 상황과 관련하여 정식으로 팀 미팅을 가질 것을 요구했습니다.",
+    "BROKEN_PROMISE": "{player} (이)가 약속 사항이 지켜지지 않았다고 느낍니다.",
+    "TRADE_TARGETED_OFFER_PUBLIC": "{player} (이)가 자신을 트레이드 하려고 했다는 사실에 서운함을 느낍니다.",
+    "TRADE_TARGETED_OFFER_LEAKED": "{player} (이)가 자신을 몰래 트레이드하려고 했다는 사실에 분노합니다.",
+    "SAME_POS_RECRUIT_ATTEMPT": "{player} (이)가 자신의 입지가 위협받고 있다고 느낍니다.",
+}
+
 
 @router.post("/api/telemetry/client")
 async def api_client_telemetry(payload: Dict[str, Any]):
@@ -741,6 +756,239 @@ def _parse_iso_date(value: Any, *, field: str) -> date:
         return date.fromisoformat(raw)
     except Exception:
         raise HTTPException(status_code=400, detail=f"Invalid {field}: expected YYYY-MM-DD")
+
+
+def _parse_iso_date_or_none(value: Any) -> Optional[date]:
+    raw = str(value or "").strip()[:10]
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except Exception:
+        return None
+
+
+def _normalize_body_part_label(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "unknown"
+    return raw.replace("_", " ").lower()
+
+
+def _format_injury_duration_label(*, current_date_iso: str, out_until_iso: Any) -> str:
+    current_date_obj = _parse_iso_date_or_none(current_date_iso)
+    out_until_obj = _parse_iso_date_or_none(out_until_iso)
+    if current_date_obj is None or out_until_obj is None:
+        return "부상"
+
+    delta_days = (out_until_obj - current_date_obj).days
+    if delta_days <= 0:
+        return "부상"
+    if delta_days <= 7:
+        return f"{delta_days}일"
+
+    if delta_days >= 50:
+        months = max(1, int(math.ceil(delta_days / 30.0)))
+        return f"{max(1, months - 1)}~{months}개월"
+
+    weeks = max(2, int(math.ceil(delta_days / 7.0)))
+    return f"{max(1, weeks - 1)}~{weeks}주"
+
+
+def _attention_occurred_date(value: Any, *, fallback_iso: str) -> str:
+    parsed = _parse_iso_date_or_none(value)
+    if parsed is not None:
+        return parsed.isoformat()
+    fb = _parse_iso_date_or_none(fallback_iso)
+    if fb is not None:
+        return fb.isoformat()
+    return str(fallback_iso or "")[:10]
+
+
+def _build_attention_trade_items(*, team_id: str, fallback_date_iso: str) -> List[Dict[str, Any]]:
+    sessions = state.negotiations_get() or {}
+    team_upper = str(team_id or "").upper()
+    out: List[Dict[str, Any]] = []
+
+    for sid, raw in (sessions.items() if isinstance(sessions, dict) else []):
+        session = raw if isinstance(raw, dict) else {}
+        if str(session.get("user_team_id") or "").upper() != team_upper:
+            continue
+
+        offer_payload = session.get("last_offer")
+        if not isinstance(offer_payload, dict) or not offer_payload:
+            continue
+
+        status = str(session.get("status") or "ACTIVE").upper()
+        phase = str(session.get("phase") or "INIT").upper()
+        auto_end = session.get("auto_end") if isinstance(session.get("auto_end"), dict) else {}
+        is_expired = str(auto_end.get("status") or "").upper() == "ENDED"
+        if status != "ACTIVE" or phase in {"REJECTED", "ACCEPTED"} or is_expired:
+            continue
+
+        session_id = str(session.get("session_id") or sid or "")
+        other_team_id = str(session.get("other_team_id") or "").upper()
+        team_name = TEAM_FULL_NAMES.get(other_team_id, other_team_id or "상대팀")
+        occurred_at = _attention_occurred_date(
+            session.get("updated_at") or session.get("created_at"),
+            fallback_iso=fallback_date_iso,
+        )
+        out.append(
+            {
+                "issue_id": f"trade:{session_id}:{occurred_at}",
+                "type": "TRADE_OFFER",
+                "occurred_at": occurred_at,
+                "title": f"{team_name} (으)로부터 온 트레이드 제안",
+                "detail": None,
+                "meta": {
+                    "session_id": session_id,
+                    "other_team_id": other_team_id,
+                },
+            }
+        )
+
+    return out
+
+
+def _build_attention_injury_items(*, team_id: str, season_year: int, as_of: date) -> List[Dict[str, Any]]:
+    overview = _medical_team_overview_payload(
+        team_id=team_id,
+        season_year=int(season_year or 0),
+        as_of=as_of,
+        history_days=365,
+        top_n=50,
+    )
+    events = (((overview.get("watchlists") or {}).get("recent_injury_events")) or []) if isinstance(overview, dict) else []
+    current_date_iso = as_of.isoformat()
+    out: List[Dict[str, Any]] = []
+
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        player_id = str(event.get("player_id") or "")
+        player_name = str(event.get("name") or "Unknown")
+        occurred_at = _attention_occurred_date(event.get("date"), fallback_iso=current_date_iso)
+        body_part = _normalize_body_part_label(event.get("body_part"))
+        out_until_date = str(event.get("out_until_date") or "")[:10] or None
+        duration = _format_injury_duration_label(
+            current_date_iso=current_date_iso,
+            out_until_iso=out_until_date,
+        )
+        out.append(
+            {
+                "issue_id": f"injury:{player_id}:{occurred_at}:{out_until_date or 'na'}",
+                "type": "INJURY",
+                "occurred_at": occurred_at,
+                "title": f"{player_name}, {body_part}에 {duration} 부상",
+                "detail": None,
+                "meta": {
+                    "player_id": player_id,
+                    "body_part": body_part,
+                    "out_until_date": out_until_date,
+                },
+            }
+        )
+    return out
+
+
+def _normalize_attention_dissatisfaction_type(raw_type: Any) -> Optional[str]:
+    text = str(raw_type or "").strip().upper()
+    if not text:
+        return None
+    if text in ATTENTION_DISSATISFACTION_TEXTS:
+        return text
+
+    alias_pairs = (
+        ("TRADE_TARGETED_OFFER_LEAKED", "TRADE_TARGETED_OFFER_LEAKED"),
+        ("TRADE_TARGETED_OFFER_PUBLIC", "TRADE_TARGETED_OFFER_PUBLIC"),
+        ("LOCKER_ROOM_MEETING", "LOCKER_ROOM_MEETING"),
+        ("BROKEN_PROMISE", "BROKEN_PROMISE"),
+        ("SAME_POS_RECRUIT_ATTEMPT", "SAME_POS_RECRUIT_ATTEMPT"),
+    )
+    for needle, normalized in alias_pairs:
+        if needle in text:
+            return normalized
+
+    axis_aliases = {
+        "MINUTES": "MINUTES",
+        "ROLE": "ROLE",
+        "CONTRACT": "CONTRACT",
+        "HEALTH": "HEALTH",
+        "TEAM": "TEAM",
+        "CHEMISTRY": "CHEMISTRY",
+    }
+    for needle, normalized in axis_aliases.items():
+        if needle in text:
+            return normalized
+
+    if "TRADE" in text:
+        return "TRADE"
+    return None
+
+
+def _build_attention_dissatisfaction_text(*, normalized_type: str, player_name: str) -> str:
+    template = ATTENTION_DISSATISFACTION_TEXTS.get(normalized_type)
+    if not template:
+        return f"{player_name or '선수'} 관련 불만 이벤트가 발생했습니다."
+    return template.format(player=player_name or "선수")
+
+
+def _build_attention_dissatisfaction_items(*, team_id: str, season_year: int, fallback_date_iso: str) -> List[Dict[str, Any]]:
+    tid = str(team_id or "").upper()
+    if not tid:
+        return []
+    db_path = state.get_db_path()
+    out: List[Dict[str, Any]] = []
+
+    with LeagueRepo(db_path) as repo:
+        repo.init_db()
+        from agency import repo as agency_repo
+
+        roster_rows = repo.get_team_roster(tid) or []
+        name_by_pid = {
+            str(r.get("player_id") or ""): str(r.get("name") or "")
+            for r in roster_rows
+            if isinstance(r, dict)
+        }
+        with repo.transaction() as cur:
+            events = agency_repo.list_agency_events(
+                cur,
+                team_id=tid,
+                season_year=int(season_year) if int(season_year or 0) > 0 else None,
+                limit=200,
+                offset=0,
+            )
+
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        raw_type = str(event.get("event_type") or "")
+        normalized_type = _normalize_attention_dissatisfaction_type(raw_type)
+        if not normalized_type:
+            continue
+        event_id = str(event.get("event_id") or "")
+        player_id = str(event.get("player_id") or "")
+        player_name = name_by_pid.get(player_id) or str((event.get("payload") or {}).get("player_name") or "") or "선수"
+        occurred_at = _attention_occurred_date(event.get("date"), fallback_iso=fallback_date_iso)
+        out.append(
+            {
+                "issue_id": f"agency:{event_id or f'{normalized_type}:{player_id}:{occurred_at}'}",
+                "type": "DISSATISFACTION",
+                "occurred_at": occurred_at,
+                "title": _build_attention_dissatisfaction_text(
+                    normalized_type=normalized_type,
+                    player_name=player_name,
+                ),
+                "detail": None,
+                "meta": {
+                    "event_id": event_id,
+                    "event_type": normalized_type,
+                    "source_event_type": raw_type,
+                    "player_id": player_id,
+                },
+            }
+        )
+    return out
 
 
 def _build_risk_profile(
@@ -2345,6 +2593,63 @@ async def api_home_dashboard(team_id: str):
         "activity_feed": feed_items,
         "risk_calendar": risk_calendar.get("days") if isinstance(risk_calendar, dict) else [],
         "medical_alerts": medical_alerts,
+    }
+
+
+@router.get("/api/home/attention/{team_id}")
+async def api_home_attention(
+    team_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    include_read: bool = False,
+):
+    tid = str(normalize_team_id(team_id, strict=True))
+    q_limit = max(1, min(int(limit or 50), 200))
+    q_offset = max(0, int(offset or 0))
+
+    league_ctx = state.get_league_context_snapshot() or {}
+    season_year = int(league_ctx.get("season_year") or 0)
+    current_date_iso = state.get_current_date_as_date().isoformat()
+
+    trade_items = _build_attention_trade_items(team_id=tid, fallback_date_iso=current_date_iso)
+    injury_items = _build_attention_injury_items(
+        team_id=tid,
+        season_year=season_year,
+        as_of=date.fromisoformat(current_date_iso),
+    )
+    dissatisfaction_items = _build_attention_dissatisfaction_items(
+        team_id=tid,
+        season_year=season_year,
+        fallback_date_iso=current_date_iso,
+    )
+
+    merged = [*trade_items, *injury_items, *dissatisfaction_items]
+    merged.sort(
+        key=lambda item: (
+            str(item.get("occurred_at") or ""),
+            str(item.get("issue_id") or ""),
+        ),
+        reverse=True,
+    )
+
+    deduped: List[Dict[str, Any]] = []
+    seen_ids = set()
+    for item in merged:
+        issue_id = str(item.get("issue_id") or "")
+        if not issue_id or issue_id in seen_ids:
+            continue
+        seen_ids.add(issue_id)
+        deduped.append(item)
+
+    total = len(deduped)
+    items = deduped[q_offset:q_offset + q_limit]
+    return {
+        "ok": True,
+        "team_id": tid,
+        "current_date": current_date_iso,
+        "total": total,
+        "items": items,
+        "include_read": bool(include_read),
     }
 
 

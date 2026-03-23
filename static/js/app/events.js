@@ -6,6 +6,8 @@ import {
   showMainScreen,
   createNewGame,
   continueGame,
+  toggleHomeAttentionPanel,
+  closeHomeAttentionPanel,
   progressNextGameFromHome,
   autoAdvanceToNextGameDayFromHome,
   progressTenGamesFromHome,
@@ -88,6 +90,7 @@ function bindEvents() {
   els.nextGamePlayBtn.addEventListener("click", () => progressNextGameFromHome().catch((e) => alert(e.message)));
   els.nextGameQuickBtn.addEventListener("click", () => autoAdvanceToNextGameDayFromHome().catch((e) => alert(e.message)));
   els.nextGameDev10Btn?.addEventListener("click", () => progressTenGamesFromHome().catch((e) => alert(e.message)));
+  els.homeAttentionOpenAllBtn?.addEventListener("click", () => toggleHomeAttentionPanel());
   // DEV 버튼은 오프시즌 진입 조건(챔피언 확정) 보정 용도이며, 실제 진입은 공통 게이트를 사용한다.
   els.nextGameDevOffseasonBtn?.addEventListener("click", () => startOffseasonDevRunFromHome().catch((e) => alert(e.message)));
   els.offseasonDevChampionBackBtn?.addEventListener("click", () => showMainScreen());
@@ -234,11 +237,25 @@ function bindEvents() {
     if (event.key === "Escape" && els.collegeBigboardDetailScreen?.classList.contains("active")) {
       closeCollegeBigboardDetailScreen();
     }
+    if (event.key === "Escape" && state.homeAttentionPanelOpen) {
+      closeHomeAttentionPanel();
+    }
     if (event.key === "Escape" && !els.collegeScoutPlayerModal?.classList.contains("hidden")) {
       closeScoutPlayerModal();
     }
     if (event.key === "Escape" && !els.collegeScoutReportsModal?.classList.contains("hidden")) {
       closeScoutReportsModal();
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!state.homeAttentionPanelOpen) return;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (!target) return;
+    const insidePanel = target.closest("#home-attention-panel");
+    const openToggleBtn = target.closest("#home-attention-open-all-btn");
+    if (!insidePanel && !openToggleBtn) {
+      closeHomeAttentionPanel();
     }
   });
   els.collegeScoutCards?.addEventListener("click", async (event) => {

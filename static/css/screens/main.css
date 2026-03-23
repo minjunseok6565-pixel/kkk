@@ -266,6 +266,66 @@
   min-width: 42px;
 }
 
+.home-attention-preview-panel .home-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.home-attention-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: .74rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  border: 1px solid transparent;
+}
+
+.home-attention-type-trade {
+  background: rgba(30, 64, 175, 0.08);
+  color: #1e3a8a;
+  border-color: rgba(30, 64, 175, 0.26);
+}
+
+.home-attention-type-injury {
+  background: rgba(217, 119, 6, 0.1);
+  color: #92400e;
+  border-color: rgba(217, 119, 6, 0.3);
+}
+
+.home-attention-type-dissatisfaction {
+  background: rgba(190, 24, 93, 0.1);
+  color: #9d174d;
+  border-color: rgba(190, 24, 93, 0.28);
+}
+
+.home-attention-type-default {
+  background: rgba(100, 116, 139, 0.14);
+  color: #334155;
+  border-color: rgba(100, 116, 139, 0.32);
+}
+
+.home-attention-read-btn {
+  border-radius: 8px;
+  min-width: 52px;
+}
+
+.home-attention-panel {
+  position: fixed;
+  inset: 84px 24px 24px;
+  max-width: 920px;
+  margin-left: auto;
+  margin-right: auto;
+  z-index: 40;
+  overflow: auto;
+  box-shadow: 0 30px 60px rgba(15, 23, 42, 0.25);
+}
+
 .home-risk-calendar {
   display: grid;
   grid-template-columns: repeat(7, minmax(80px, 1fr));
