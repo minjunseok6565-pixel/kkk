@@ -1,12 +1,19 @@
 import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen, showOffseasonEntryScreen } from "../../app/router.js";
-import { fetchJson, invalidateCachedValuesByPrefix, setLoading, showConfirmModal } from "../../core/api.js";
+import { fetchHomeAttention, fetchJson, invalidateCachedValuesByPrefix, setLoading, showConfirmModal } from "../../core/api.js";
 import { CACHE_EVENT_TYPES, getPrefetchPlanAfterGame, invalidateByEvent, runPrefetchPlan } from "../../app/cachePolicy.js";
 import { formatIsoDate, formatWinPct } from "../../core/format.js";
 import { num } from "../../core/guards.js";
 import { TEAM_FULL_NAMES, applyTeamLogo, getTeamBranding, renderTeamLogoMark, getScheduleVenueText } from "../../core/constants/teams.js";
-import { resetNextGameCard, renderHomePriorities, renderHomeActivityFeed, renderHomeRiskCalendar } from "./homeWidgets.js";
+import {
+  resetNextGameCard,
+  renderHomePriorities,
+  renderHomeActivityFeed,
+  renderHomeRiskCalendar,
+  renderHomeAttentionPreview,
+  renderHomeAttentionFullList,
+} from "./homeWidgets.js";
 import { showGameResultScreenByGameId } from "../gameResult/gameResultScreen.js";
 
 function showTeamSelection() { activateScreen(els.teamScreen); }
@@ -24,6 +31,7 @@ function showMainScreen() {
   activateScreen(els.mainScreen);
   const teamName = state.selectedTeamName || state.selectedTeamId || "선택 팀";
   els.mainTeamTitle.textContent = teamName;
+  syncHomeAttentionPanelVisibility();
   void refreshMainDashboard();
 }
 
@@ -161,6 +169,49 @@ async function fetchInGameDate() {
   return formatIsoDate(currentDate);
 }
 
+function syncHomeAttentionPanelVisibility() {
+  if (!els.homeAttentionPanel) return;
+  const open = Boolean(state.homeAttentionPanelOpen);
+  els.homeAttentionPanel.classList.toggle("hidden", !open);
+  els.homeAttentionPanel.setAttribute("aria-hidden", open ? "false" : "true");
+  if (els.homeAttentionOpenAllBtn) {
+    els.homeAttentionOpenAllBtn.textContent = open ? "닫기" : "전체 보기";
+  }
+}
+
+function toggleHomeAttentionPanel() {
+  state.homeAttentionPanelOpen = !Boolean(state.homeAttentionPanelOpen);
+  syncHomeAttentionPanelVisibility();
+  if (state.homeAttentionPanelOpen) {
+    renderHomeAttentionFullList(state.homeAttentionItems || [], state.selectedTeamId);
+  }
+}
+
+function closeHomeAttentionPanel() {
+  if (!state.homeAttentionPanelOpen) return;
+  state.homeAttentionPanelOpen = false;
+  syncHomeAttentionPanelVisibility();
+}
+
+async function refreshHomeAttentionItems() {
+  if (!state.selectedTeamId) return;
+  try {
+    const payload = await fetchHomeAttention(state.selectedTeamId, { limit: 50, offset: 0 });
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    state.homeAttentionItems = items;
+    state.homeAttentionLoaded = true;
+  } catch (error) {
+    console.warn("[home-attention] load failed", error);
+    state.homeAttentionItems = [];
+    state.homeAttentionLoaded = false;
+  }
+
+  renderHomeAttentionPreview(state.homeAttentionItems, state.selectedTeamId);
+  if (state.homeAttentionPanelOpen) {
+    renderHomeAttentionFullList(state.homeAttentionItems, state.selectedTeamId);
+  }
+}
+
 async function refreshMainDashboard() {
   if (!state.selectedTeamId) return;
 
@@ -173,6 +224,7 @@ async function refreshMainDashboard() {
     const currentDate = formatIsoDate(dashboard?.current_date);
     state.currentDate = currentDate;
     els.mainCurrentDate.textContent = currentDate;
+    await refreshHomeAttentionItems();
 
     const nextGame = dashboard?.next_game?.game;
 
@@ -218,6 +270,12 @@ async function refreshMainDashboard() {
     resetNextGameCard();
     els.mainCurrentDate.textContent = "YYYY-MM-DD";
     els.nextGameDatetime.textContent = `다음 경기 정보를 불러오지 못했습니다: ${e.message}`;
+    state.homeAttentionItems = [];
+    state.homeAttentionLoaded = false;
+    renderHomeAttentionPreview([], state.selectedTeamId);
+    if (state.homeAttentionPanelOpen) {
+      renderHomeAttentionFullList([], state.selectedTeamId);
+    }
   }
 }
 
@@ -600,6 +658,8 @@ export {
   showMainScreen,
   randomTipoffTime,
   fetchInGameDate,
+  toggleHomeAttentionPanel,
+  closeHomeAttentionPanel,
   refreshMainDashboard,
   progressNextGameFromHome,
   autoAdvanceToNextGameDayFromHome,
