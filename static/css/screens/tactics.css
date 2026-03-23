@@ -684,55 +684,91 @@
 #preset-defense-modal .modal-body {
   margin-top: 8px;
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
-#preset-defense-modal .preset-defense-section {
+#preset-defense-modal .preset-defense-action-list {
+  display: grid;
+  gap: 10px;
+}
+
+#preset-defense-modal .preset-defense-action-item {
   border: 1px solid rgba(148, 163, 184, 0.32);
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fff;
-  padding: 10px;
+  overflow: hidden;
   display: grid;
-  gap: 10px;
 }
 
-#preset-defense-modal .preset-defense-section h3,
-#preset-defense-modal .preset-defense-policy-row h4 {
+#preset-defense-modal .preset-defense-action-head {
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+#preset-defense-modal .preset-defense-action-toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
   margin: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
 }
 
-#preset-defense-modal .preset-defense-budget-grid,
-#preset-defense-modal .preset-defense-policy-grid {
-  display: grid;
-  gap: 10px;
+#preset-defense-modal .preset-defense-action-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #0f172a;
 }
 
-#preset-defense-modal .preset-defense-budget-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+#preset-defense-modal .preset-defense-action-meta {
+  font-size: 0.75rem;
+  color: #64748b;
+  font-weight: 700;
 }
 
-#preset-defense-modal .preset-defense-budget-row {
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 10px;
-  background: #fff;
-  padding: 8px;
+#preset-defense-modal .preset-defense-budget-control {
   display: grid;
   gap: 6px;
   font-size: 0.82rem;
   color: #334155;
 }
 
-#preset-defense-modal .preset-defense-budget-row input[type="range"] {
+#preset-defense-modal .preset-defense-budget-control input[type="range"] {
   width: 100%;
 }
 
-#preset-defense-modal .preset-defense-policy-row {
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 10px;
-  background: #fff;
-  padding: 8px;
+#preset-defense-modal .preset-defense-action-detail {
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 10px 12px;
+  display: grid;
+  gap: 10px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(241, 245, 249, 0.9));
+}
+
+#preset-defense-modal .preset-defense-action-item:not(.is-expanded) .preset-defense-action-detail {
+  display: none;
+}
+
+#preset-defense-modal .preset-defense-action-item.is-expanded .preset-defense-action-head {
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.7), rgba(248, 250, 252, 0.3));
+}
+
+#preset-defense-modal .preset-defense-policy-block {
   display: grid;
   gap: 8px;
+}
+
+#preset-defense-modal .preset-defense-policy-title {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #334155;
+  font-weight: 800;
 }
 
 #preset-defense-modal .preset-defense-policy-choices,
@@ -758,6 +794,22 @@
   background: #dbeafe;
   color: #1d4ed8;
   border-color: rgba(59, 130, 246, 0.45);
+}
+
+#preset-defense-modal .preset-defense-pressure-section {
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.92), rgba(241, 245, 249, 0.95));
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+#preset-defense-modal .preset-defense-pressure-title {
+  margin: 0;
+  font-size: 0.84rem;
+  color: #1e293b;
+  font-weight: 800;
 }
 
 #preset-defense-modal .preset-defense-pressure-row {
@@ -789,8 +841,13 @@
 
   #preset-offense-modal .preset-offense-summary-grid,
   #preset-offense-modal .preset-offense-field-grid,
-  #preset-offense-modal .preset-offense-grid,
-  #preset-defense-modal .preset-defense-budget-grid {
+  #preset-offense-modal .preset-offense-grid {
     grid-template-columns: 1fr;
+  }
+
+  #preset-defense-modal .preset-defense-policy-choices,
+  #preset-defense-modal .preset-defense-policy-level {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
