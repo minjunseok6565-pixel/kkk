@@ -206,238 +206,35 @@ def _clamp01(x: Any) -> float:
     return max(0.0, min(1.0, _as_float(x, 0.0)))
 
 
-def _sigmoid(x: float) -> float:
-    # Stable-ish sigmoid for soft percentile fallback.
-    xf = max(-30.0, min(30.0, float(x)))
-    return 1.0 / (1.0 + math.exp(-xf))
+def _resolve_ovr(focus: Any) -> Optional[float]:
+    raw = getattr(focus, "ovr", None)
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except Exception:
+        return None
 
 
-def _soft_membership(score: float, lo: float, hi: float, band: float) -> float:
-    """Soft box membership in [lo, hi] with smooth boundaries.
-
-    score: normalized percentile-like score in [0,1]
-    lo/hi: interval bounds (inclusive, lo <= hi)
-    band: smoothing width near each edge
-    """
-    s = _clamp01(score)
-    l = _clamp01(lo)
-    h = _clamp01(hi)
-    if h < l:
-        l, h = h, l
-
-    b = max(1e-6, float(band))
-    # left ramp up
-    if s <= (l - b):
-        left = 0.0
-    elif s >= (l + b):
-        left = 1.0
-    else:
-        left = _smoothstep01((s - (l - b)) / (2.0 * b))
-
-    # right ramp down
-    if s <= (h - b):
-        right = 1.0
-    elif s >= (h + b):
-        right = 0.0
-    else:
-        right = 1.0 - _smoothstep01((s - (h - b)) / (2.0 * b))
-
-    return _clamp01(min(left, right))
-
-
-def _soft_tier_memberships(score: float, *, band: float) -> Dict[str, float]:
-    """Return soft memberships for the 8-tier model on percentile score [0,1]."""
-    # Intervals follow docs/target_tier_soft_threshold_plan.md
-    intervals: Tuple[Tuple[str, float, float], ...] = (
-        ("MVP", 0.99, 1.00),
-        ("ALL_NBA", 0.95, 0.99),
-        ("ALL_STAR", 0.85, 0.95),
-        ("HIGH_STARTER", 0.65, 0.85),
-        ("STARTER", 0.45, 0.65),
-        ("HIGH_ROTATION", 0.28, 0.45),
-        ("ROTATION", 0.10, 0.28),
-        ("GARBAGE", 0.00, 0.10),
-    )
-    out: Dict[str, float] = {}
-    for name, lo, hi in intervals:
-        out[name] = _soft_membership(score, lo, hi, band)
-    return out
-
-
-def _resolve_skill_score_percentile_base(focus: Any, config: Optional[DealGeneratorConfig]) -> float:
-    """Resolve current-step percentile-like score in [0,1].
-
-    Priority:
-    1) Explicit league/distribution percentile fields (preferred)
-    2) Sigmoid fallback from basketball_total (or market_total fallback)
-    """
-    explicit_keys = (
-        "basketball_percentile",
-        "bball_percentile",
-        "skill_percentile",
-        "market_percentile",
-        "tier_percentile",
-        "league_percentile",
-        "basketball_percentile_rank",
-    )
-    for k in explicit_keys:
-        raw = getattr(focus, k, None)
-        if raw is None:
-            continue
-        v = _as_float(raw, 0.0)
-        if v > 1.0:
-            v = v / 100.0
-        return _clamp01(v)
-
-    basketball_total = getattr(focus, "basketball_total", None)
-    if basketball_total is None:
-        basketball_total = getattr(focus, "market_total", 0.0)
-    b = _as_float(basketball_total, 0.0)
-
-    # Soft calibration knobs (NOT tier thresholds):
-    # map raw value to percentile-like score smoothly.
-    center = _as_float(getattr(config, "target_tier_skill_center", 58.0) if config is not None else 58.0, 58.0)
-    scale = abs(_as_float(getattr(config, "target_tier_skill_scale", 12.0) if config is not None else 12.0, 12.0))
-    scale = max(scale, 1e-6)
-    return _clamp01(_sigmoid((b - center) / scale))
-
-
-def _resolve_skill_score_percentile_ema(
-    focus: Any,
-    *,
-    q_now: float,
-    config: Optional[DealGeneratorConfig],
-) -> float:
-    """Apply EMA smoothing on percentile score when previous EMA is available.
-
-    prev EMA candidates (0..1 or 0..100):
-    - q_b_ema, skill_percentile_ema, tier_percentile_ema
-    """
-    prev = None
-    for key in ("q_b_ema", "skill_percentile_ema", "tier_percentile_ema"):
-        raw = getattr(focus, key, None)
-        if raw is None:
-            continue
-        v = _as_float(raw, 0.0)
-        if v > 1.0:
-            v = v / 100.0
-        prev = _clamp01(v)
-        break
-
-    alpha = _as_float(getattr(config, "target_tier_ema_alpha", 0.35) if config is not None else 0.35, 0.35)
-    alpha = _clamp01(alpha)
-
-    if prev is None:
-        return _clamp01(q_now)
-    return _clamp01(alpha * _clamp01(q_now) + (1.0 - alpha) * prev)
-
-
-def _apply_tier_hysteresis(
-    memberships: Dict[str, float],
-    *,
-    prev_tier: Optional[str],
-    score: float,
-    h_up: float,
-    h_down: float,
-) -> Dict[str, float]:
-    """Apply asymmetric hysteresis by biasing previous tier membership.
-
-    - Promote only if score clears upper edge by h_up
-    - Demote only if score goes below lower edge by h_down
-    """
-    if not prev_tier:
-        return memberships
-
-    prev = str(prev_tier).upper().strip()
-    order = [
-        "MVP",
-        "ALL_NBA",
-        "ALL_STAR",
-        "HIGH_STARTER",
-        "STARTER",
-        "HIGH_ROTATION",
-        "ROTATION",
-        "GARBAGE",
-    ]
-    if prev not in memberships or prev not in order:
-        return memberships
-
-    bounds = {
-        "MVP": (0.99, 1.00),
-        "ALL_NBA": (0.95, 0.99),
-        "ALL_STAR": (0.85, 0.95),
-        "HIGH_STARTER": (0.65, 0.85),
-        "STARTER": (0.45, 0.65),
-        "HIGH_ROTATION": (0.28, 0.45),
-        "ROTATION": (0.10, 0.28),
-        "GARBAGE": (0.00, 0.10),
-    }
-    lo, hi = bounds[prev]
-    s = _clamp01(score)
-    can_promote = s >= (hi + max(0.0, h_up))
-    can_demote = s <= (lo - max(0.0, h_down))
-
-    out = dict(memberships)
-    # keep previous tier sticky unless promotion/demotion condition is satisfied
-    if not can_promote and not can_demote:
-        out[prev] = max(out.get(prev, 0.0), 1.05)
-    return out
-
-
-def _resolve_contract_gap_cap_share(focus: Any) -> float:
-    """Resolve contract gap as cap share proxy used for contract tag.
-
-    Priority:
-    1) contract_gap_cap_share (already normalized)
-    2) contract_delta_cap_share (alias)
-    3) 0.0 fallback when unavailable
-    """
-    for key in ("contract_gap_cap_share", "contract_delta_cap_share"):
-        raw = getattr(focus, key, None)
-        if raw is None:
-            continue
-        return _as_float(raw, 0.0)
-    return 0.0
-
-
-def _classify_contract_value_tag(
-    gap_cap_share: float,
-    *,
-    config: Optional[DealGeneratorConfig],
-) -> Tuple[str, str, float]:
-    """Classify contract into overpay/fair/value with soft confidence.
-
-    Returns: (contract_tag, contract_confidence, contract_score)
-    - contract_score = tanh(gap / soft_c)
-    - fair band around zero defaults to ±0.015
-    - value/overpay hard side boundary defaults to ±0.04
-    """
-    f = abs(_as_float(getattr(config, "target_tier_contract_fair_band", 0.015) if config is not None else 0.015, 0.015))
-    v = abs(_as_float(getattr(config, "target_tier_contract_value_boundary", 0.04) if config is not None else 0.04, 0.04))
-    if v < f:
-        v = f
-    soft_c = abs(_as_float(getattr(config, "target_tier_contract_softness", 0.05) if config is not None else 0.05, 0.05))
-    soft_c = max(1e-6, soft_c)
-
-    x = _as_float(gap_cap_share, 0.0)
-    score = math.tanh(x / soft_c)
-
-    if x >= v:
-        tag = "value"
-    elif x <= -v:
-        tag = "overpay"
-    else:
-        tag = "fair"
-
-    ax = abs(x)
-    if ax >= v:
-        confidence = "high"
-    elif ax >= f:
-        confidence = "medium"
-    else:
-        confidence = "low"
-
-    return tag, confidence, float(score)
+def _tier_from_ovr_hardcut(ovr: Optional[float]) -> str:
+    if ovr is None:
+        return "GARBAGE"
+    v = float(ovr)
+    if v >= 97.0:
+        return "MVP"
+    if v >= 93.0:
+        return "ALL_NBA"
+    if v >= 90.0:
+        return "ALL_STAR"
+    if v >= 85.0:
+        return "HIGH_STARTER"
+    if v >= 80.0:
+        return "STARTER"
+    if v >= 77.0:
+        return "HIGH_ROTATION"
+    if v >= 75.0:
+        return "ROTATION"
+    return "GARBAGE"
 
 
 def classify_target_profile(
@@ -447,74 +244,23 @@ def classify_target_profile(
     match_tag: str = "",
     config: Optional[DealGeneratorConfig] = None,
 ) -> Dict[str, Any]:
-    """Classify focal asset into skill tier + contract value tag.
+    """Classify focal asset into OVR-hardcut 8-tier.
 
     Output keys:
     - tier: MVP/ALL_NBA/ALL_STAR/HIGH_STARTER/STARTER/HIGH_ROTATION/ROTATION/GARBAGE
-    - contract_tag: overpay|fair|value
-    - tier_confidence: high|medium|low (distance from nearest boundary)
-    - contract_confidence: high|medium|low
-    - skill_score: percentile-like score [0,1]
-    - contract_score: tanh-normalized contract score [-1,1]
     """
     _ = match_tag
     focus = target if target is not None else sale_asset
     if focus is None:
         return {
-            "tier": "STARTER",
-            "contract_tag": "fair",
-            "tier_confidence": "low",
-            "contract_confidence": "low",
-            "skill_score": 0.5,
-            "contract_score": 0.0,
+            "tier": "GARBAGE",
         }
 
-    score_now = _resolve_skill_score_percentile_base(focus, config)
-    score = _resolve_skill_score_percentile_ema(focus, q_now=score_now, config=config)
-
-    band = _as_float(getattr(config, "target_tier_soft_band", 0.03) if config is not None else 0.03, 0.03)
-    band = max(0.005, min(0.08, band))
-
-    memberships = _soft_tier_memberships(score, band=band)
-
-    prev_tier = getattr(focus, "tier_prev", None)
-    if prev_tier is None:
-        prev_tier = getattr(focus, "previous_tier", None)
-    h_up = _as_float(getattr(config, "target_tier_hysteresis_up", 0.01) if config is not None else 0.01, 0.01)
-    h_down = _as_float(getattr(config, "target_tier_hysteresis_down", 0.02) if config is not None else 0.02, 0.02)
-    memberships = _apply_tier_hysteresis(
-        memberships,
-        prev_tier=prev_tier,
-        score=score,
-        h_up=h_up,
-        h_down=h_down,
-    )
-
-    tier, best_m = max(
-        memberships.items(),
-        key=lambda kv: (float(kv[1]), -_as_float(score, 0.0), kv[0]),
-    )
-    if float(best_m) >= 0.80:
-        tier_conf = "high"
-    elif float(best_m) >= 0.45:
-        tier_conf = "medium"
-    else:
-        tier_conf = "low"
-
-    gap_cap_share = _resolve_contract_gap_cap_share(focus)
-    contract_tag, contract_conf, contract_score = _classify_contract_value_tag(
-        gap_cap_share,
-        config=config,
-    )
+    ovr = _resolve_ovr(focus)
+    tier = _tier_from_ovr_hardcut(ovr)
 
     return {
         "tier": str(tier),
-        "contract_tag": str(contract_tag),
-        "tier_confidence": str(tier_conf),
-        "contract_confidence": str(contract_conf),
-        "skill_score": float(score),
-        "skill_score_now": float(score_now),
-        "contract_score": float(contract_score),
     }
 
 
@@ -543,23 +289,6 @@ def _clone_deal(deal: Deal) -> Deal:
         teams=list(deal.teams),
         legs={tid: list(assets) for tid, assets in deal.legs.items()},
     )
-
-def _is_locked_candidate(lock: Any, *, allow_locked_by_deal_id: Optional[str]) -> bool:
-    """LockInfo precheck (SSOT).
-
-    - is_locked=True 이고 allow_locked_by_deal_id와 무관하면 잠김.
-    - allow_locked_by_deal_id가 lock.deal_id와 같으면(동일 딜 수정) 잠김으로 보지 않는다.
-    """
-    try:
-        if not bool(getattr(lock, "is_locked", False)):
-            return False
-        lock_deal = getattr(lock, "deal_id", None)
-        if allow_locked_by_deal_id and lock_deal and str(lock_deal) == str(allow_locked_by_deal_id):
-            return False
-        return True
-    except Exception:
-        return False
-
 
 def _shape_ok(deal: Deal, *, config: DealGeneratorConfig, catalog: Optional[TradeAssetCatalog] = None) -> bool:
     for assets in deal.legs.values():

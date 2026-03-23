@@ -67,75 +67,8 @@ class DecisionPolicyCounterSoftnessTests(unittest.TestCase):
             meta={},
         )
 
-    def test_counter_probability_changes_smoothly_around_half_rate(self):
-        policy = DecisionPolicy(config=DecisionPolicyConfig(stochastic_counter=False))
-        outgoing = 10.0
-        scale = outgoing
-        required = 0.1 * scale
-        net = required - (0.01 * scale)
-        corridor = policy.config.counter_corridor_ratio * scale
-
-        p_49 = policy._counter_probability(
-            counter_rate=0.49,
-            net=net,
-            accept_threshold=required,
-            overpay_allowed=0.2 * scale,
-            scale=scale,
-            corridor=corridor,
-        )
-        p_51 = policy._counter_probability(
-            counter_rate=0.51,
-            net=net,
-            accept_threshold=required,
-            overpay_allowed=0.2 * scale,
-            scale=scale,
-            corridor=corridor,
-        )
-
-        self.assertGreater(p_49, 0.0)
-        self.assertLess(p_51, 1.0)
-        self.assertGreater(p_51, p_49)
-        self.assertLess(p_51 - p_49, 0.05)
-
-    def test_low_counter_rate_is_suppressed_in_same_near_threshold_condition(self):
-        policy = DecisionPolicy(config=DecisionPolicyConfig(stochastic_counter=False))
-        outgoing = 10.0
-        scale = outgoing
-        required = 0.1 * scale
-        net = required - (0.01 * scale)
-        corridor = policy.config.counter_corridor_ratio * scale
-
-        p_low = policy._counter_probability(
-            counter_rate=0.05,
-            net=net,
-            accept_threshold=required,
-            overpay_allowed=0.2 * scale,
-            scale=scale,
-            corridor=corridor,
-        )
-        p_mid = policy._counter_probability(
-            counter_rate=0.5,
-            net=net,
-            accept_threshold=required,
-            overpay_allowed=0.2 * scale,
-            scale=scale,
-            corridor=corridor,
-        )
-        p_high = policy._counter_probability(
-            counter_rate=0.95,
-            net=net,
-            accept_threshold=required,
-            overpay_allowed=0.2 * scale,
-            scale=scale,
-            corridor=corridor,
-        )
-
-        self.assertLess(p_low, 0.5)
-        self.assertGreater(p_mid, p_low)
-        self.assertGreater(p_high, p_mid)
-
     def test_near_threshold_and_small_overpay_prefers_counter(self):
-        policy = DecisionPolicy(config=DecisionPolicyConfig(stochastic_counter=False))
+        policy = DecisionPolicy(config=DecisionPolicyConfig())
         # required=+1.0, net=+0.9 -> gray zone near acceptance threshold
         evaluation = self._evaluation(outgoing=10.0, net=0.9)
         decision = policy.decide(evaluation=evaluation, ctx=self._ctx(counter_rate=0.95), allow_counter=True)
@@ -143,23 +76,21 @@ class DecisionPolicyCounterSoftnessTests(unittest.TestCase):
         self.assertEqual(decision.verdict, DealVerdict.COUNTER)
         self.assertIsNotNone(decision.meta.get("counter_score"))
 
-    def test_same_net_changes_verdict_with_counter_rate(self):
-        policy = DecisionPolicy(config=DecisionPolicyConfig(stochastic_counter=False))
+    def test_same_net_keeps_counter_regardless_of_counter_rate(self):
+        policy = DecisionPolicy(config=DecisionPolicyConfig())
         evaluation = self._evaluation(outgoing=10.0, net=0.9)
 
         low = policy.decide(evaluation=evaluation, ctx=self._ctx(counter_rate=0.05), allow_counter=True)
         high = policy.decide(evaluation=evaluation, ctx=self._ctx(counter_rate=0.95), allow_counter=True)
 
-        self.assertNotEqual(low.verdict, high.verdict)
-        self.assertEqual(low.verdict, DealVerdict.ACCEPT)
+        self.assertEqual(low.verdict, DealVerdict.COUNTER)
         self.assertEqual(high.verdict, DealVerdict.COUNTER)
 
-    def test_counter_rate_sweep_distribution_in_gray_zone(self):
-        policy = DecisionPolicy(config=DecisionPolicyConfig(stochastic_counter=False))
+    def test_counter_rate_sweep_always_counter_in_gray_zone(self):
+        policy = DecisionPolicy(config=DecisionPolicyConfig())
         rates = [0.05, 0.2, 0.5, 0.8, 0.95]
         nets = [0.96, 0.93, 0.90, 0.87, 0.84]
 
-        verdict_counts = {r: {DealVerdict.ACCEPT: 0, DealVerdict.COUNTER: 0, DealVerdict.REJECT: 0} for r in rates}
         for r in rates:
             for net in nets:
                 dec = policy.decide(
@@ -167,24 +98,17 @@ class DecisionPolicyCounterSoftnessTests(unittest.TestCase):
                     ctx=self._ctx(counter_rate=r),
                     allow_counter=True,
                 )
-                verdict_counts[r][dec.verdict] += 1
-
-        self.assertGreater(verdict_counts[0.05][DealVerdict.ACCEPT], 0)
-        self.assertGreater(verdict_counts[0.95][DealVerdict.COUNTER], 0)
-        self.assertGreater(
-            verdict_counts[0.95][DealVerdict.COUNTER],
-            verdict_counts[0.05][DealVerdict.COUNTER],
-        )
+                self.assertEqual(dec.verdict, DealVerdict.COUNTER)
 
     def test_clear_reject_zone_unchanged(self):
-        policy = DecisionPolicy(config=DecisionPolicyConfig(stochastic_counter=False))
+        policy = DecisionPolicy(config=DecisionPolicyConfig())
         # required=+1.0 and overpay_floor=-2.0. net=-3.5 is clear reject.
         evaluation = self._evaluation(outgoing=10.0, net=-3.5)
         decision = policy.decide(evaluation=evaluation, ctx=self._ctx(counter_rate=0.95), allow_counter=True)
         self.assertEqual(decision.verdict, DealVerdict.REJECT)
 
     def test_threshold_scale_uses_incoming_when_larger_than_outgoing(self):
-        policy = DecisionPolicy(config=DecisionPolicyConfig(stochastic_counter=False))
+        policy = DecisionPolicy(config=DecisionPolicyConfig())
         # outgoing=2, incoming=9 -> scale should follow incoming axis.
         evaluation = self._evaluation(outgoing=2.0, net=7.0)
         decision = policy.decide(evaluation=evaluation, ctx=self._ctx(counter_rate=0.5), allow_counter=True)
@@ -195,7 +119,7 @@ class DecisionPolicyCounterSoftnessTests(unittest.TestCase):
         self.assertAlmostEqual(float(th_meta["scale_incoming"]), 9.0, places=6)
 
     def test_threshold_scale_can_be_driven_by_mass_axis(self):
-        policy = DecisionPolicy(config=DecisionPolicyConfig(stochastic_counter=False))
+        policy = DecisionPolicy(config=DecisionPolicyConfig())
         # Totals cancel to zero, but abs mass is large: in_mass=10, out_mass=10.
         evaluation = self._evaluation_components(
             incoming_now=5.0,
@@ -211,7 +135,7 @@ class DecisionPolicyCounterSoftnessTests(unittest.TestCase):
         self.assertAlmostEqual(float(th_meta["scale_mass"]), 10.0, places=6)
 
     def test_threshold_scale_has_eps_guard_when_all_axes_zero(self):
-        policy = DecisionPolicy(config=DecisionPolicyConfig(stochastic_counter=False, eps=1e-9))
+        policy = DecisionPolicy(config=DecisionPolicyConfig(eps=1e-9))
         evaluation = self._evaluation_components(
             incoming_now=0.0,
             incoming_future=0.0,

@@ -91,7 +91,6 @@ class ProactiveListingTests(unittest.TestCase):
         players = {
             "p1": SimpleNamespace(
                 buckets=("SURPLUS_EXPENDABLE",),
-                lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.9,
                 is_expiring=False,
@@ -109,18 +108,16 @@ class ProactiveListingTests(unittest.TestCase):
         self.assertIn("p1", trade_market["listings"])
         self.assertEqual(trade_market["events"][-1]["payload"].get("origin"), "PROACTIVE")
 
-    def test_proactive_listing_excludes_non_allowed_and_blocks_locked(self):
+    def test_proactive_listing_excludes_non_allowed_bucket_and_lists_allowed_candidate(self):
         players = {
             "not_allowed": SimpleNamespace(
                 buckets=("UNKNOWN_BUCKET",),
-                lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=1.0,
                 is_expiring=False,
             ),
-            "locked": SimpleNamespace(
+            "candidate": SimpleNamespace(
                 buckets=("SURPLUS_EXPENDABLE",),
-                lock=SimpleNamespace(is_locked=True),
                 recent_signing_banned_until=None,
                 surplus_score=1.0,
                 is_expiring=False,
@@ -131,22 +128,21 @@ class ProactiveListingTests(unittest.TestCase):
             team_id="LAL",
             tick_ctx=self._tick_ctx(
                 players,
-                player_ids_by_bucket={"UNKNOWN_BUCKET": ("not_allowed",), "SURPLUS_EXPENDABLE": ("locked",)},
+                player_ids_by_bucket={"UNKNOWN_BUCKET": ("not_allowed",), "SURPLUS_EXPENDABLE": ("candidate",)},
             ),
             trade_market=trade_market,
             today=date(2026, 2, 1),
             config=self._cfg(ai_proactive_listing_team_daily_cap=2),
         )
-        self.assertEqual(listed, [])
+        self.assertEqual(listed, ["candidate"])
         self.assertNotIn("not_allowed", listed)
-        self.assertNotIn("locked", listed)
+        self.assertIn("candidate", listed)
 
 
     def test_proactive_listing_skips_filler_cheap_bucket(self):
         players = {
             "cheap": SimpleNamespace(
                 buckets=("FILLER_CHEAP",),
-                lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=1.0,
                 is_expiring=False,
@@ -168,7 +164,6 @@ class ProactiveListingTests(unittest.TestCase):
         players = {
             "c1": SimpleNamespace(
                 buckets=("CONSOLIDATE",),
-                lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=1.0,
                 is_expiring=False,
@@ -189,7 +184,6 @@ class ProactiveListingTests(unittest.TestCase):
         players = {
             "p1": SimpleNamespace(
                 buckets=("SURPLUS_EXPENDABLE",),
-                lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.9,
                 is_expiring=False,
@@ -218,7 +212,6 @@ class ProactiveListingTests(unittest.TestCase):
         players = {
             "p1": SimpleNamespace(
                 buckets=("SURPLUS_EXPENDABLE",),
-                lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.40,
                 is_expiring=False,
@@ -238,7 +231,6 @@ class ProactiveListingTests(unittest.TestCase):
         players = {
             "p1": SimpleNamespace(
                 buckets=("SURPLUS_EXPENDABLE",),
-                lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.9,
                 is_expiring=False,
@@ -259,7 +251,6 @@ class ProactiveListingTests(unittest.TestCase):
         players = {
             "p1": SimpleNamespace(
                 buckets=("SURPLUS_EXPENDABLE",),
-                lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.80,
                 is_expiring=False,
@@ -279,7 +270,6 @@ class ProactiveListingTests(unittest.TestCase):
         players = {
             "p1": SimpleNamespace(
                 buckets=("SURPLUS_EXPENDABLE",),
-                lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.60,
                 is_expiring=False,
@@ -306,9 +296,8 @@ class ProactiveListingTests(unittest.TestCase):
         players = {
             "p1": SimpleNamespace(
                 buckets=("SURPLUS_EXPENDABLE",),
-                lock=SimpleNamespace(is_locked=True),
-                recent_signing_banned_until=None,
-                surplus_score=0.90,
+                recent_signing_banned_until="2026-02-10",
+                surplus_score=0.95,
                 is_expiring=False,
             )
         }
@@ -328,7 +317,6 @@ class ProactiveListingTests(unittest.TestCase):
         players = {
             "p1": SimpleNamespace(
                 buckets=("SURPLUS_EXPENDABLE",),
-                lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.90,
                 is_expiring=False,
@@ -353,7 +341,6 @@ class ProactiveListingTests(unittest.TestCase):
         players = {
             "p1": SimpleNamespace(
                 buckets=("SURPLUS_EXPENDABLE",),
-                lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.90,
                 is_expiring=False,
@@ -377,7 +364,6 @@ class ProactiveListingTests(unittest.TestCase):
         players = {
             "p1": SimpleNamespace(
                 buckets=("SURPLUS_EXPENDABLE",),
-                lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.10,
                 raw_trade_block_score=0.70,
@@ -398,7 +384,6 @@ class ProactiveListingTests(unittest.TestCase):
         players = {
             "p1": SimpleNamespace(
                 buckets=("SURPLUS_EXPENDABLE",),
-                lock=SimpleNamespace(is_locked=False),
                 recent_signing_banned_until=None,
                 surplus_score=0.50,
                 is_expiring=False,

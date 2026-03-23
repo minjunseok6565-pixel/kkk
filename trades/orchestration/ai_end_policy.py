@@ -70,6 +70,11 @@ def _silence_days(session: Dict[str, Any], *, today: date) -> int:
     return max(0, int((today - start).days))
 
 
+def _session_age_days(session: Dict[str, Any], *, today: date) -> int:
+    start = _parse_iso_date(session.get("created_at")) or today
+    return max(0, int((today - start).days))
+
+
 def _tone_bias(*, tone: str, config: OrchestrationConfig) -> float:
     t = str(tone or "").upper()
     if t == "LOWBALL":
@@ -178,6 +183,36 @@ def evaluate_and_maybe_end(session_id: str, today: date, seed_context: Optional[
     auto_end = session.get("auto_end") if isinstance(session.get("auto_end"), dict) else {}
     if str(auto_end.get("status") or "").upper() == "ENDED":
         return {"session_id": str(session_id), "evaluated": False, "ended": True, "reason": "ALREADY_ENDED"}
+
+    cap_days = max(0, int(getattr(ctx["config"], "ai_auto_end_hard_cap_days", 20) or 20))
+    age_days = _session_age_days(session, today=today)
+    if age_days >= cap_days:
+        ended_out = negotiation_store.mark_auto_ended(
+            session_id,
+            reason="MAX_AGE_CAP",
+            score=1.0,
+            detail={
+                "roll": 0.0,
+                "session_age_days": int(age_days),
+                "hard_cap_days": int(cap_days),
+            },
+        )
+        return {
+            "session_id": str(session_id),
+            "evaluated": True,
+            "ended": True,
+            "probability": 1.0,
+            "roll": 0.0,
+            "reason_code": "MAX_AGE_CAP",
+            "analysis": {
+                "probability": 1.0,
+                "reason_code": "MAX_AGE_CAP",
+                "session_age_days": int(age_days),
+                "hard_cap_days": int(cap_days),
+            },
+            "session": ended_out.get("session"),
+            "idempotent": bool(ended_out.get("idempotent")),
+        }
 
     prob = compute_auto_end_probability(session, today=today, ctx=ctx)
     p = _clamp01(prob.get("probability", 0.0))

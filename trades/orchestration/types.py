@@ -105,10 +105,11 @@ class OrchestrationConfig:
 
     # --- 유저 오퍼 보호(agreement+asset lock)
     lock_user_offers: bool = True
-    user_offer_valid_days: int = 2  # Deprecated: user offer expiry should migrate to AI auto-end policy.
+    user_offer_valid_days: int = 22  # Deprecated: user offer expiry should migrate to AI auto-end policy.
 
     # --- AI-driven auto-end policy for user offer negotiations
     enable_ai_auto_end_user_offers: bool = True
+    ai_auto_end_hard_cap_days: int = 20
     ai_auto_end_grace_days: int = 5
     ai_auto_end_probability_min: float = 0.01
     ai_auto_end_probability_cap: float = 0.88

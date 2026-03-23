@@ -10,7 +10,7 @@ from uuid import uuid4
 from league_repo import LeagueRepo
 from schema import normalize_player_id, normalize_team_id
 import state
-from state import asset_locks_get, asset_locks_set, get_current_date_as_date, trade_agreements_get, trade_agreements_set
+from state import get_current_date_as_date, trade_agreements_get, trade_agreements_set
 
 from .errors import (
     TradeError,
@@ -167,16 +167,7 @@ def create_committed_deal(
     agreements = trade_agreements_get()
     agreements[deal_id] = entry
     trade_agreements_set(agreements)
-    _lock_assets_for_deal(canonical, deal_id, entry["expires_at"])
     return entry
-
-
-def _lock_assets_for_deal(deal: Deal, deal_id: str, expires_at: str) -> None:
-    locks = asset_locks_get()
-    for assets in deal.legs.values():
-        for asset in assets:
-            locks[asset_key(asset)] = {"deal_id": deal_id, "expires_at": expires_at}
-    asset_locks_set(locks)
 
 
 def verify_committed_deal(deal_id: str, current_date: Optional[date] = None) -> Deal:
@@ -198,7 +189,6 @@ def verify_committed_deal(deal_id: str, current_date: Optional[date] = None) -> 
     if expires_at and today > date.fromisoformat(str(expires_at)):
         entry["status"] = "EXPIRED"
         trade_agreements_set(agreements)
-        release_locks_for_deal(deal_id)
         raise TradeError(DEAL_EXPIRED, "Deal expired")
 
     deal_payload = entry.get("deal") or {}
@@ -207,7 +197,6 @@ def verify_committed_deal(deal_id: str, current_date: Optional[date] = None) -> 
     except TradeError as exc:
         entry["status"] = "INVALIDATED"
         trade_agreements_set(agreements)
-        release_locks_for_deal(deal_id)
         raise TradeError(
             DEAL_INVALIDATED,
             "Committed deal payload invalid",
@@ -216,7 +205,6 @@ def verify_committed_deal(deal_id: str, current_date: Optional[date] = None) -> 
     except Exception as exc:
         entry["status"] = "INVALIDATED"
         trade_agreements_set(agreements)
-        release_locks_for_deal(deal_id)
         raise TradeError(
             DEAL_INVALIDATED,
             "Committed deal payload invalid",
@@ -228,7 +216,6 @@ def verify_committed_deal(deal_id: str, current_date: Optional[date] = None) -> 
     except TradeError as exc:
         entry["status"] = "INVALIDATED"
         trade_agreements_set(agreements)
-        release_locks_for_deal(deal_id)
         raise TradeError(
             DEAL_INVALIDATED,
             "Deal assets verification failed",
@@ -237,7 +224,6 @@ def verify_committed_deal(deal_id: str, current_date: Optional[date] = None) -> 
     except Exception as exc:
         entry["status"] = "INVALIDATED"
         trade_agreements_set(agreements)
-        release_locks_for_deal(deal_id)
         raise TradeError(
             DEAL_INVALIDATED,
             "Deal assets verification failed",
@@ -248,18 +234,7 @@ def verify_committed_deal(deal_id: str, current_date: Optional[date] = None) -> 
 
         entry["status"] = "INVALIDATED"
         trade_agreements_set(agreements)
-        release_locks_for_deal(deal_id)
         raise TradeError(DEAL_INVALIDATED, "Deal assets have changed")
-
-    locks = asset_locks_get()
-    for assets in deal.legs.values():
-        for asset in assets:
-            lock = locks.get(asset_key(asset))
-            if not lock or lock.get("deal_id") != deal_id:
-                entry["status"] = "INVALIDATED"
-                trade_agreements_set(agreements)
-                release_locks_for_deal(deal_id)
-                raise TradeError(DEAL_INVALIDATED, "Asset lock missing")
 
     return deal
 
@@ -271,25 +246,15 @@ def mark_executed(deal_id: str) -> None:
         return
     entry["status"] = "EXECUTED"
     trade_agreements_set(agreements)
-    release_locks_for_deal(deal_id)
-
-
-def release_locks_for_deal(deal_id: str) -> None:
-    locks = asset_locks_get()
-    to_remove = [key for key, lock in locks.items() if lock.get("deal_id") == deal_id]
-    for key in to_remove:
-        locks.pop(key, None)
-    asset_locks_set(locks)
 
 
 def gc_expired_agreements(current_date: Optional[date] = None) -> None:
     agreements = trade_agreements_get()
     today = current_date or get_current_date_as_date()
-    for deal_id, entry in list(agreements.items()):
+    for _deal_id, entry in list(agreements.items()):
         if entry.get("status") != "ACTIVE":
             continue
         expires_at = entry.get("expires_at")
         if expires_at and today > date.fromisoformat(str(expires_at)):
             entry["status"] = "EXPIRED"
-            release_locks_for_deal(deal_id)
     trade_agreements_set(agreements)

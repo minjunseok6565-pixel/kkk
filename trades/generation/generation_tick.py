@@ -225,14 +225,12 @@ class TradeGenerationTickContext:
         self,
         deal: Deal,
         *,
-        allow_locked_by_deal_id: Optional[str] = None,
         integrity_check: Optional[bool] = None,
     ) -> None:
         """Hard-rule validation using tick-level caches."""
         _validate_deal(
             deal,
             current_date=self.current_date,
-            allow_locked_by_deal_id=allow_locked_by_deal_id,
             db_path=self.db_path,
             tick_ctx=self.rule_tick_ctx,
             integrity_check=integrity_check,

@@ -134,22 +134,30 @@ class MarketPricingConfig:
     """
 
     # --- Player base pricing
-    player_ovr_center: float = 75.0
-    player_ovr_scale: float = 6.0
-    player_ovr_now_max: float = 25.0  # OVR 기반 now 상한(화폐 단위)
+    player_ovr_center: float = 91.5
+    player_ovr_scale: float = 5.5
+    player_ovr_now_max: float = 60.0  # OVR 기반 now 상한(화폐 단위)
     player_ovr_now_min: float = 0.0
 
     # OVR 증가가 상위 구간에서 더 비싸지도록(비선형)
-    player_star_softplus_scale: float = 0.55
-    player_star_softplus_shift: float = 86.0
+    player_star_softplus_scale: float = 1.3
+    player_star_softplus_shift: float = 91.0
 
     # --- Age / horizon split (market-level expectation)
-    age_peak: float = 27.0
+    age_peak_start: float = 27.0
+    age_peak_end: float = 29.0
     age_now_decay_per_year: float = 0.06
-    age_future_growth_per_year_under_peak: float = 0.07
-    age_future_decay_per_year_over_peak: float = 0.05
-    age_future_floor: float = 0.20
-    age_future_cap: float = 1.40
+    future_dev_age_min: float = 18.0
+    future_upside_max: float = 22.0
+    future_gap_ref: float = 16.0
+    future_pre_peak_age_exp: float = 1.10
+    future_pre_peak_gap_exp: float = 0.65
+    future_post_peak_decline_age: float = 38.0
+    future_post_peak_max_discount: float = 10.0
+    future_post_peak_age_exp: float = 1.35
+    future_post_peak_ovr_lo: float = 74.0
+    future_post_peak_ovr_hi: float = 98.0
+    future_post_peak_ovr_floor_weight: float = 0.20
 
     # --- Contract efficiency (market-level)
     # expected salary as function of ovr -> compare vs actual to compute contract factor
@@ -176,10 +184,10 @@ class MarketPricingConfig:
 
     # Fair salary curve (cap%-based).
     # - Designed to cover max salary ranges (superstars can be underpaid even at max).
-    fair_salary_pct_lo: float = 0.02
-    fair_salary_pct_hi: float = 0.47
-    fair_salary_ovr_center: float = 86.0
-    fair_salary_ovr_scale: float = 7.0
+    fair_salary_pct_lo: float = 0.010
+    fair_salary_pct_hi: float = 0.350
+    fair_salary_ovr_center: float = 83.5
+    fair_salary_ovr_scale: float = 3.8
 
     # Contract surplus (fair - actual) is converted into value units and ADDED to player value.
     # This allows truly bad contracts to become negative assets.
@@ -234,8 +242,8 @@ class MarketPricingConfig:
     health_credit_cap: float = 0.06
 
     # --- Pick base pricing
-    pick_round1_base_future: float = 14.0
-    pick_round2_base_future: float = 3.5
+    pick_round1_base_future: float = 8.0
+    pick_round2_base_future: float = 1.0
 
     # pick number -> value curve
     pick_num_best: int = 1
@@ -243,7 +251,7 @@ class MarketPricingConfig:
     pick_num_curve_power: float = 1.65  # 상위픽 프리미엄(비선형)
 
     # year discount (멀수록 가치 감소)
-    pick_year_discount_rate: float = 0.10  # 1년당 할인
+    pick_year_discount_rate: float = 0.08  # 1년당 할인
 
     # --- Protection expectation (TOP_N)
     protection_logit_k: float = 0.85  # convey probability sharpness
@@ -276,6 +284,20 @@ class MarketPricer:
     _cache_pick: Dict[Tuple[str, int, str], MarketValuation] = field(default_factory=dict, init=False)
     _cache_swap: Dict[Tuple[str, int], MarketValuation] = field(default_factory=dict, init=False)
     _cache_fixed: Dict[Tuple[str, int], MarketValuation] = field(default_factory=dict, init=False)
+    _potential_ceiling: Dict[str, float] = field(
+        default_factory=lambda: {
+            "C-": 60.0,
+            "C": 65.0,
+            "C+": 70.0,
+            "B-": 75.0,
+            "B": 80.0,
+            "B+": 85.0,
+            "A-": 90.0,
+            "A": 95.0,
+            "A+": 99.0,
+        },
+        init=False,
+    )
 
     # -------------------------------------------------------------------------
     # Public API
@@ -417,34 +439,19 @@ class MarketPricer:
             )
         base_now = base_now_raw * now_decay
 
-        # 4) Age -> future multiplier (market-level expected horizon)
-        age_future_factor = self._age_to_future_factor(age)
-        steps.append(
-            ValuationStep(
-                stage=ValuationStage.MARKET,
-                mode=StepMode.MUL,
-                code="AGE_FUTURE_FACTOR",
-                label="나이 기반 미래가치 배율",
-                factor=age_future_factor,
-                delta=_vc(0.0, 0.0),
-                meta={"age": age},
-            )
-        )
-
-        # We create a future component from current base using the factor.
-        future_from_age = base_now * (age_future_factor - 1.0)
+        # 4) Future component (potential/age/headroom-based absolute value)
+        future_component, future_meta = self._player_future_component(snap=snap, age=age, ovr=ovr)
         steps.append(
             ValuationStep(
                 stage=ValuationStage.MARKET,
                 mode=StepMode.ADD,
-                code="AGE_FUTURE_COMPONENT",
-                label="나이 기반 미래가치 구성",
-                delta=_vc(now=0.0, future=future_from_age),
-                meta={"age": age, "factor": age_future_factor},
+                code="PLAYER_FUTURE_COMPONENT",
+                label="포텐셜/나이/헤드룸 기반 미래가치",
+                delta=_vc(now=0.0, future=future_component),
+                meta=future_meta,
             )
         )
-
-        basketball_value = _vc(now=base_now, future=future_from_age)
+        basketball_value = _vc(now=base_now, future=future_component)
 
         # 4) Position scarcity (market-level) -> applies to basketball value only.
         pos_factor, pos_meta = self._position_scarcity_factor(snap)
@@ -789,22 +796,93 @@ class MarketPricer:
 
     def _age_to_now_decay_factor(self, age: float) -> float:
         cfg = self.config
-        if age <= cfg.age_peak:
+        if age <= cfg.age_peak_end:
             return 1.0
-        diff = age - cfg.age_peak
+        diff = age - cfg.age_peak_end
         factor = 1.0 - diff * cfg.age_now_decay_per_year
         return _clamp(factor, 0.35, 1.0)
 
-    def _age_to_future_factor(self, age: float) -> float:
+    def _resolve_player_potential(self, snap: PlayerSnapshot) -> str:
+        # priority
+        # 1) snap.potential (if schema expanded externally)
+        # 2) snap.meta["potential"]
+        # 3) snap.attrs["Potential"] (ratings payload convention)
+        # 4) default "B"
+        raw = None
+        if hasattr(snap, "potential"):
+            raw = getattr(snap, "potential", None)
+        if raw is None and isinstance(snap.meta, dict):
+            raw = snap.meta.get("potential")
+        if raw is None and isinstance(snap.attrs, dict):
+            raw = snap.attrs.get("Potential")
+        token = str(raw or "").strip().upper()
+        return token if token in self._potential_ceiling else "B"
+
+    def _potential_to_ceiling(self, potential: str) -> float:
+        token = str(potential or "").strip().upper()
+        return float(self._potential_ceiling.get(token, self._potential_ceiling["B"]))
+
+    def _player_future_component(self, *, snap: PlayerSnapshot, age: float, ovr: float) -> Tuple[float, Dict[str, Any]]:
         cfg = self.config
-        # below peak -> growth, above peak -> decay, both clamped
-        if age <= cfg.age_peak:
-            diff = cfg.age_peak - age
-            factor = 1.0 + diff * cfg.age_future_growth_per_year_under_peak
-        else:
-            diff = age - cfg.age_peak
-            factor = 1.0 - diff * cfg.age_future_decay_per_year_over_peak
-        return _clamp(factor, cfg.age_future_floor, cfg.age_future_cap)
+        potential = self._resolve_player_potential(snap)
+        ceiling = self._potential_to_ceiling(potential)
+        gap = max(float(ceiling - ovr), 0.0)
+
+        if age < cfg.age_peak_start:
+            age_den = max(cfg.age_peak_start - cfg.future_dev_age_min + 1.0, cfg.eps)
+            age_raw = (cfg.age_peak_start - age + 1.0) / age_den
+            age_term = _clamp(age_raw, 0.0, 1.0) ** max(cfg.future_pre_peak_age_exp, cfg.eps)
+
+            pot_norm = _clamp((ceiling - 75.0) / (99.0 - 75.0), 0.0, 1.0)
+            pot_term = 0.10 + 0.90 * (pot_norm ** 1.15)
+
+            gap_ref = max(cfg.future_gap_ref, cfg.eps)
+            gap_term = _clamp(gap / gap_ref, 0.0, 1.0) ** max(cfg.future_pre_peak_gap_exp, cfg.eps)
+
+            future = cfg.future_upside_max * age_term * pot_term * gap_term
+            return float(future), {
+                "branch": "pre_peak_upside",
+                "age": float(age),
+                "ovr": float(ovr),
+                "potential": potential,
+                "ceiling": float(ceiling),
+                "gap": float(gap),
+                "age_term": float(age_term),
+                "pot_term": float(pot_term),
+                "gap_term": float(gap_term),
+            }
+
+        if age <= cfg.age_peak_end:
+            return 0.0, {
+                "branch": "peak_neutral",
+                "age": float(age),
+                "ovr": float(ovr),
+                "potential": potential,
+                "ceiling": float(ceiling),
+                "gap": float(gap),
+            }
+
+        decline_den = max(cfg.future_post_peak_decline_age - cfg.age_peak_end, cfg.eps)
+        decline_raw = (age - cfg.age_peak_end) / decline_den
+        decline_age_term = _clamp(decline_raw, 0.0, 1.0) ** max(cfg.future_post_peak_age_exp, cfg.eps)
+
+        ovr_den = max(cfg.future_post_peak_ovr_hi - cfg.future_post_peak_ovr_lo, cfg.eps)
+        ovr_term = _clamp((ovr - cfg.future_post_peak_ovr_lo) / ovr_den, 0.0, 1.0)
+        floor_w = _clamp(cfg.future_post_peak_ovr_floor_weight, 0.0, 1.0)
+        ability_term = floor_w + (1.0 - floor_w) * ovr_term
+
+        future = -cfg.future_post_peak_max_discount * decline_age_term * ability_term
+        return float(future), {
+            "branch": "post_peak_decline",
+            "age": float(age),
+            "ovr": float(ovr),
+            "potential": potential,
+            "ceiling": float(ceiling),
+            "gap": float(gap),
+            "decline_age_term": float(decline_age_term),
+            "ovr_term": float(ovr_term),
+            "ability_term": float(ability_term),
+        }
 
     def _resolve_expected_salary_scale(self) -> Tuple[float, float, Dict[str, Any]]:
         """Resolve expected-salary curve scale.

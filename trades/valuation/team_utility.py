@@ -214,7 +214,9 @@ class TeamUtilityConfig:
     # - When missing: fall back to legacy absolute-dollar defaults for backward
     #   compatibility (older call sites/tests).
     salary_cap: Optional[float] = None
-    finance_factor_floor: float = 0.55
+    # Player-level finance penalty is intentionally capped to a mild haircut
+    # (at most 5%) so package-level finance effects can carry most of the signal.
+    finance_factor_floor: float = 0.95
     finance_factor_cap: float = 1.00
     # Cap-normalized defaults derived from the legacy 2025 base-cap tuning:
     #   lo=8M, hi=40M at cap=154,647,000
@@ -223,6 +225,17 @@ class TeamUtilityConfig:
     finance_salary_lo: float = 8_000_000.0
     finance_salary_hi: float = 40_000_000.0
     finance_term_weight: float = 0.35  # 긴 계약일수록 재정 부담 가중
+
+    # --- Fan favorite outgoing guard (players, outgoing leg only)
+    # Reads score from PlayerSnapshot.attrs using the first matched key.
+    # Score domain is normalized to [0,10], while multiplier has no upper cap
+    # in the initial observation phase by product requirement.
+    fan_favorite_attr_keys: Tuple[str, ...] = (
+        "Fan Favorite",
+        "fan_favorite",
+        "FAN_FAVORITE",
+    )
+    fan_favorite_outgoing_scale: float = 0.06
 
     # NOTE: eps is used across fit/star/finance computations and is owned by FitEngineConfig
 
@@ -239,9 +252,13 @@ class TeamUtilityAdjuster:
 
     _fit_engine: FitEngine = field(init=False, repr=False)
 
-    # team-specific cache: (team_id, asset_key, season_year_ctx) -> TeamValuation
-    # NOTE: team utility can depend on season-year via cap-scaled finance thresholds.
-    _cache: Dict[Tuple[str, str, int, str], TeamValuation] = field(default_factory=dict, init=False)
+    # team-specific cache key:
+    #   (team_id, asset_key, season_year_ctx, protection_signature, direction_signature)
+    # NOTE:
+    # - team utility can depend on season-year via cap-scaled finance thresholds.
+    # - player utility can now depend on leg direction (incoming vs outgoing),
+    #   so direction must be part of the cache key.
+    _cache: Dict[Tuple[str, str, int, str, str], TeamValuation] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
         # Single Source of Truth for fit evaluation.
@@ -277,7 +294,12 @@ class TeamUtilityAdjuster:
         if kind == AssetKind.PICK and isinstance(snap, PickSnapshot):
             prot_sig = pick_protection_signature(snap.protection)
 
-        key = (str(ctx.team_id), str(market.asset_key), env_key, str(prot_sig))
+        dir_sig = ""
+        if kind == AssetKind.PLAYER and isinstance(snap, PlayerSnapshot):
+            meta = snap.meta if isinstance(snap.meta, Mapping) else {}
+            dir_sig = str(meta.get("direction") or "").strip().lower()
+
+        key = (str(ctx.team_id), str(market.asset_key), env_key, str(prot_sig), str(dir_sig))
         cached = self._cache.get(key)
         if cached is not None:
             return cached
@@ -321,6 +343,9 @@ class TeamUtilityAdjuster:
             # 5) Finance penalty (basketball only)
             bball = self._apply_finance_penalty(bball, snap, ctx, team_steps, env=env)
 
+            # 6) Fan favorite outgoing guard (basketball only, outgoing leg)
+            bball = self._apply_fan_favorite_outgoing_guard(bball, snap, team_steps)
+
             value = _add_components(bball, contract)
 
             out = TeamValuation(
@@ -348,12 +373,12 @@ class TeamUtilityAdjuster:
         # -----------------------------------------------------------------
         value = market.value
 
-        # 1) Apply now/future weights (DecisionContext.knobs)
-        value = self._apply_now_future_weights(value, ctx, team_steps)
-
-        # 2) Asset-type multipliers (DecisionContext.knobs)
+        # 1) Asset-type weighting/multipliers (DecisionContext.knobs)
         if kind in (AssetKind.PICK, AssetKind.SWAP):
+            value = self._apply_pick_timeline_factor(value, ctx, team_steps)
             value = self._apply_pick_preference(value, ctx, team_steps)
+        else:
+            value = self._apply_now_future_weights(value, ctx, team_steps)
 
         out = TeamValuation(
             asset_key=market.asset_key,
@@ -453,6 +478,33 @@ class TeamUtilityAdjuster:
             )
         )
         return _scale_components(v, now_factor=1.0, future_factor=m)
+
+    def _apply_pick_timeline_factor(
+        self,
+        v: ValueComponents,
+        ctx: DecisionContext,
+        steps: List[ValuationStep],
+    ) -> ValueComponents:
+        """
+        Pick timeline factor (requested):
+        factor = 1 + (w_future / 2)
+        - Always non-negative and >= 1.0 under normal w_future in [0,1].
+        - Applied to future component for pick-like assets.
+        """
+        w_fut = _safe_float(ctx.knobs.w_future, 1.0)
+        factor = 1.0 + (w_fut / 2.0)
+        factor = max(0.0, float(factor))
+        steps.append(
+            ValuationStep(
+                stage=ValuationStage.TEAM,
+                mode=StepMode.MUL,
+                code="PICK_TIMELINE_FACTOR",
+                label="픽 타임라인 계수(1 + w_future/2)",
+                factor=factor,
+                meta={"w_future": w_fut},
+            )
+        )
+        return _scale_components(v, now_factor=1.0, future_factor=factor)
 
     # -------------------------------------------------------------------------
     # 2-B) Youth: preference multiplier (players)
@@ -843,6 +895,71 @@ class TeamUtilityAdjuster:
                     "salary_burden": burden,
                     "term_burden": term,
                     "finance_score": finance_score,
+                },
+            )
+        )
+        return v.scale(factor)
+
+    # -------------------------------------------------------------------------
+    # 6) Fan favorite outgoing guard (players, outgoing leg only)
+    # -------------------------------------------------------------------------
+    def _is_outgoing_leg(self, snap: PlayerSnapshot) -> bool:
+        meta = snap.meta if isinstance(snap.meta, Mapping) else {}
+        direction = str(meta.get("direction") or "").strip().lower()
+        return direction == "outgoing"
+
+    def _extract_fan_favorite_score(self, snap: PlayerSnapshot) -> float:
+        cfg = self.config
+        attrs = snap.attrs if isinstance(snap.attrs, Mapping) else {}
+
+        raw: Any = None
+        key_used: Optional[str] = None
+        for k in cfg.fan_favorite_attr_keys:
+            if k in attrs:
+                raw = attrs.get(k)
+                key_used = str(k)
+                break
+
+        if raw is None and key_used is None:
+            return 0.0
+
+        try:
+            score = float(raw)
+        except Exception:
+            return 0.0
+
+        # Product requirement: input domain is 1~10, unrated treated as 0.
+        # We normalize any incoming number into [0,10].
+        return _clamp(score, 0.0, 10.0)
+
+    def _apply_fan_favorite_outgoing_guard(
+        self,
+        v: ValueComponents,
+        snap: PlayerSnapshot,
+        steps: List[ValuationStep],
+    ) -> ValueComponents:
+        direction = "outgoing" if self._is_outgoing_leg(snap) else "incoming_or_unknown"
+        ff_score = self._extract_fan_favorite_score(snap)
+        ff_scale = max(_safe_float(self.config.fan_favorite_outgoing_scale, 0.0), 0.0)
+
+        if direction != "outgoing":
+            return v
+        if ff_score <= self.config.fit.eps or ff_scale <= self.config.fit.eps:
+            return v
+
+        factor = 1.0 + ff_scale * ff_score
+
+        steps.append(
+            ValuationStep(
+                stage=ValuationStage.TEAM,
+                mode=StepMode.MUL,
+                code="FAN_FAVORITE_OUTGOING_GUARD",
+                label="팬 페이보릿 보호 배율(OUTGOING 전용)",
+                factor=factor,
+                meta={
+                    "direction": direction,
+                    "fan_favorite_score": ff_score,
+                    "fan_favorite_scale": ff_scale,
                 },
             )
         )

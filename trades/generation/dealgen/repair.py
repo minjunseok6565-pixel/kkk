@@ -1,18 +1,29 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
+from collections import deque
+from dataclasses import dataclass
+from itertools import combinations
+from typing import Any, Deque, Dict, List, Mapping, Optional, Set, Tuple
 
 from ...errors import TradeError
-from ...models import PlayerAsset, PickAsset, Asset, resolve_asset_receiver
+from ...models import Deal, PlayerAsset, PickAsset, Asset, resolve_asset_receiver
 
 from ..generation_tick import TradeGenerationTickContext
-from ..asset_catalog import TradeAssetCatalog, BucketId
+from ..asset_catalog import TradeAssetCatalog
 
 from ...rules.policies.salary_matching_policy import SalaryMatchingParams, check_salary_matching
 
-from .types import DealGeneratorConfig, DealGeneratorBudget, DealGeneratorStats, DealCandidate, RuleFailureKind, parse_trade_error
+from .types import (
+    DealGeneratorConfig,
+    DealGeneratorBudget,
+    DealGeneratorStats,
+    DealCandidate,
+    RuleFailure,
+    RuleFailureKind,
+    parse_trade_error,
+)
+from .dedupe import dedupe_hash
 from .utils import (
-    SURPLUS_BUCKETS_EFFECTIVE,
     _count_picks,
     _count_players,
     _current_pick_ids,
@@ -31,16 +42,47 @@ def repair_until_valid(
     catalog: TradeAssetCatalog,
     config: DealGeneratorConfig,
     *,
-    allow_locked_by_deal_id: Optional[str],
     budget: DealGeneratorBudget,
     banned_asset_keys: Set[str],
     banned_players: Set[str],
     stats: DealGeneratorStats,
     banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
 ) -> Tuple[bool, Optional[DealCandidate], int]:
-    """validate -> 실패 유형에 따라 최대 budget.max_repairs회 repair.
+    """호환 래퍼: many API 결과에서 첫 후보만 반환."""
+    valid, validations_used = repair_until_valid_many(
+        cand,
+        tick_ctx,
+        catalog,
+        config,
+        budget=budget,
+        banned_asset_keys=banned_asset_keys,
+        banned_players=banned_players,
+        stats=stats,
+        banned_receivers_by_player=banned_receivers_by_player,
+    )
+    if not valid:
+        return False, None, validations_used
+    return True, valid[0], validations_used
 
-    Returns: (ok, candidate_or_none, validations_used)
+
+def repair_until_valid_many(
+    cand: DealCandidate,
+    tick_ctx: TradeGenerationTickContext,
+    catalog: TradeAssetCatalog,
+    config: DealGeneratorConfig,
+    *,
+    budget: DealGeneratorBudget,
+    banned_asset_keys: Set[str],
+    banned_players: Set[str],
+    stats: DealGeneratorStats,
+    banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
+) -> Tuple[List[DealCandidate], int]:
+    """복수 후보 validate/repair.
+
+    md 설계 기준:
+    - validate 실패 시 실패 유형별 수리 분기를 생성하여 큐에 적재
+    - 중복 해시/분기 cap/예산 cap으로 폭발 방지
+    - validate 통과 후보를 모두 반환
     """
 
     validations_used = 0
@@ -48,24 +90,37 @@ def repair_until_valid(
         banned_receivers_by_player = {}
 
     if not _shape_ok(cand.deal, config=config, catalog=catalog):
-        return False, None, validations_used
+        return [], validations_used
 
-    for _ in range(int(budget.max_repairs) + 1):
+    q: Deque[DealCandidate] = deque([cand])
+    valid: List[DealCandidate] = []
+    seen_hash: Set[str] = set()
+    branch_cap = max(1, int(getattr(config, "salary_repair_branch_cap", 10) or 10))
+    max_repaired_variants = max(1, int(getattr(config, "max_repaired_variants_per_base", 10) or 10))
+    emitted_total = 0
+
+    while q:
+        if validations_used >= int(getattr(budget, "max_validations", 10**9)):
+            break
+        cur = q.popleft()
+        if cur.repairs_used > int(budget.max_repairs):
+            continue
         try:
-            tick_ctx.validate_deal(cand.deal, allow_locked_by_deal_id=allow_locked_by_deal_id)
+            tick_ctx.validate_deal(cur.deal)
             validations_used += 1
-            return True, cand, validations_used
+            valid.append(cur)
+            continue
         except TradeError as err:
             validations_used += 1
             failure = parse_trade_error(err)
             stats.bump_failure(str(failure.kind.value))
 
-            if cand.repairs_used >= int(budget.max_repairs):
+            if cur.repairs_used >= int(budget.max_repairs):
                 _apply_prune_side_effects(failure, banned_asset_keys, banned_players, banned_receivers_by_player)
-                return False, None, validations_used
+                continue
 
-            repaired = repair_once(
-                cand,
+            variants = repair_once_many(
+                cur,
                 failure,
                 tick_ctx=tick_ctx,
                 catalog=catalog,
@@ -73,23 +128,63 @@ def repair_until_valid(
                 banned_asset_keys=banned_asset_keys,
                 banned_players=banned_players,
             )
-            if not repaired:
+            if not variants:
                 _apply_prune_side_effects(failure, banned_asset_keys, banned_players, banned_receivers_by_player)
-                return False, None, validations_used
+                continue
 
-            cand.repairs_used += 1
-            stats.repairs += 1
-
-            # repair 후 shape check
-            if not _shape_ok(cand.deal, config=config, catalog=catalog):
-                return False, None, validations_used
+            emitted = 0
+            for nxt in variants:
+                if emitted >= branch_cap:
+                    break
+                if emitted_total >= max_repaired_variants:
+                    break
+                nxt.repairs_used = int(cur.repairs_used) + 1
+                stats.repairs += 1
+                if not _shape_ok(nxt.deal, config=config, catalog=catalog):
+                    continue
+                key = dedupe_hash(nxt.deal)
+                if key in seen_hash:
+                    continue
+                seen_hash.add(key)
+                q.append(nxt)
+                emitted += 1
+                emitted_total += 1
         except Exception:
-            # 상업용 루프: 예상 못한 예외로 tick이 죽지 않게 방어
             validations_used += 1
             stats.bump_failure("unexpected_exception_validate")
-            return False, None, validations_used
+            continue
 
-    return False, None, validations_used
+    return valid, validations_used
+
+
+def repair_once_many(
+    cand: DealCandidate,
+    failure: RuleFailure,
+    *,
+    tick_ctx: TradeGenerationTickContext,
+    catalog: TradeAssetCatalog,
+    config: DealGeneratorConfig,
+    banned_asset_keys: Set[str],
+    banned_players: Set[str],
+) -> List[DealCandidate]:
+    """1-step repair 결과를 복수 후보로 반환."""
+    if failure.kind == RuleFailureKind.SALARY_MATCHING:
+        team_id = str(failure.team_id or "").upper()
+        if not team_id:
+            return []
+        return _repair_salary_matching(cand, team_id, catalog, tick_ctx, config, failure)
+
+    c2 = _clone_candidate(cand)
+    ok = repair_once(
+        c2,
+        failure,
+        tick_ctx=tick_ctx,
+        catalog=catalog,
+        config=config,
+        banned_asset_keys=banned_asset_keys,
+        banned_players=banned_players,
+    )
+    return [c2] if ok else []
 
 
 def repair_once(
@@ -109,7 +204,7 @@ def repair_once(
     """
 
     # 구조적으로 수리 의미가 거의 없는 유형
-    if failure.kind in (RuleFailureKind.ASSET_LOCK, RuleFailureKind.OWNERSHIP, RuleFailureKind.DUPLICATE_ASSET):
+    if failure.kind in (RuleFailureKind.OWNERSHIP, RuleFailureKind.DUPLICATE_ASSET):
         return False
 
     if failure.kind == RuleFailureKind.PLAYER_ELIGIBILITY:
@@ -160,7 +255,13 @@ def repair_once(
         team_id = str(failure.team_id or "").upper()
         if not team_id:
             return False
-        return _repair_salary_matching(cand, team_id, catalog, config, failure)
+        variants = _repair_salary_matching(cand, team_id, catalog, tick_ctx, config, failure)
+        if not variants:
+            return False
+        best = variants[0]
+        cand.deal = best.deal
+        cand.tags.extend(best.tags)
+        return True
 
     if failure.kind == RuleFailureKind.PICK_RULES:
         team_id = str(failure.team_id or "").upper()
@@ -176,7 +277,7 @@ def _apply_prune_side_effects(
     banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
 ) -> None:
     # (C) 같은 invalid를 반복 생성하지 않도록 금지 목록에 반영
-    if failure.kind in (RuleFailureKind.ASSET_LOCK, RuleFailureKind.OWNERSHIP, RuleFailureKind.DUPLICATE_ASSET):
+    if failure.kind in (RuleFailureKind.OWNERSHIP, RuleFailureKind.DUPLICATE_ASSET):
         if failure.asset_key:
             banned_asset_keys.add(failure.asset_key)
 
@@ -206,435 +307,616 @@ def _to_int_dollars(x: Any) -> int:
         return 0
 
 
-def _repair_salary_matching(
-    cand: DealCandidate,
-    failing_team: str,
+@dataclass(frozen=True, slots=True)
+class SalaryTeamSnapshot:
+    team_id: str
+    payroll_before_d: int
+    outgoing_salary_d: int
+    incoming_salary_d: int
+    outgoing_players: int
+    incoming_players: int
+    max_single_outgoing_salary_d: int
+
+
+@dataclass(frozen=True, slots=True)
+class SalaryRepairContext:
+    teams: Tuple[str, ...]
+    trade_rules: Mapping[str, Any]
+    by_team: Dict[str, SalaryTeamSnapshot]
+
+
+@dataclass(frozen=True, slots=True)
+class SalaryValidationOutcome:
+    ok: bool
+    by_team_ok: Dict[str, bool]
+    by_team_slack_d: Dict[str, int]
+
+
+@dataclass(frozen=True, slots=True)
+class SalaryPackage:
+    # (team_id, player_id) list
+    additions: Tuple[Tuple[str, str], ...]
+    k: int
+    total_added_salary_d: int
+    total_added_market: float
+
+
+def _lookup_player_salary_d(catalog: TradeAssetCatalog, owner_team: str, player_id: str) -> int:
+    out = catalog.outgoing_by_team.get(str(owner_team).upper())
+    if out is None:
+        return 0
+    c = out.players.get(str(player_id))
+    if c is None:
+        return 0
+    try:
+        return int(round(float(c.salary_m) * 1_000_000.0))
+    except Exception:
+        return 0
+
+
+def _snapshot_salary_for_team(
+    deal: Deal,
+    team_id: str,
     catalog: TradeAssetCatalog,
-    config: DealGeneratorConfig,
-    failure: RuleFailure,
-) -> bool:
-    """SalaryMatchingRule 실패 수리.
+    tick_ctx: TradeGenerationTickContext,
+) -> SalaryTeamSnapshot:
+    tid = str(team_id).upper()
 
-    가장 안전한 수리:
-    - failing_team outgoing에 filler 1명을 추가(FILLER_CHEAP -> FILLER_BAD_CONTRACT)
+    payroll_before_d = 0
+    rt = getattr(tick_ctx, "rule_tick_ctx", None)
+    if rt is not None:
+        try:
+            rt.ensure_active_roster_index()
+            payroll_before_d = _to_int_dollars(rt.team_payroll_before_map.get(tid, 0))
+        except Exception:
+            payroll_before_d = 0
+    if payroll_before_d <= 0:
+        ts = None
+        try:
+            ts = tick_ctx.get_team_situation(tid)
+        except Exception:
+            ts = None
+        payroll_before_d = _to_int_dollars(getattr(getattr(ts, "constraints", None), "payroll", 0))
 
-    단, SECOND_APRON 팀은 post-2024 CBA 기준으로 outgoing salary aggregation이 금지되므로
-    (incoming이 단일 outgoing 계약으로 매칭 가능해야 함) 여기서는 보수적으로 제한된 수리만 시도한다.
-    """
+    outgoing_salary_d = 0
+    outgoing_players = 0
+    max_single_outgoing_salary_d = 0
+    for a in deal.legs.get(tid, []) or []:
+        if not isinstance(a, PlayerAsset):
+            continue
+        outgoing_players += 1
+        sal_d = _lookup_player_salary_d(catalog, tid, a.player_id)
+        outgoing_salary_d += sal_d
+        if sal_d > max_single_outgoing_salary_d:
+            max_single_outgoing_salary_d = sal_d
 
-    status = str(failure.status or "")
-    method = str(failure.method or "")
-    if status == "SECOND_APRON":
-        # SECOND_APRON salary matching: incoming must be matchable by a single outgoing salary (no aggregation).
-        if method == "outgoing_second_apron":
-            return _repair_second_apron_salary_mismatch(cand, failing_team, catalog, config, failure)
-        return False
-
-    out_catalog = catalog.outgoing_by_team.get(failing_team)
-    if out_catalog is None:
-        return False
-
-    # max_players_per_side guard
-    if _count_players(cand.deal, failing_team) >= int(config.max_players_per_side):
-        return False
-
-    # aggregation_solo_only가 이미 포함되면 추가 player를 붙이면 바로 다시 실패할 확률이 큼
-    for a in cand.deal.legs.get(failing_team, []):
-        if isinstance(a, PlayerAsset):
-            c = out_catalog.players.get(a.player_id)
-            if c is not None and bool(getattr(c, "aggregation_solo_only", False)):
-                return False
-
-    # receiver team(상대팀) 계산: return-ban 프리필터에 사용
-    other = [t for t in cand.deal.teams if str(t).upper() != str(failing_team).upper()]
-    receiver_team = str(other[0]).upper() if other else None
-
-    # SalaryMatchingRule failure.details는 달러(float) 기반이므로, 달러 정수로 변환해 사용한다.
-    # 이 숫자들은 SSOT(validate_deal)의 '현재 딜 상태' 기준이며, filler 추가 후 상태는 여기서 재시뮬레이션한다.
-    payroll_before_d = _to_int_dollars(failure.details.get("payroll_before"))
-    outgoing_salary_d0 = _to_int_dollars(failure.details.get("outgoing_salary"))
-    incoming_salary_d0 = _to_int_dollars(failure.details.get("incoming_salary"))
-
-    if incoming_salary_d0 <= 0:
-        return False
-
-    # max_players_per_side guard는 이미 위에서 통과했으므로, 여기서는 후보 스캔/선정만 한다.
-    already = {a.player_id for a in cand.deal.legs.get(failing_team, []) if isinstance(a, PlayerAsset)}
-    outgoing_players0 = len(already)
-    # aggregation_solo_only는 "묶음(2+ outgoing) 금지"이므로,
-    # 현재 outgoing이 0명(=단독 트레이드)인 경우에만 허용한다.
-    allow_solo_only = (len(already) == 0)
-
-    # 후보 filler를 버킷에서 전수 스캔하고, "salary matching을 실제로 통과시키는" 후보만 남긴다.
-    buckets: Tuple[BucketId, ...] = ("FILLER_CHEAP", "FILLER_BAD_CONTRACT")
-    seen: Set[str] = set()
-    passing: List[Tuple[int, float, str]] = []  # (salary_d, market_total, player_id)
-
-    trade_rules = catalog.trade_rules or {}
-
-    params = SalaryMatchingParams.from_trade_rules(trade_rules)
-    team_u = str(failing_team).upper()
-    incoming_players0 = 0
-    for sender_team, assets in (cand.deal.legs or {}).items():
-        if str(sender_team).upper() == team_u:
+    incoming_salary_d = 0
+    incoming_players = 0
+    for from_team, assets in (deal.legs or {}).items():
+        f_u = str(from_team).upper()
+        if f_u == tid:
             continue
         for a in assets or []:
             if not isinstance(a, PlayerAsset):
                 continue
             try:
-                recv = str(resolve_asset_receiver(cand.deal, sender_team, a)).upper()
+                recv = str(resolve_asset_receiver(deal, from_team, a)).upper()
             except Exception:
+                recv = tid
+            if recv != tid:
                 continue
-            if recv == team_u:
-                incoming_players0 += 1
+            incoming_players += 1
+            incoming_salary_d += _lookup_player_salary_d(catalog, f_u, a.player_id)
 
-    for b in buckets:
-        for pid in out_catalog.player_ids_by_bucket.get(b, tuple()):
-            pid = str(pid)
-            if pid in seen or pid in already:
+    return SalaryTeamSnapshot(
+        team_id=tid,
+        payroll_before_d=payroll_before_d,
+        outgoing_salary_d=outgoing_salary_d,
+        incoming_salary_d=incoming_salary_d,
+        outgoing_players=outgoing_players,
+        incoming_players=incoming_players,
+        max_single_outgoing_salary_d=max_single_outgoing_salary_d,
+    )
+
+
+def _build_salary_context(
+    cand: DealCandidate,
+    catalog: TradeAssetCatalog,
+    tick_ctx: TradeGenerationTickContext,
+) -> SalaryRepairContext:
+    teams: Tuple[str, ...] = tuple(str(t).upper() for t in (cand.deal.teams or ()))
+    by_team: Dict[str, SalaryTeamSnapshot] = {}
+    for tid in teams:
+        by_team[tid] = _snapshot_salary_for_team(cand.deal, tid, catalog, tick_ctx)
+    return SalaryRepairContext(
+        teams=teams,
+        trade_rules=dict(catalog.trade_rules or {}),
+        by_team=by_team,
+    )
+
+
+def _validate_salary_for_all_teams(
+    deal: Deal,
+    ctx: SalaryRepairContext,
+    catalog: TradeAssetCatalog,
+    tick_ctx: TradeGenerationTickContext,
+) -> SalaryValidationOutcome:
+    params = SalaryMatchingParams.from_trade_rules(ctx.trade_rules)
+    by_team_ok: Dict[str, bool] = {}
+    by_team_slack_d: Dict[str, int] = {}
+    all_ok = True
+    for tid in ctx.teams:
+        snap = _snapshot_salary_for_team(deal, tid, catalog, tick_ctx)
+        sim = check_salary_matching(
+            payroll_before_d=snap.payroll_before_d,
+            outgoing_salary_d=snap.outgoing_salary_d,
+            incoming_salary_d=snap.incoming_salary_d,
+            outgoing_players=snap.outgoing_players,
+            incoming_players=snap.incoming_players,
+            max_single_outgoing_salary_d=snap.max_single_outgoing_salary_d,
+            params=params,
+        )
+        by_team_ok[tid] = bool(sim.ok)
+        by_team_slack_d[tid] = int(sim.allowed_in_d - snap.incoming_salary_d)
+        if not sim.ok:
+            all_ok = False
+    return SalaryValidationOutcome(ok=all_ok, by_team_ok=by_team_ok, by_team_slack_d=by_team_slack_d)
+
+
+def _clone_candidate(cand: DealCandidate) -> DealCandidate:
+    legs_new: Dict[str, List[Asset]] = {
+        str(t).upper(): list(assets or [])
+        for t, assets in (cand.deal.legs or {}).items()
+    }
+    deal_new = Deal(
+        teams=list(cand.deal.teams or ()),
+        legs=legs_new,
+        meta=dict(cand.deal.meta or {}),
+    )
+    return DealCandidate(
+        deal=deal_new,
+        buyer_id=cand.buyer_id,
+        seller_id=cand.seller_id,
+        focal_player_id=cand.focal_player_id,
+        archetype=cand.archetype,
+        skeleton_id=cand.skeleton_id,
+        skeleton_domain=cand.skeleton_domain,
+        target_tier=cand.target_tier,
+        compat_archetype=cand.compat_archetype,
+        modifier_trace=list(cand.modifier_trace or []),
+        tags=list(cand.tags or []),
+        repairs_used=int(cand.repairs_used),
+    )
+
+
+def _iter_salary_add_candidates(
+    cand: DealCandidate,
+    team_id: str,
+    catalog: TradeAssetCatalog,
+    config: DealGeneratorConfig,
+) -> List[str]:
+    team_u = str(team_id).upper()
+    out = catalog.outgoing_by_team.get(team_u)
+    if out is None:
+        return []
+
+    leg = cand.deal.legs.get(team_u, []) or []
+    already = {str(a.player_id) for a in leg if isinstance(a, PlayerAsset)}
+    if len(already) >= int(config.max_players_per_side):
+        return []
+
+    other = [t for t in cand.deal.teams if str(t).upper() != team_u]
+    receiver_team = str(other[0]).upper() if other else None
+
+    # solo-only guard: existing solo-only outgoing이 이미 있으면 추가하지 않음.
+    for pid0 in already:
+        c0 = out.players.get(pid0)
+        if c0 is not None and bool(getattr(c0, "aggregation_solo_only", False)):
+            return []
+
+    seen: Set[str] = set()
+    picked: List[str] = []
+    for b in ("FILLER_CHEAP", "FILLER_BAD_CONTRACT", "CONSOLIDATE"):
+        for pid in out.player_ids_by_bucket.get(b, tuple()):
+            pid_s = str(pid)
+            if pid_s in seen or pid_s in already:
                 continue
-            seen.add(pid)
-
-            c = out_catalog.players.get(pid)
+            seen.add(pid_s)
+            c = out.players.get(pid_s)
             if c is None:
                 continue
-
-            # return-ban / aggregation-solo-only 필터 (기존 _pick_bucket_player와 동일한 의도)
             if receiver_team and receiver_team in set(getattr(c, "return_ban_teams", None) or ()):
                 continue
-            # solo-only는 단독 outgoing이면 허용, 이미 outgoing이 있으면 추가 outgoing으로 붙이지 않음
-            if bool(getattr(c, "aggregation_solo_only", False)) and not allow_solo_only:
+            if bool(getattr(c, "aggregation_solo_only", False)) and len(already) >= 1:
                 continue
+            picked.append(pid_s)
+    return picked
 
-            filler_salary_d = int(round(float(c.salary_m) * 1_000_000.0))
-            if filler_salary_d <= 0:
+
+def _candidate_player_meta(catalog: TradeAssetCatalog, team_id: str, pid: str) -> Tuple[int, float]:
+    out = catalog.outgoing_by_team.get(str(team_id).upper())
+    if out is None:
+        return 0, 0.0
+    c = out.players.get(str(pid))
+    if c is None:
+        return 0, 0.0
+    sal_d = _to_int_dollars(float(getattr(c, "salary_m", 0.0) or 0.0) * 1_000_000.0)
+    mkt = float(getattr(getattr(c, "market", None), "total", 0.0) or 0.0)
+    return sal_d, mkt
+
+
+def _build_salary_package(additions: List[Tuple[str, str]], catalog: TradeAssetCatalog) -> SalaryPackage:
+    ordered = tuple(sorted((str(t).upper(), str(pid)) for t, pid in additions))
+    total_sal = 0
+    total_mkt = 0.0
+    for tid, pid in ordered:
+        sal_d, mkt = _candidate_player_meta(catalog, tid, pid)
+        total_sal += sal_d
+        total_mkt += mkt
+    return SalaryPackage(
+        additions=ordered,
+        k=len(ordered),
+        total_added_salary_d=total_sal,
+        total_added_market=total_mkt,
+    )
+
+
+def _materialize_salary_package_candidate(
+    cand: DealCandidate,
+    pkg: SalaryPackage,
+    config: DealGeneratorConfig,
+) -> Optional[DealCandidate]:
+    c2 = _clone_candidate(cand)
+    # team별 인원 cap 사전 검증
+    add_by_team: Dict[str, int] = {}
+    for tid, _ in pkg.additions:
+        add_by_team[tid] = add_by_team.get(tid, 0) + 1
+    for tid, n_add in add_by_team.items():
+        cur_players = _count_players(c2.deal, tid)
+        if cur_players + n_add > int(config.max_players_per_side):
+            return None
+    for tid, pid in pkg.additions:
+        c2.deal.legs.setdefault(tid, []).append(PlayerAsset(kind="player", player_id=pid))
+    c2.tags.append(f"repair:salary_match_k{pkg.k}")
+    return c2
+
+
+def _search_min_k_salary_packages(
+    cand: DealCandidate,
+    ctx: SalaryRepairContext,
+    catalog: TradeAssetCatalog,
+    tick_ctx: TradeGenerationTickContext,
+    config: DealGeneratorConfig,
+    failing_team: str,
+    *,
+    max_k: int = 3,
+    per_k_limit: int = 10,
+) -> List[SalaryPackage]:
+    teams = [str(t).upper() for t in (cand.deal.teams or ()) if str(t).upper() in ctx.by_team]
+    if not teams:
+        return []
+
+    f_u = str(failing_team).upper()
+    ordered_teams: List[str] = []
+    if f_u in teams:
+        ordered_teams.append(f_u)
+    ordered_teams.extend([t for t in teams if t != f_u])
+
+    pool_cap_per_team = max(1, int(getattr(config, "salary_repair_pool_cap_per_team", 20) or 20))
+    combo_eval_cap = max(1, int(getattr(config, "salary_repair_combo_eval_cap", 1500) or 1500))
+    pool_by_team: Dict[str, List[str]] = {}
+    for tid in ordered_teams:
+        raw = _iter_salary_add_candidates(cand, tid, catalog, config)
+        # 조합 폭발 방지: 팀별 후보 풀 상한
+        pool_by_team[tid] = list(raw[:pool_cap_per_team])
+    if not any(pool_by_team.values()):
+        return []
+
+    eval_used = 0
+    passing_all: List[SalaryPackage] = []
+    blocked_from_lower_k: Set[Tuple[str, str]] = set()
+
+    def _can_eval_more() -> bool:
+        return eval_used < combo_eval_cap
+
+    # k=1
+    passing_k1: List[SalaryPackage] = []
+    seen_k1: Set[Tuple[Tuple[str, str], ...]] = set()
+    for tid in ordered_teams:
+        if len(passing_k1) >= int(per_k_limit):
+            break
+        for pid in pool_by_team.get(tid, []):
+            if len(passing_k1) >= int(per_k_limit):
+                break
+            pkg = _build_salary_package([(tid, pid)], catalog)
+            if pkg.additions in seen_k1:
                 continue
-
-            sim = check_salary_matching(
-                payroll_before_d=payroll_before_d,
-                outgoing_salary_d=outgoing_salary_d0 + filler_salary_d,
-                incoming_salary_d=incoming_salary_d0,
-                outgoing_players=outgoing_players0 + 1,
-                incoming_players=incoming_players0,
-                params=params,
-            )
-            if not sim.ok:
+            seen_k1.add(pkg.additions)
+            if not _can_eval_more():
+                return passing_all + passing_k1
+            c2 = _materialize_salary_package_candidate(cand, pkg, config)
+            if c2 is None:
                 continue
+            eval_used += 1
+            out = _validate_salary_for_all_teams(c2.deal, ctx, catalog, tick_ctx)
+            if not out.ok:
+                continue
+            passing_k1.append(pkg)
+            if len(passing_k1) >= int(per_k_limit):
+                break
 
-            mkt = float(getattr(c.market, "total", 0.0))
-            passing.append((filler_salary_d, mkt, pid))
+    if passing_k1:
+        passing_all.extend(passing_k1)
+        for pkg in passing_k1:
+            for add in pkg.additions:
+                blocked_from_lower_k.add(add)
 
-    if not passing:
-        return False
+    if int(max_k) < 2:
+        return passing_all
 
-    # "필요 샐러리를 충족하는 최소 salary" 우선, 그 안에서 market.total 최소
-    passing.sort(key=lambda t: (t[0], t[1], t[2]))
-    filler = passing[0][2]
+    # k=2
+    passing_k2: List[SalaryPackage] = []
+    seen_k2: Set[Tuple[Tuple[str, str], ...]] = set()
 
-    cand.deal.legs[failing_team].append(PlayerAsset(kind="player", player_id=filler))
-    cand.tags.append("repair:add_filler_salary")
-    return True
+    # same-team pairs
+    for tid in ordered_teams:
+        if len(passing_k2) >= int(per_k_limit):
+            break
+        pool = pool_by_team.get(tid, [])
+        for p1, p2 in combinations(pool, 2):
+            if len(passing_k2) >= int(per_k_limit):
+                break
+            pkg = _build_salary_package([(tid, p1), (tid, p2)], catalog)
+            if pkg.additions in seen_k2:
+                continue
+            seen_k2.add(pkg.additions)
+            if any(add in blocked_from_lower_k for add in pkg.additions):
+                continue
+            if not _can_eval_more():
+                return passing_all + passing_k2
+            c2 = _materialize_salary_package_candidate(cand, pkg, config)
+            if c2 is None:
+                continue
+            eval_used += 1
+            out = _validate_salary_for_all_teams(c2.deal, ctx, catalog, tick_ctx)
+            if not out.ok:
+                continue
+            passing_k2.append(pkg)
+            if len(passing_k2) >= int(per_k_limit):
+                break
+
+    # cross-team pairs
+    for i in range(len(ordered_teams)):
+        if len(passing_k2) >= int(per_k_limit):
+            break
+        for j in range(i + 1, len(ordered_teams)):
+            if len(passing_k2) >= int(per_k_limit):
+                break
+            ti = ordered_teams[i]
+            tj = ordered_teams[j]
+            pi = pool_by_team.get(ti, [])
+            pj = pool_by_team.get(tj, [])
+            for a in pi:
+                if len(passing_k2) >= int(per_k_limit):
+                    break
+                for b in pj:
+                    if len(passing_k2) >= int(per_k_limit):
+                        break
+                    pkg = _build_salary_package([(ti, a), (tj, b)], catalog)
+                    if pkg.additions in seen_k2:
+                        continue
+                    seen_k2.add(pkg.additions)
+                    if any(add in blocked_from_lower_k for add in pkg.additions):
+                        continue
+                    if not _can_eval_more():
+                        return passing_all + passing_k2
+                    c2 = _materialize_salary_package_candidate(cand, pkg, config)
+                    if c2 is None:
+                        continue
+                    eval_used += 1
+                    out = _validate_salary_for_all_teams(c2.deal, ctx, catalog, tick_ctx)
+                    if not out.ok:
+                        continue
+                    passing_k2.append(pkg)
+                    if len(passing_k2) >= int(per_k_limit):
+                        break
+
+    if passing_k2:
+        passing_all.extend(passing_k2)
+        for pkg in passing_k2:
+            for add in pkg.additions:
+                blocked_from_lower_k.add(add)
+
+    if int(max_k) < 3:
+        return passing_all
+
+    # k=3
+    passing_k3: List[SalaryPackage] = []
+    seen_k3: Set[Tuple[Tuple[str, str], ...]] = set()
+
+    # 3 same-team
+    for tid in ordered_teams:
+        if len(passing_k3) >= int(per_k_limit):
+            break
+        pool = pool_by_team.get(tid, [])
+        for p1, p2, p3 in combinations(pool, 3):
+            if len(passing_k3) >= int(per_k_limit):
+                break
+            pkg = _build_salary_package([(tid, p1), (tid, p2), (tid, p3)], catalog)
+            if pkg.additions in seen_k3:
+                continue
+            seen_k3.add(pkg.additions)
+            if any(add in blocked_from_lower_k for add in pkg.additions):
+                continue
+            if not _can_eval_more():
+                return passing_all + passing_k3
+            c2 = _materialize_salary_package_candidate(cand, pkg, config)
+            if c2 is None:
+                continue
+            eval_used += 1
+            out = _validate_salary_for_all_teams(c2.deal, ctx, catalog, tick_ctx)
+            if not out.ok:
+                continue
+            passing_k3.append(pkg)
+            if len(passing_k3) >= int(per_k_limit):
+                break
+
+    # 2 + 1 split
+    for i in range(len(ordered_teams)):
+        if len(passing_k3) >= int(per_k_limit):
+            break
+        for j in range(len(ordered_teams)):
+            if len(passing_k3) >= int(per_k_limit):
+                break
+            if i == j:
+                continue
+            ti = ordered_teams[i]
+            tj = ordered_teams[j]
+            pi = pool_by_team.get(ti, [])
+            pj = pool_by_team.get(tj, [])
+            for a, b in combinations(pi, 2):
+                if len(passing_k3) >= int(per_k_limit):
+                    break
+                for c in pj:
+                    if len(passing_k3) >= int(per_k_limit):
+                        break
+                    pkg = _build_salary_package([(ti, a), (ti, b), (tj, c)], catalog)
+                    if pkg.additions in seen_k3:
+                        continue
+                    seen_k3.add(pkg.additions)
+                    if any(add in blocked_from_lower_k for add in pkg.additions):
+                        continue
+                    if not _can_eval_more():
+                        return passing_all + passing_k3
+                    c2 = _materialize_salary_package_candidate(cand, pkg, config)
+                    if c2 is None:
+                        continue
+                    eval_used += 1
+                    out = _validate_salary_for_all_teams(c2.deal, ctx, catalog, tick_ctx)
+                    if not out.ok:
+                        continue
+                    passing_k3.append(pkg)
+                    if len(passing_k3) >= int(per_k_limit):
+                        break
+
+    # 1 + 1 + 1 split (3+ teams)
+    if len(ordered_teams) >= 3:
+        for i in range(len(ordered_teams)):
+            if len(passing_k3) >= int(per_k_limit):
+                break
+            for j in range(i + 1, len(ordered_teams)):
+                if len(passing_k3) >= int(per_k_limit):
+                    break
+                for k in range(j + 1, len(ordered_teams)):
+                    if len(passing_k3) >= int(per_k_limit):
+                        break
+                    ti = ordered_teams[i]
+                    tj = ordered_teams[j]
+                    tk = ordered_teams[k]
+                    pi = pool_by_team.get(ti, [])
+                    pj = pool_by_team.get(tj, [])
+                    pk = pool_by_team.get(tk, [])
+                    for a in pi:
+                        if len(passing_k3) >= int(per_k_limit):
+                            break
+                        for b in pj:
+                            if len(passing_k3) >= int(per_k_limit):
+                                break
+                            for c in pk:
+                                if len(passing_k3) >= int(per_k_limit):
+                                    break
+                                pkg = _build_salary_package([(ti, a), (tj, b), (tk, c)], catalog)
+                                if pkg.additions in seen_k3:
+                                    continue
+                                seen_k3.add(pkg.additions)
+                                if any(add in blocked_from_lower_k for add in pkg.additions):
+                                    continue
+                                if not _can_eval_more():
+                                    return passing_all + passing_k3
+                                c2 = _materialize_salary_package_candidate(cand, pkg, config)
+                                if c2 is None:
+                                    continue
+                                eval_used += 1
+                                out = _validate_salary_for_all_teams(c2.deal, ctx, catalog, tick_ctx)
+                                if not out.ok:
+                                    continue
+                                passing_k3.append(pkg)
+                                if len(passing_k3) >= int(per_k_limit):
+                                    break
+
+    passing_all.extend(passing_k3)
+    return passing_all
 
 
-def _repair_second_apron_salary_mismatch(
+def _rank_salary_packages(packages: List[SalaryPackage]) -> List[SalaryPackage]:
+    ranked = list(packages)
+    ranked.sort(
+        key=lambda p: (
+            int(p.k),
+            int(p.total_added_salary_d),
+            float(p.total_added_market),
+            tuple(p.additions),
+        )
+    )
+    return ranked
+
+
+def _materialize_salary_repaired_candidates(
+    cand: DealCandidate,
+    ranked_packages: List[SalaryPackage],
+    config: DealGeneratorConfig,
+    *,
+    top_n: int,
+) -> List[DealCandidate]:
+    out: List[DealCandidate] = []
+    for i, pkg in enumerate(ranked_packages[: max(0, int(top_n))], start=1):
+        c2 = _materialize_salary_package_candidate(cand, pkg, config)
+        if c2 is None:
+            continue
+        c2.tags.append(f"repair:salary_variant:{i}")
+        out.append(c2)
+    return out
+
+
+def _repair_salary_matching(
     cand: DealCandidate,
     failing_team: str,
     catalog: TradeAssetCatalog,
+    tick_ctx: TradeGenerationTickContext,
     config: DealGeneratorConfig,
     failure: RuleFailure,
-) -> bool:
-    """SECOND_APRON + method=outgoing_second_apron salary mismatch 수리.
+) -> List[DealCandidate]:
+    """SalaryMatchingRule 실패 수리 (3단계: 최소 인원 탐색 k=1/2/3 + 폭발 제어).
 
-    2026+ (post-2024 CBA) 가정:
-    - SECOND_APRON의 핵심 제약은 one-for-one이 아니라 *outgoing salary aggregation 금지*.
-      즉, incoming_total이 '단일 outgoing 계약 1명'으로 매칭 가능해야 한다.
-
-    SSOT 정렬:
-    - failure.details["allowed_in"] 은 SalaryMatchingPolicy(SSOT)가 계산한 allowed_in(달러)이며,
-      SECOND_APRON에서는 'max_single_outgoing_salary'와 동일해야 한다.
-    - 따라서 수리 목표는: incoming_total_d <= allowed_in_d
-
-    수리 전략(1-step, 다음 validate 루프에서 SSOT로 재검증)
-    1) max_single_outgoing을 올린다(allowed_in ↑)
-       - focal_player_id를 건드리지 않기 위해, 우선 failing_team outgoing 쪽을 swap/add로 보강한다.
-    2) incoming_total을 내린다(incoming ↓)
-       - 가능하면 focal이 아닌 incoming filler를 swap-down 또는 제거한다.
-
-    NOTE:
-    - player-specific aggregation_solo_only(별도 룰) 충돌을 줄이기 위해,
-      solo-only 플레이어를 multi-player leg에 끼워 넣는 선택은 기본적으로 피한다.
+    - 레거시 SECOND_APRON 분기 로직 없이, 모든 팀에 대해 SSOT(check_salary_matching)로 검증한다.
+    - 양 팀 후보 풀을 대상으로 k=1 -> k=2 -> k=3 순으로 탐색하며,
+      k에서 해가 발견되면 즉시 종료(최소 인원 원칙)한다.
     """
 
-    team = str(failing_team).upper()
-    others = [t for t in (cand.deal.teams or []) if str(t).upper() != team]
-    if not others:
-        return False
-    other = str(others[0]).upper()
+    ctx = _build_salary_context(cand, catalog, tick_ctx)
+    if not ctx.teams:
+        return []
 
-    # SSOT numbers (dollars)
-    try:
-        incoming_total_d = int(round(float(failure.details.get("incoming_salary") or 0.0)))
-    except Exception:
-        incoming_total_d = 0
-    try:
-        allowed_in_d = int(round(float(failure.details.get("allowed_in") or 0.0)))
-    except Exception:
-        allowed_in_d = 0
+    per_k_limit = int(getattr(config, "salary_repair_per_k_limit", 10) or 10)
+    top_n = int(getattr(config, "salary_repair_materialize_top_n", 10) or 10)
+    max_k = min(3, int(getattr(config, "salary_repair_max_k", 3) or 3))
 
-    if incoming_total_d <= 0 or allowed_in_d <= 0:
-        return False
-    if incoming_total_d <= allowed_in_d:
-        return False
-
-    # dollars 기반 비교: validate(SSOT)와 정렬해 float/rounding으로 인한 재실패를 줄인다.
-    EPS_D = 1_000  # $1k
-    required_out_d = incoming_total_d + EPS_D          # want a single outgoing >= this
-    max_in_total_d = max(0, allowed_in_d - EPS_D)      # want incoming_total <= this
-
-    focal_pid = str(cand.focal_player_id or "")
-    all_pids: Set[str] = {
-        str(a.player_id)
-        for leg in (cand.deal.legs or {}).values()
-        for a in (leg or [])
-        if isinstance(a, PlayerAsset)
-    }
-
-    allow_solo_only = bool(getattr(config, "allow_solo_only_fillers", False))
-
-    # Collect outgoing/incoming PlayerAssets (multi-player allowed)
-    out_assets = list(cand.deal.legs.get(team, []) or [])
-    out_players: List[PlayerAsset] = [a for a in out_assets if isinstance(a, PlayerAsset)]
-
-    incoming_players: List[PlayerAsset] = []
-    for a in cand.deal.legs.get(other, []) or []:
-        if not isinstance(a, PlayerAsset):
-            continue
-        try:
-            recv = str(resolve_asset_receiver(cand.deal, other, a)).upper()
-        except Exception:
-            recv = team  # 2-team deal fallback
-        if recv == team:
-            incoming_players.append(a)
-
-    if not incoming_players:
-        return False
-
-    # =========================================================
-    # Strategy 1) Raise max single outgoing (swap or add)
-    # =========================================================
-    out_cat = catalog.outgoing_by_team.get(team)
-    if out_cat is not None:
-
-        receiver_team = other
-        # choose an existing outgoing to replace (prefer non-focal, lowest market)
-        replace_pid: Optional[str] = None
-        replace_key: Optional[Tuple[float, int]] = None  # (market, salary_d)
-        for a in out_players:
-            pid = str(a.player_id)
-            if pid == focal_pid:
-                continue
-            c = out_cat.players.get(pid)
-            if c is None:
-                continue
-            try:
-                sal_d = int(round(float(c.salary_m) * 1_000_000.0))
-            except Exception:
-                sal_d = 0
-            key = (float(getattr(getattr(c, "market", None), "total", 0.0) or 0.0), sal_d)
-            if replace_key is None or key < replace_key:
-                replace_key = key
-                replace_pid = pid
-
-        best_pid: Optional[str] = None
-        best_key: Optional[Tuple[int, float, int]] = None  # (overshoot_d, market, salary_d)
-
-        scan_buckets: Tuple[BucketId, ...] = (
-            "FILLER_BAD_CONTRACT",
-            "FILLER_CHEAP",
-            "CONSOLIDATE",
-        ) + SURPLUS_BUCKETS_EFFECTIVE + (
-            "VETERAN_SALE",
-        )
-
-        # Resulting outgoing player-count if we swap vs add (solo-only filter uses this)
-        out_player_count_now = len(out_players)
-        
-        for b in scan_buckets:
-            for pid in out_cat.player_ids_by_bucket.get(b, tuple()):
-                pid_s = str(pid)
-                if pid_s in all_pids:
-                    continue
-                c = out_cat.players.get(pid_s)
-                if c is None:
-                    continue
-                if receiver_team in set(getattr(c, "return_ban_teams", None) or ()):
-                    continue
-
-                # Avoid selecting solo-only players into a multi-player leg (separate rule).
-                if bool(getattr(c, "aggregation_solo_only", False)) and not allow_solo_only:
-                    # swap keeps count, add increases count
-                    resulting_count = out_player_count_now if replace_pid else (out_player_count_now + 1)
-                    if resulting_count > 1:
-                        continue
-
-                sal_d = int(round(float(c.salary_m) * 1_000_000.0))
-                if sal_d < required_out_d:
-                    continue
-
-                overshoot_d = sal_d - required_out_d
-                mkt = float(getattr(getattr(c, "market", None), "total", 0.0) or 0.0)
-                key = (overshoot_d, mkt, sal_d)
-                if best_key is None or key < best_key:
-                    best_key = key
-                    best_pid = str(pid)
-
-                    best_pid = pid_s
-
-        if best_pid:
-            if replace_pid:
-                # Replace an existing outgoing PlayerAsset
-                new_leg: List[Asset] = []
-                for a in out_assets:
-                    if isinstance(a, PlayerAsset) and str(a.player_id) == replace_pid:
-                        new_leg.append(PlayerAsset(kind="player", player_id=best_pid))
-                    else:
-                        new_leg.append(a)
-                cand.deal.legs[team] = new_leg
-                cand.tags.append("repair:second_apron_raise_max_out_swap")
-                return True
-
-            # Otherwise, add a new outgoing PlayerAsset (to raise max_single_outgoing)
-            cand.deal.legs[team] = list(out_assets) + [PlayerAsset(kind="player", player_id=best_pid)]
-            cand.tags.append("repair:second_apron_raise_max_out_add")
-            return True
-
-    # =========================================================
-    # Strategy 2) Reduce incoming total (swap-down or remove a non-focal incoming)
-    # =========================================================
-    other_cat = catalog.outgoing_by_team.get(other)
-    if other_cat is None:
-        return False
-    if max_in_total_d <= 0:
-        return False
-
-    receiver_team = team
-    # Build incoming meta (only incoming to failing_team)
-    incoming_meta: List[Tuple[PlayerAsset, str, int, float]] = []
-    for a in incoming_players:
-        pid = str(a.player_id)
-        c = other_cat.players.get(pid)
-        if c is None:
-            continue
-        sal_d = int(round(float(c.salary_m) * 1_000_000.0))
-        mkt = float(getattr(getattr(c, "market", None), "total", 0.0) or 0.0)
-        incoming_meta.append((a, pid, sal_d, mkt))
-
-    # Prefer modifying non-focal incoming (filler)
-    non_focal = [x for x in incoming_meta if x[1] != focal_pid]
-    if not non_focal:
-        return False
-
-    # pick the largest-salary non-focal incoming to maximize chance of fixing in 1 step
-    non_focal.sort(key=lambda x: (-x[2], x[3]))
-    target_asset, target_pid, target_sal_d, _target_mkt = non_focal[0]
-
-    # If we keep other incoming unchanged, replacement must be <= limit
-    limit_d = max_in_total_d - (incoming_total_d - target_sal_d)
-
-    # Count player assets in other leg (for solo-only filter)
-    other_leg_player_count = sum(
-        1 for a in (cand.deal.legs.get(other, []) or []) if isinstance(a, PlayerAsset)
+    packages = _search_min_k_salary_packages(
+        cand,
+        ctx,
+        catalog,
+        tick_ctx,
+        config,
+        failing_team,
+        max_k=max_k,
+        per_k_limit=per_k_limit,
     )
+    if not packages:
+        return []
 
-    # -------------------------
-    # 2A) swap-down (replace with cheaper incoming)
-    # -------------------------
-    if limit_d >= 0:
-        best_pid2: Optional[str] = None
-        best_key2: Optional[Tuple[int, float]] = None  # (slack_d, market)
-
-        scan_buckets2: Tuple[BucketId, ...] = (
-            "FILLER_CHEAP",
-            "FILLER_BAD_CONTRACT",
-        ) + SURPLUS_BUCKETS_EFFECTIVE + (
-            "CONSOLIDATE",
-            "VETERAN_SALE",
-        )
-
-        for b in scan_buckets2:
-            for pid in other_cat.player_ids_by_bucket.get(b, tuple()):
-                pid_s = str(pid)
-                if pid_s in all_pids:
-                    continue
-                c = other_cat.players.get(pid_s)
-                if c is None:
-                    continue
-                if receiver_team in set(getattr(c, "return_ban_teams", None) or ()):
-                    continue
-
-                if bool(getattr(c, "aggregation_solo_only", False)) and not allow_solo_only:
-                    # other leg already has multiple outgoing players -> solo-only would fail separate rule
-                    if other_leg_player_count > 1:
-                        continue
-
-                sal_d = int(round(float(c.salary_m) * 1_000_000.0))
-                if sal_d > limit_d:
-                    continue
-
-                slack_d = limit_d - sal_d  # 0에 가까울수록(= limit에 가까울수록) 좋음
-                mkt = float(getattr(getattr(c, "market", None), "total", 0.0) or 0.0)
-                key = (slack_d, mkt)
-                if best_key2 is None or key < best_key2:
-                    best_key2 = key
-                    best_pid2 = pid_s
-
-        if best_pid2:
-            # Replace in other leg only for the asset that is incoming to failing_team
-            new_leg2: List[Asset] = []
-            for a in cand.deal.legs.get(other, []) or []:
-                if isinstance(a, PlayerAsset) and str(a.player_id) == target_pid:
-                    try:
-                        recv = str(resolve_asset_receiver(cand.deal, other, a)).upper()
-                    except Exception:
-                        recv = team
-                    if recv == team:
-                        new_leg2.append(PlayerAsset(kind="player", player_id=best_pid2))
-                    else:
-                        new_leg2.append(a)
-                else:
-                    new_leg2.append(a)
-
-            cand.deal.legs[other] = new_leg2
-            cand.tags.append("repair:second_apron_reduce_in_swap")
-            return True
-
-    # -------------------------
-    # 2B) remove a non-focal incoming (only if multiple incoming exist)
-    # -------------------------
-    if len(incoming_players) > 1 and (incoming_total_d - target_sal_d) <= max_in_total_d:
-        removed = False
-        new_leg3: List[Asset] = []
-        for a in cand.deal.legs.get(other, []) or []:
-            if (
-                not removed
-                and isinstance(a, PlayerAsset)
-                and str(a.player_id) == target_pid
-            ):
-                try:
-                    recv = str(resolve_asset_receiver(cand.deal, other, a)).upper()
-                except Exception:
-                    recv = team
-                if recv == team:
-                    removed = True
-                    continue
-            new_leg3.append(a)
-
-        if removed:
-            cand.deal.legs[other] = new_leg3
-            cand.tags.append("repair:second_apron_reduce_in_remove")
-            return True
-
-    return False
+    ranked = _rank_salary_packages(packages)
+    materialized = _materialize_salary_repaired_candidates(cand, ranked, config, top_n=top_n)
+    return materialized
 
 
 def _repair_roster_limit(cand: DealCandidate, problem_team: str, catalog: TradeAssetCatalog, config: DealGeneratorConfig) -> bool:

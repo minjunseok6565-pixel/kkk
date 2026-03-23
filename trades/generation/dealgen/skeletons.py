@@ -3,24 +3,15 @@ from __future__ import annotations
 import random
 from typing import Dict, List, Optional, Set, Tuple
 
-from ...models import Deal, PlayerAsset
+from ...models import Deal, PlayerAsset, asset_key
 
 from ..generation_tick import TradeGenerationTickContext
 from ..asset_catalog import TradeAssetCatalog, TeamOutgoingCatalog, BucketId
 
 from .types import DealGeneratorConfig, DealGeneratorBudget, TargetCandidate, DealCandidate, SellAssetCandidate
 from .skeleton_registry import BuildContext, build_default_registry
-from .skeleton_modifiers import apply_modifiers
 from .utils import (
     _add_pick_package,
-    _best_need_tag,
-    _can_absorb_without_outgoing,
-    _clone_deal,
-    _get_need_map,
-    _pick_bucket_player_for_need,
-    _pick_from_id_pool_for_need,
-    _pick_return_player_salaryish_with_need,
-    _split_young_candidates,
     _shape_ok,
     classify_target_profile,
 )
@@ -41,7 +32,7 @@ def _with_core_tags(tags: List[str], *, mode: str, focal_player_id: str, archety
     return out
 
 
-def _attach_v3_meta(candidate: DealCandidate, *, spec: object, target_tier: str, contract_tag: str) -> None:
+def _attach_v3_meta(candidate: DealCandidate, *, spec: object, target_tier: str) -> None:
     skeleton_id = str(getattr(spec, "skeleton_id", "") or "")
     domain = str(getattr(spec, "domain", "") or "")
     compat = str(getattr(spec, "compat_archetype", "") or candidate.archetype)
@@ -52,7 +43,6 @@ def _attach_v3_meta(candidate: DealCandidate, *, spec: object, target_tier: str,
         candidate.skeleton_domain = domain
     candidate.compat_archetype = compat
     candidate.target_tier = str(target_tier).upper()
-    candidate.contract_tag = str(contract_tag).upper()
     candidate.archetype = compat
 
     if not isinstance(candidate.tags, list):
@@ -62,12 +52,45 @@ def _attach_v3_meta(candidate: DealCandidate, *, spec: object, target_tier: str,
         f"skeleton:{candidate.skeleton_id}",
         f"domain:{candidate.skeleton_domain}",
         f"target_tier:{candidate.target_tier}",
-        f"contract_tag:{candidate.contract_tag}",
         f"arch_compat:{candidate.compat_archetype}",
         f"arch:{candidate.archetype}",
     ):
         if t not in candidate.tags:
             candidate.tags.append(t)
+
+
+def _append_unique_tag(candidate: DealCandidate, tag: str) -> None:
+    if not isinstance(candidate.tags, list):
+        candidate.tags = list(candidate.tags or [])
+    if tag not in candidate.tags:
+        candidate.tags.append(tag)
+
+
+def _build_candidates_for_phase(
+    *,
+    registry: object,
+    mode: str,
+    target_tier: str,
+    config: DealGeneratorConfig,
+    ctx: BuildContext,
+    route_phase: str,
+    stage_tag: str,
+) -> List[DealCandidate]:
+    out: List[DealCandidate] = []
+    specs = registry.get_specs_for_mode_and_tier(
+        mode,
+        target_tier,
+        config,
+        ctx=ctx,
+        route_phase=route_phase,
+    )
+    for spec in specs:
+        built = spec.build_fn(ctx)
+        for cand in built:
+            _attach_v3_meta(cand, spec=spec, target_tier=target_tier)
+            _append_unique_tag(cand, stage_tag)
+        out.extend(built)
+    return out
 
 
 def build_offer_skeletons_buy(
@@ -83,296 +106,98 @@ def build_offer_skeletons_buy(
     banned_asset_keys: Set[str],
     banned_players: Set[str],
     banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
+    generation_phase: str = "combined",
 ) -> List[DealCandidate]:
     """BUY 모드: target 1명 기준 2~4개 archetype 스켈레톤."""
-
-    if bool(getattr(config, "skeleton_overhaul_enabled", True)):
-        registry = build_default_registry()
-        target_profile = classify_target_profile(target=target, config=config)
-        target_tier = str(target_profile.get("tier") or "STARTER")
-        contract_tag = str(target_profile.get("contract_tag") or "FAIR")
-        ctx = BuildContext(
-            mode="BUY",
-            buyer_id=buyer_id,
-            seller_id=seller_id,
-            target=target,
-            tick_ctx=tick_ctx,
-            catalog=catalog,
-            config=config,
-            budget=budget,
-            rng=rng,
-            banned_asset_keys=banned_asset_keys,
-            banned_players=banned_players,
-            banned_receivers_by_player=banned_receivers_by_player,
-        )
-        out_v3: List[DealCandidate] = []
-        for spec in registry.get_specs_for_mode_and_tier("BUY", target_tier, config, ctx=ctx, contract_tag=contract_tag):
-            built = spec.build_fn(ctx)
-            for cand in built:
-                _attach_v3_meta(cand, spec=spec, target_tier=target_tier, contract_tag=contract_tag)
-            out_v3.extend(built)
-        out_v3 = apply_modifiers(
-            out_v3,
-            catalog=catalog,
-            config=config,
-            banned_asset_keys=banned_asset_keys,
-            max_variants_per_candidate=int(getattr(config, "modifier_max_variants_per_candidate", 3) or 3),
-        )
-
-        trimmed_v3: List[DealCandidate] = []
-        for c in out_v3:
-            if not c.compat_archetype:
-                c.compat_archetype = c.archetype
-            if not c.target_tier:
-                c.target_tier = str(target_tier).upper()
-            if not c.contract_tag:
-                c.contract_tag = str(contract_tag).upper()
-            if _shape_ok(c.deal, config=config, catalog=catalog):
-                trimmed_v3.append(c)
-        return trimmed_v3[: max(2, int(budget.beam_width))]
-
-    buyer_out = catalog.outgoing_by_team.get(str(buyer_id).upper())
-    seller_out = catalog.outgoing_by_team.get(str(seller_id).upper())
-    if buyer_out is None or seller_out is None:
-        return []
-
-    # BUY 관점에서는 seller outgoing bucket 포함 여부를 선제 게이트로 사용하지 않는다.
-
-    # return-ban precheck
-    cand_target = seller_out.players.get(target.player_id)
-    if cand_target is not None:
-        if str(buyer_id).upper() in set(cand_target.return_ban_teams or ()):
-            return []
-    # learned receiver-specific ban (from repair stage)
-    buyer_u = str(buyer_id).upper()
-    if banned_receivers_by_player is not None:
-        if buyer_u in banned_receivers_by_player.get(str(target.player_id), set()):
-            return []
-
-    ts_buyer = tick_ctx.get_team_situation(buyer_id)
-    ts_seller = tick_ctx.get_team_situation(seller_id)
-    seller_need_map = _get_need_map(tick_ctx, seller_id)
-
-    # soft 2nd apron guard는 _soft_guard_second_apron_candidates(=payroll_after_est 기반)에서 처리
-
-    # base deal: seller sends target
-    base = Deal(
-        teams=[str(buyer_id).upper(), str(seller_id).upper()],
-        legs={
-            str(buyer_id).upper(): [],
-            str(seller_id).upper(): [PlayerAsset(kind="player", player_id=target.player_id)],
-        },
-    )
-
-    out: List[DealCandidate] = []
-
-    # archetype 1) picks-only
-    # cap space로 흡수 가능한 경우에만 생성(그 외는 salary_matching repair로 억지 변형되는 비율이 높아 현실감/비용에 악영향)
-    if _can_absorb_without_outgoing(ts_buyer, float(target.salary_m)):
-        deal1 = _clone_deal(base)
-        # seller rebuild이면 pick을 조금 더
-        max_picks = 2 if str(getattr(ts_seller, "time_horizon", "RE_TOOL") or "RE_TOOL") == "REBUILD" else 1
-        _add_pick_package(
-            deal1,
-            from_team=buyer_id,
-            out_cat=buyer_out,
-            catalog=catalog,
-            config=config,
-            rng=rng,
-            prefer=("SECOND", "FIRST_SAFE"),
-            max_picks=max_picks,
-            banned_asset_keys=banned_asset_keys,
-        )
-        out.append(
-            DealCandidate(
-                deal=deal1,
-                buyer_id=buyer_id,
-                seller_id=seller_id,
-                focal_player_id=target.player_id,
-                archetype="picks_only",
-                tags=_with_core_tags([f"need:{target.need_tag}", "pkg:picks"], mode="BUY", focal_player_id=target.player_id, archetype="picks_only"),
-            )
-        )
-
-    # archetype 2) young + pick (one outgoing player)
-    seller_horizon = str(getattr(ts_seller, "time_horizon", "RE_TOOL") or "RE_TOOL")
-    rebuildish = seller_horizon in {"REBUILD", "RE_TOOL"}
-
-    prospect_ids, throwin_ids = _split_young_candidates(
-        buyer_out,
+    registry = build_default_registry()
+    target_profile = classify_target_profile(target=target, config=config)
+    target_tier = str(target_profile.get("tier") or "STARTER")
+    ctx = BuildContext(
+        mode="BUY",
+        buyer_id=buyer_id,
+        seller_id=seller_id,
+        target=target,
+        tick_ctx=tick_ctx,
+        catalog=catalog,
         config=config,
-        receiver_team_id=seller_id,
-        banned_players=banned_players,
-        banned_receivers_by_player=banned_receivers_by_player,
-        must_be_aggregation_friendly=True,
-    )
-
-    young_id: Optional[str] = None
-    source_tag: Optional[str] = None
-
-    if rebuildish:
-        pool = prospect_ids if prospect_ids else throwin_ids
-        if pool:
-            # variety: shuffle among top candidates (deterministic rng)
-            max_prospect = int(getattr(config, "young_prospect_max_candidates", 6) or 6)
-            top_n = max(2, min(max_prospect, len(pool)))
-            bucket = list(pool[:top_n])
-            rng.shuffle(bucket)
-            young_id = bucket[0]
-            source_tag = "young_source:prospect" if prospect_ids else "young_source:throwin"
-    else:
-        # non-rebuild sellers treat "young" as cheap throw-in only (no prospect fallback)
-        pool = throwin_ids
-        if pool:
-            young_id = _pick_from_id_pool_for_need(
-                buyer_out,
-                pool_ids=pool,
-                receiver_team_id=seller_id,
-                target_salary_m=float(target.salary_m),
-                need_map=seller_need_map,
-                rng=rng,
-                banned_players=banned_players,
-                banned_receivers_by_player=banned_receivers_by_player,
-                must_be_aggregation_friendly=True,
-                top_scan=6,
-            )
-            source_tag = "young_source:throwin"
-
-    if young_id:
-        deal2 = _clone_deal(base)
-        deal2.legs[str(buyer_id).upper()].append(PlayerAsset(kind="player", player_id=young_id))
-        _add_pick_package(
-            deal2,
-            from_team=buyer_id,
-            out_cat=buyer_out,
-            catalog=catalog,
-            config=config,
-            rng=rng,
-            prefer=("SECOND",),
-            max_picks=1,
-            banned_asset_keys=banned_asset_keys,
-        )
-        tags = [f"need:{target.need_tag}", "pkg:young+pick"]
-        if source_tag:
-            tags.append(source_tag)
-        c_ret = buyer_out.players.get(str(young_id))
-        if c_ret is not None:
-            rt = _best_need_tag(seller_need_map, c_ret)
-            if rt:
-                tags.append(f"return_need:{rt}")
-        out.append(
-            DealCandidate(
-                deal=deal2,
-                buyer_id=buyer_id,
-                seller_id=seller_id,
-                focal_player_id=target.player_id,
-                archetype="young_plus_pick",
-                tags=_with_core_tags(tags, mode="BUY", focal_player_id=target.player_id, archetype="young_plus_pick"),
-            )
-        )
-
-    # archetype 3) player-for-player (salary-ish)
-    filler_id = _pick_return_player_salaryish_with_need(
-        buyer_out,
-        receiver_team_id=seller_id,
-        target_salary_m=float(target.salary_m),
-        need_map=seller_need_map,
+        budget=budget,
         rng=rng,
+        banned_asset_keys=banned_asset_keys,
         banned_players=banned_players,
         banned_receivers_by_player=banned_receivers_by_player,
-        # aggregation_solo_only는 '묶음 금지'이므로 1-for-1(p4p) 스켈레톤에서는 허용
-        must_be_aggregation_friendly=False,
     )
-    if filler_id:
-        deal3 = _clone_deal(base)
-        deal3.legs[str(buyer_id).upper()].append(PlayerAsset(kind="player", player_id=filler_id))
+    phase = str(generation_phase or "combined").strip().lower()
+    out_v3: List[DealCandidate] = []
 
-        tags = [f"need:{target.need_tag}", "pkg:player_for_player"]
-        c_ret = buyer_out.players.get(str(filler_id))
-        if c_ret is not None:
-            rt = _best_need_tag(seller_need_map, c_ret)
-            if rt:
-                tags.append(f"return_need:{rt}")
-        
-        out.append(
-            DealCandidate(
-                deal=deal3,
-                buyer_id=buyer_id,
-                seller_id=seller_id,
-                focal_player_id=target.player_id,
-                archetype="p4p_salary",
-                tags=_with_core_tags(tags, mode="BUY", focal_player_id=target.player_id, archetype="p4p_salary"),
+    if phase == "template":
+        if bool(getattr(config, "template_first_enabled", True)):
+            out_v3 = _build_candidates_for_phase(
+                registry=registry,
+                mode="BUY",
+                target_tier=target_tier,
+                config=config,
+                ctx=ctx,
+                route_phase="template_only",
+                stage_tag="stage:template",
             )
-        )
-
-    # archetype 4) consolidate 2-for-1
-    cons_id = _pick_bucket_player_for_need(
-        buyer_out,
-        bucket="CONSOLIDATE",
-        receiver_team_id=seller_id,
-        banned_players=banned_players,
-        banned_receivers_by_player=banned_receivers_by_player,
-        must_be_aggregation_friendly=True,
-        need_map=seller_need_map,
-    )
-    cheap_id = _pick_bucket_player_for_need(
-        buyer_out,
-        bucket="FILLER_CHEAP",
-        receiver_team_id=seller_id,
-        banned_players=banned_players,
-        banned_receivers_by_player=banned_receivers_by_player,
-        must_be_aggregation_friendly=True,
-        need_map=seller_need_map,
-    )
-    if cons_id and cheap_id and cons_id != cheap_id:
-        deal4 = _clone_deal(base)
-        deal4.legs[str(buyer_id).upper()].extend(
-            [
-                PlayerAsset(kind="player", player_id=cons_id),
-                PlayerAsset(kind="player", player_id=cheap_id),
-            ]
-        )
-        _add_pick_package(
-            deal4,
-            from_team=buyer_id,
-            out_cat=buyer_out,
-            catalog=catalog,
-            config=config,
-            rng=rng,
-            prefer=("SECOND",),
-            max_picks=1,
-            banned_asset_keys=banned_asset_keys,
-        )
-        tags = [f"need:{target.need_tag}", "pkg:consolidate"]
-        rt_seen: Set[str] = set()
-        for _pid in (cons_id, cheap_id):
-            c_ret = buyer_out.players.get(str(_pid))
-            if c_ret is None:
-                continue
-            rt = _best_need_tag(seller_need_map, c_ret)
-            if rt and rt not in rt_seen:
-                rt_seen.add(rt)
-                tags.append(f"return_need:{rt}")
-                
-        out.append(
-            DealCandidate(
-                deal=deal4,
-                buyer_id=buyer_id,
-                seller_id=seller_id,
-                focal_player_id=target.player_id,
-                archetype="consolidate_2_for_1",
-                tags=_with_core_tags(tags, mode="BUY", focal_player_id=target.player_id, archetype="consolidate_2_for_1"),
+    elif phase == "fallback":
+        if bool(getattr(config, "template_first_fallback_enabled", True)):
+            out_v3 = _build_candidates_for_phase(
+                registry=registry,
+                mode="BUY",
+                target_tier=target_tier,
+                config=config,
+                ctx=ctx,
+                route_phase="fallback_only",
+                stage_tag="stage:fallback",
             )
-        )
+    else:
+        template_enabled = bool(getattr(config, "template_first_enabled", True))
+        fallback_enabled = bool(getattr(config, "template_first_fallback_enabled", True))
+        min_keep = max(1, int(getattr(config, "template_first_min_keep_after_eval", 1) or 1))
 
-    # shape cap
-    trimmed: List[DealCandidate] = []
-    for c in out:
+        out_template: List[DealCandidate] = []
+        if template_enabled:
+            out_template = _build_candidates_for_phase(
+                registry=registry,
+                mode="BUY",
+                target_tier=target_tier,
+                config=config,
+                ctx=ctx,
+                route_phase="template_only",
+                stage_tag="stage:template",
+            )
+
+        out_v3.extend(out_template)
+
+        should_run_fallback = (not template_enabled) or (len(out_template) < min_keep)
+        if should_run_fallback and fallback_enabled:
+            out_v3.extend(
+                _build_candidates_for_phase(
+                    registry=registry,
+                    mode="BUY",
+                    target_tier=target_tier,
+                    config=config,
+                    ctx=ctx,
+                    route_phase="fallback_only" if template_enabled else "combined",
+                    stage_tag="stage:fallback",
+                )
+            )
+    # skeleton_modifiers module removed: keep candidates as-is.
+    out_v3 = list(out_v3)
+
+    trimmed_v3: List[DealCandidate] = []
+    for c in out_v3:
+        buyer_leg = c.deal.legs.get(str(buyer_id).upper(), []) or []
+        if not buyer_leg:
+            continue
+        if not c.compat_archetype:
+            c.compat_archetype = c.archetype
+        if not c.target_tier:
+            c.target_tier = str(target_tier).upper()
         if _shape_ok(c.deal, config=config, catalog=catalog):
-            trimmed.append(c)
-
-    # beam cap
-    return trimmed[: max(2, int(budget.beam_width))]
+            trimmed_v3.append(c)
+    return trimmed_v3[: max(2, int(budget.beam_width))]
 
 
 def build_offer_skeletons_sell(
@@ -389,292 +214,99 @@ def build_offer_skeletons_sell(
     banned_asset_keys: Set[str],
     banned_players: Set[str],
     banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
+    generation_phase: str = "combined",
 ) -> List[DealCandidate]:
     """SELL 모드: (seller sends sale_asset.player_id) 기준 BUYER 패키지를 생성."""
-
-    if bool(getattr(config, "skeleton_overhaul_enabled", True)):
-        registry = build_default_registry()
-        target_profile = classify_target_profile(sale_asset=sale_asset, match_tag=match_tag, config=config)
-        target_tier = str(target_profile.get("tier") or "STARTER")
-        contract_tag = str(target_profile.get("contract_tag") or "FAIR")
-        ctx = BuildContext(
-            mode="SELL",
-            buyer_id=buyer_id,
-            seller_id=seller_id,
-            sale_asset=sale_asset,
-            match_tag=match_tag,
-            tick_ctx=tick_ctx,
-            catalog=catalog,
-            config=config,
-            budget=budget,
-            rng=rng,
-            banned_asset_keys=banned_asset_keys,
-            banned_players=banned_players,
-            banned_receivers_by_player=banned_receivers_by_player,
-        )
-        out_v3: List[DealCandidate] = []
-        for spec in registry.get_specs_for_mode_and_tier("SELL", target_tier, config, ctx=ctx, contract_tag=contract_tag):
-            built = spec.build_fn(ctx)
-            for cand in built:
-                _attach_v3_meta(cand, spec=spec, target_tier=target_tier, contract_tag=contract_tag)
-            out_v3.extend(built)
-        out_v3 = apply_modifiers(
-            out_v3,
-            catalog=catalog,
-            config=config,
-            banned_asset_keys=banned_asset_keys,
-            max_variants_per_candidate=int(getattr(config, "modifier_max_variants_per_candidate", 3) or 3),
-        )
-
-        trimmed_v3: List[DealCandidate] = []
-        for c in out_v3:
-            if not c.compat_archetype:
-                c.compat_archetype = c.archetype
-            if not c.target_tier:
-                c.target_tier = str(target_tier).upper()
-            if not c.contract_tag:
-                c.contract_tag = str(contract_tag).upper()
-            if _shape_ok(c.deal, config=config, catalog=catalog):
-                trimmed_v3.append(c)
-        return trimmed_v3[: max(2, int(budget.beam_width))]
-
-    buyer_out = catalog.outgoing_by_team.get(str(buyer_id).upper())
-    seller_out = catalog.outgoing_by_team.get(str(seller_id).upper())
-    if buyer_out is None or seller_out is None:
-        return []
-
-    pid = sale_asset.player_id
-    if pid in banned_players:
-        return []
-
-    # return-ban precheck
-    c_sale = seller_out.players.get(pid)
-    if c_sale is not None:
-        if str(buyer_id).upper() in set(c_sale.return_ban_teams or ()):
-            return []
-    # learned receiver-specific ban
-    buyer_u = str(buyer_id).upper()
-    if banned_receivers_by_player is not None:
-        if buyer_u in banned_receivers_by_player.get(str(pid), set()):
-            return []
-
-    # base deal: seller sends player to buyer
-    base = Deal(
-        teams=[str(buyer_id).upper(), str(seller_id).upper()],
-        legs={
-            str(buyer_id).upper(): [],
-            str(seller_id).upper(): [PlayerAsset(kind="player", player_id=pid)],
-        },
-    )
-
-    ts_seller = tick_ctx.get_team_situation(seller_id)
-    ts_buyer = tick_ctx.get_team_situation(buyer_id)
-    time_horizon = str(getattr(ts_seller, "time_horizon", "RE_TOOL") or "RE_TOOL")
-    seller_need_map = _get_need_map(tick_ctx, seller_id)
-
-    # soft 2nd apron guard는 _soft_guard_second_apron_candidates(=payroll_after_est 기반)에서 처리
-
-    out: List[DealCandidate] = []
-
-    # archetype 1) buyer picks package to seller
-    # buyer가 선수 없이 salary를 흡수할 cap space가 있을 때만 생성
-    if _can_absorb_without_outgoing(ts_buyer, float(sale_asset.salary_m)):
-        deal1 = _clone_deal(base)
-        # rebuild seller는 picks 선호
-        max_picks = 2 if time_horizon == "REBUILD" else 1
-        _add_pick_package(
-            deal1,
-            from_team=buyer_id,
-            out_cat=buyer_out,
-            catalog=catalog,
-            config=config,
-            rng=rng,
-            prefer=("SECOND", "FIRST_SAFE"),
-            max_picks=max_picks,
-            banned_asset_keys=banned_asset_keys,
-        )
-        out.append(
-            DealCandidate(
-                deal=deal1,
-                buyer_id=buyer_id,
-                seller_id=seller_id,
-                focal_player_id=pid,
-                archetype="buyer_picks",
-                tags=_with_core_tags([f"match:{match_tag}", "pkg:picks"], mode="SELL", focal_player_id=pid, archetype="buyer_picks"),
-            )
-        )
-
-    # archetype 2) buyer young + pick
-    rebuildish = time_horizon in {"REBUILD", "RE_TOOL"}
-
-    prospect_ids, throwin_ids = _split_young_candidates(
-        buyer_out,
+    registry = build_default_registry()
+    target_profile = classify_target_profile(sale_asset=sale_asset, match_tag=match_tag, config=config)
+    target_tier = str(target_profile.get("tier") or "STARTER")
+    ctx = BuildContext(
+        mode="SELL",
+        buyer_id=buyer_id,
+        seller_id=seller_id,
+        sale_asset=sale_asset,
+        match_tag=match_tag,
+        tick_ctx=tick_ctx,
+        catalog=catalog,
         config=config,
-        receiver_team_id=seller_id,
+        budget=budget,
+        rng=rng,
+        banned_asset_keys=banned_asset_keys,
         banned_players=banned_players,
         banned_receivers_by_player=banned_receivers_by_player,
-        must_be_aggregation_friendly=True,
     )
+    phase = str(generation_phase or "combined").strip().lower()
+    out_v3: List[DealCandidate] = []
 
-    young_id: Optional[str] = None
-    source_tag: Optional[str] = None
-
-    if rebuildish:
-        pool = prospect_ids if prospect_ids else throwin_ids
-        if pool:
-            max_prospect = int(getattr(config, "young_prospect_max_candidates", 6) or 6)
-            top_n = max(2, min(max_prospect, len(pool)))
-            bucket = list(pool[:top_n])
-            rng.shuffle(bucket)
-            young_id = bucket[0]
-            source_tag = "young_source:prospect" if prospect_ids else "young_source:throwin"
+    if phase == "template":
+        if bool(getattr(config, "template_first_enabled", True)):
+            out_v3 = _build_candidates_for_phase(
+                registry=registry,
+                mode="SELL",
+                target_tier=target_tier,
+                config=config,
+                ctx=ctx,
+                route_phase="template_only",
+                stage_tag="stage:template",
+            )
+    elif phase == "fallback":
+        if bool(getattr(config, "template_first_fallback_enabled", True)):
+            out_v3 = _build_candidates_for_phase(
+                registry=registry,
+                mode="SELL",
+                target_tier=target_tier,
+                config=config,
+                ctx=ctx,
+                route_phase="fallback_only",
+                stage_tag="stage:fallback",
+            )
     else:
-        pool = throwin_ids
-        if pool:
-            young_id = _pick_from_id_pool_for_need(
-                buyer_out,
-                pool_ids=pool,
-                receiver_team_id=seller_id,
-                target_salary_m=float(sale_asset.salary_m),
-                need_map=seller_need_map,
-                rng=rng,
-                banned_players=banned_players,
-                banned_receivers_by_player=banned_receivers_by_player,
-                must_be_aggregation_friendly=True,
-                top_scan=6,
+        template_enabled = bool(getattr(config, "template_first_enabled", True))
+        fallback_enabled = bool(getattr(config, "template_first_fallback_enabled", True))
+        min_keep = max(1, int(getattr(config, "template_first_min_keep_after_eval", 1) or 1))
+
+        out_template: List[DealCandidate] = []
+        if template_enabled:
+            out_template = _build_candidates_for_phase(
+                registry=registry,
+                mode="SELL",
+                target_tier=target_tier,
+                config=config,
+                ctx=ctx,
+                route_phase="template_only",
+                stage_tag="stage:template",
             )
-            source_tag = "young_source:throwin"
 
-    if young_id:
-        deal2 = _clone_deal(base)
-        deal2.legs[str(buyer_id).upper()].append(PlayerAsset(kind="player", player_id=young_id))
-        _add_pick_package(
-            deal2,
-            from_team=buyer_id,
-            out_cat=buyer_out,
-            catalog=catalog,
-            config=config,
-            rng=rng,
-            prefer=("SECOND",),
-            max_picks=1,
-            banned_asset_keys=banned_asset_keys,
-        )
-        tags = [f"match:{match_tag}", "pkg:young+pick"]
-        if source_tag:
-            tags.append(source_tag)
-        c_ret = buyer_out.players.get(str(young_id))
-        if c_ret is not None:
-            rt = _best_need_tag(seller_need_map, c_ret)
-            if rt:
-                tags.append(f"return_need:{rt}")
-        out.append(
-            DealCandidate(
-                deal=deal2,
-                buyer_id=buyer_id,
-                seller_id=seller_id,
-                focal_player_id=pid,
-                archetype="buyer_young_plus_pick",
-                tags=_with_core_tags(tags, mode="SELL", focal_player_id=pid, archetype="buyer_young_plus_pick"),
-            )
-        )
+        out_v3.extend(out_template)
 
-    # archetype 3) buyer sends salary-ish player back (WIN_NOW seller라면 우선)
-    if time_horizon in {"WIN_NOW", "RE_TOOL"}:
-        filler_id = _pick_return_player_salaryish_with_need(
-            buyer_out,
-            receiver_team_id=seller_id,
-            target_salary_m=float(sale_asset.salary_m),
-            need_map=seller_need_map,
-            rng=rng,
-            banned_players=banned_players,
-            banned_receivers_by_player=banned_receivers_by_player,
-            # aggregation_solo_only는 '묶음 금지'이므로 1-for-1(p4p) 스켈레톤에서는 허용
-            must_be_aggregation_friendly=False,
-        )
-        if filler_id:
-            deal3 = _clone_deal(base)
-            deal3.legs[str(buyer_id).upper()].append(PlayerAsset(kind="player", player_id=filler_id))
-
-            tags = [f"match:{match_tag}", "pkg:player_for_player"]
-            c_ret = buyer_out.players.get(str(filler_id))
-            if c_ret is not None:
-                rt = _best_need_tag(seller_need_map, c_ret)
-                if rt:
-                    tags.append(f"return_need:{rt}")
-            
-            out.append(
-                DealCandidate(
-                    deal=deal3,
-                    buyer_id=buyer_id,
-                    seller_id=seller_id,
-                    focal_player_id=pid,
-                    archetype="buyer_p4p",
-                    tags=_with_core_tags(tags, mode="SELL", focal_player_id=pid, archetype="buyer_p4p"),
+        should_run_fallback = (not template_enabled) or (len(out_template) < min_keep)
+        if should_run_fallback and fallback_enabled:
+            out_v3.extend(
+                _build_candidates_for_phase(
+                    registry=registry,
+                    mode="SELL",
+                    target_tier=target_tier,
+                    config=config,
+                    ctx=ctx,
+                    route_phase="fallback_only" if template_enabled else "combined",
+                    stage_tag="stage:fallback",
                 )
             )
+    # skeleton_modifiers module removed: keep candidates as-is.
+    out_v3 = list(out_v3)
 
-    # archetype 4) consolidate (buyer 2-for-1)
-    cons_id = _pick_bucket_player_for_need(
-        buyer_out,
-        bucket="CONSOLIDATE",
-        receiver_team_id=seller_id,
-        banned_players=banned_players,
-        banned_receivers_by_player=banned_receivers_by_player,
-        must_be_aggregation_friendly=True,
-        need_map=seller_need_map,
-    )
-    cheap_id = _pick_bucket_player_for_need(
-        buyer_out,
-        bucket="FILLER_CHEAP",
-        receiver_team_id=seller_id,
-        banned_players=banned_players,
-        banned_receivers_by_player=banned_receivers_by_player,
-        must_be_aggregation_friendly=True,
-        need_map=seller_need_map,
-    )
-    if cons_id and cheap_id and cons_id != cheap_id:
-        deal4 = _clone_deal(base)
-        deal4.legs[str(buyer_id).upper()].extend(
-            [PlayerAsset(kind="player", player_id=cons_id), PlayerAsset(kind="player", player_id=cheap_id)]
-        )
-        _add_pick_package(
-            deal4,
-            from_team=buyer_id,
-            out_cat=buyer_out,
-            catalog=catalog,
-            config=config,
-            rng=rng,
-            prefer=("SECOND",),
-            max_picks=1,
-            banned_asset_keys=banned_asset_keys,
-        )
-        tags = [f"match:{match_tag}", "pkg:consolidate"]
-        rt_seen: Set[str] = set()
-        for _pid in (cons_id, cheap_id):
-            c_ret = buyer_out.players.get(str(_pid))
-            if c_ret is None:
-                continue
-            rt = _best_need_tag(seller_need_map, c_ret)
-            if rt and rt not in rt_seen:
-                rt_seen.add(rt)
-                tags.append(f"return_need:{rt}")
-        out.append(
-            DealCandidate(
-                deal=deal4,
-                buyer_id=buyer_id,
-                seller_id=seller_id,
-                focal_player_id=pid,
-                archetype="buyer_consolidate",
-                tags=_with_core_tags(tags, mode="SELL", focal_player_id=pid, archetype="buyer_consolidate"),
-            )
-        )
-
-    trimmed: List[DealCandidate] = []
-    for c in out:
+    trimmed_v3: List[DealCandidate] = []
+    for c in out_v3:
+        buyer_leg = c.deal.legs.get(str(buyer_id).upper(), []) or []
+        if not buyer_leg:
+            continue
+        if not c.compat_archetype:
+            c.compat_archetype = c.archetype
+        if not c.target_tier:
+            c.target_tier = str(target_tier).upper()
         if _shape_ok(c.deal, config=config, catalog=catalog):
-            trimmed.append(c)
-
-    return trimmed[: max(2, int(budget.beam_width))]
+            trimmed_v3.append(c)
+    return trimmed_v3[: max(2, int(budget.beam_width))]
 
 
 
@@ -699,16 +331,7 @@ def expand_variants(
     banned_players: Set[str],
     banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
 ) -> List[DealCandidate]:
-    """스켈레톤을 '얕게' 확장한다.
-
-    목표
-    - 타깃당 6~12개 수준에서만 변형을 만들어 탐색을 깊게(하지만 폭발은 방지).
-    - 변형은 **동일 archetype 내에서** player/pick을 약간 교체하는 수준만 수행.
-
-    주의
-    - validate/evaluate 비용이 크므로, 여기서는 **항상 정적(cap) 상한**을 둔다.
-    - 중복 제거는 상위 루프(dedupe_hash)에서 처리한다.
-    """
+    """Registry 기반 후보를 archetype-정합 변형으로 얕게 확장한다."""
 
     goal = min(12, max(6, int(budget.beam_width)))
     if not base_candidates:
@@ -716,283 +339,173 @@ def expand_variants(
 
     buyer = str(buyer_id).upper()
     seller = str(seller_id).upper()
-
     buyer_out = catalog.outgoing_by_team.get(buyer)
     if buyer_out is None:
         return list(base_candidates)
 
     out: List[DealCandidate] = list(base_candidates)
-
-    # 내부 hard cap: goal의 2배를 넘기지 않음(폭발 방지)
     hard_cap = max(goal, min(24, goal * 2))
+    seen_sigs: Set[Tuple[str, ...]] = set()
 
-    def _push(deal: Deal, archetype: str, tags: List[str]) -> None:
+    def _deal_sig(deal: Deal) -> Tuple[str, ...]:
+        return tuple(sorted(asset_key(a) for a in (deal.legs.get(buyer, []) or [])))
+
+    for c in base_candidates:
+        seen_sigs.add(_deal_sig(c.deal))
+
+    def _is_sendable_player(pid: str) -> bool:
+        if pid in banned_players:
+            return False
+        cand = buyer_out.players.get(str(pid))
+        if cand is None:
+            return False
+        if seller in set(getattr(cand, "return_ban_teams", ()) or ()):  # return-to-trading-team ban
+            return False
+        if banned_receivers_by_player is not None:
+            if seller in banned_receivers_by_player.get(str(pid), set()):
+                return False
+        return True
+
+    def _copy_candidate(base: DealCandidate, deal: Deal, extra_tags: List[str]) -> None:
         if len(out) >= hard_cap:
             return
         if not _shape_ok(deal, config=config, catalog=catalog):
             return
+        sig = _deal_sig(deal)
+        if sig in seen_sigs:
+            return
+        seen_sigs.add(sig)
+        tags = list(getattr(base, "tags", []) or [])
+        for t in extra_tags:
+            if t not in tags:
+                tags.append(t)
         out.append(
             DealCandidate(
                 deal=deal,
-                buyer_id=buyer,
-                seller_id=seller,
-                focal_player_id=target.player_id,
-                archetype=archetype,
-                tags=_with_core_tags(tags, mode="BUY", focal_player_id=target.player_id, archetype=archetype),
+                buyer_id=base.buyer_id,
+                seller_id=base.seller_id,
+                focal_player_id=base.focal_player_id,
+                archetype=base.archetype,
+                skeleton_id=base.skeleton_id,
+                skeleton_domain=base.skeleton_domain,
+                target_tier=base.target_tier,
+                compat_archetype=base.compat_archetype,
+                modifier_trace=list(getattr(base, "modifier_trace", []) or []),
+                tags=tags,
             )
         )
 
-    def _base_deal() -> Deal:
-        return Deal(
-            teams=[buyer, seller],
-            legs={
-                buyer: [],
-                seller: [PlayerAsset(kind="player", player_id=target.player_id)],
-            },
-        )
+    def _clone_deal(deal: Deal) -> Deal:
+        return Deal(teams=list(deal.teams), legs={k: list(v) for k, v in (deal.legs or {}).items()}, meta=dict(deal.meta or {}))
 
-    # --- archetype: picks-only variants
-    # cap space 흡수 가능할 때만
-    try:
-        ts_buyer = tick_ctx.get_team_situation(buyer)
-    except Exception:
-        ts_buyer = None
-    if ts_buyer is not None and _can_absorb_without_outgoing(ts_buyer, float(target.salary_m)):
-        # (SECOND) / (SECOND+SECOND) / (FIRST_SAFE) / (FIRST_SAFE+SECOND)
-        pick_plans: List[Tuple[Tuple[str, ...], int]] = [
-            (("SECOND",), 1),
-            (("SECOND", "SECOND"), 2),
-            (("FIRST_SAFE",), 1),
-            (("FIRST_SAFE", "SECOND"), 2),
-        ]
-        for prefer, max_picks in pick_plans:
-            d = _base_deal()
-            _add_pick_package(
-                d,
-                from_team=buyer,
-                out_cat=buyer_out,
-                catalog=catalog,
-                rng=rng,
-                prefer=prefer,
-                max_picks=max_picks,
-                config=config,
-                banned_asset_keys=banned_asset_keys,
-            )
-            _push(d, "picks_only", [f"need:{target.need_tag}", "pkg:picks", "var:picks"])
+    def _player_ids_in_deal(deal: Deal) -> Set[str]:
+        ids: Set[str] = set()
+        for a in deal.legs.get(buyer, []) or []:
+            if isinstance(a, PlayerAsset):
+                ids.add(str(a.player_id))
+        return ids
 
-    # --- archetype: young + pick variants (prospect vs throw-in split)
-    try:
-        ts_seller = tick_ctx.get_team_situation(seller)
-    except Exception:
-        ts_seller = None
-    seller_horizon = str(getattr(ts_seller, "time_horizon", "RE_TOOL") or "RE_TOOL") if ts_seller is not None else "RE_TOOL"
-    rebuildish = seller_horizon in {"REBUILD", "RE_TOOL"}
-
-    prospect_ids, throwin_ids = _split_young_candidates(
-        buyer_out,
-        config=config,
-        banned_players=banned_players,
-        receiver_team_id=seller,
-        banned_receivers_by_player=banned_receivers_by_player,
-        must_be_aggregation_friendly=True,
-    )
-
-    source_tag: Optional[str] = None
-    if rebuildish:
-        pool = prospect_ids if prospect_ids else throwin_ids
-        if pool:
-            source_tag = "young_source:prospect" if prospect_ids else "young_source:throwin"
-            k = 2
-            max_prospect = int(getattr(config, "young_prospect_max_candidates", 6) or 6)
-            top_n = max(2, min(max_prospect, len(pool)))
-            bucket = list(pool[:top_n])
-            rng.shuffle(bucket)
-            young_ids = bucket[:k]
-        else:
-            young_ids = []
-    else:
-        pool = throwin_ids
-        if pool:
-            source_tag = "young_source:throwin"
-            k = 1
-            bucket = list(pool[: max(1, min(8, len(pool)))])
-            rng.shuffle(bucket)
-            young_ids = bucket[:k]
-        else:
-            young_ids = []
-
-    for pid in young_ids:
-        for prefer, max_picks in [(("SECOND",), 1), (("SECOND", "SECOND"), 2)]:
-            d = _base_deal()
-            d.legs[buyer].append(PlayerAsset(kind="player", player_id=pid))
-            _add_pick_package(
-                d,
-                from_team=buyer,
-                out_cat=buyer_out,
-                catalog=catalog,
-                rng=rng,
-                prefer=prefer,
-                max_picks=max_picks,
-                config=config,
-                banned_asset_keys=banned_asset_keys,
-            )
-            tags = [f"need:{target.need_tag}", "pkg:young+pick", "var:young"]
-            if source_tag:
-                tags.append(source_tag)
-            _push(d, "young_plus_pick", tags)
-
-    # --- archetype: p4p salary variants (top 3 fillers by salary gap)
-    filler_ids = _top_k_fillers_by_salary_gap(
-        buyer_out,
-        target_salary_m=float(target.salary_m),
-        k=3,
-        banned_players=banned_players,
-        receiver_team_id=seller,
-        banned_receivers_by_player=banned_receivers_by_player,
-        # aggregation_solo_only는 '묶음 금지'이므로 1-for-1(p4p) 변형에서는 허용
-        must_be_aggregation_friendly=False,
-    )
-    for pid in filler_ids:
-        d = _base_deal()
-        d.legs[buyer].append(PlayerAsset(kind="player", player_id=pid))
-        _push(d, "p4p_salary", [f"need:{target.need_tag}", "pkg:player_for_player", "var:salary"])
-
-    # --- archetype: consolidate variants (top 2 consolidate + cheap fillers 2)
-    cons_ids = _top_k_bucket_players_by_market(
-        buyer_out,
-        bucket="CONSOLIDATE",
-        k=2,
-        banned_players=banned_players,
-        descending=True,
-        receiver_team_id=seller,
-        banned_receivers_by_player=banned_receivers_by_player,
-    )
-    cheap_ids = _top_k_bucket_players_by_market(
-        buyer_out,
-        bucket="FILLER_CHEAP",
-        k=2,
-        banned_players=banned_players,
-        descending=False,
-        receiver_team_id=seller,
-    )
-    for cid in cons_ids:
-        for fid in cheap_ids:
-            if cid == fid:
+    def _pick_player_candidates(*, descending_market: bool) -> List[str]:
+        scored: List[Tuple[float, str]] = []
+        for pid, cand in (buyer_out.players or {}).items():
+            pid_u = str(pid)
+            if not _is_sendable_player(pid_u):
                 continue
-            d = _base_deal()
-            d.legs[buyer].extend(
-                [
-                    PlayerAsset(kind="player", player_id=cid),
-                    PlayerAsset(kind="player", player_id=fid),
-                ]
-            )
+            m = float(getattr(getattr(cand, "market", None), "total", 0.0) or 0.0)
+            scored.append((m, pid_u))
+        scored.sort(key=lambda x: (x[0], x[1]), reverse=bool(descending_market))
+        return [pid for _, pid in scored]
+
+    top_market_players = _pick_player_candidates(descending_market=True)
+    salaryish_players = _pick_player_candidates(descending_market=False)
+
+    for base in base_candidates:
+        if len(out) >= hard_cap:
+            break
+
+        style = str(getattr(base, "compat_archetype", "") or getattr(base, "archetype", "") or "mixed").lower()
+        deal_base = base.deal
+
+        # pick-heavy / mixed: add one extra pick token (prefer tier-score style)
+        if style in {"pick_heavy", "mixed"}:
+            d = _clone_deal(deal_base)
+            before = len(d.legs.get(buyer, []) or [])
             _add_pick_package(
                 d,
                 from_team=buyer,
                 out_cat=buyer_out,
                 catalog=catalog,
+                config=config,
+                rng=rng,
+                prefer=("FIRST_SAFE", "FIRST_SENSITIVE", "SECOND") if style == "pick_heavy" else ("FIRST_SAFE", "SECOND"),
+                max_picks=1,
+                banned_asset_keys=banned_asset_keys,
+            )
+            after = len(d.legs.get(buyer, []) or [])
+            if after > before:
+                _copy_candidate(base, d, [f"variant:{style}:pick_plus"])
+
+        # player-heavy / mixed: add one player or upgrade a player slot
+        if style in {"player_heavy", "mixed"}:
+            deal_players = _player_ids_in_deal(deal_base)
+            pool = top_market_players if style == "player_heavy" else salaryish_players
+
+            add_pid: Optional[str] = None
+            for pid in pool:
+                if pid in deal_players:
+                    continue
+                add_pid = pid
+                break
+
+            if add_pid is not None:
+                d = _clone_deal(deal_base)
+                d.legs.setdefault(buyer, []).append(PlayerAsset(kind="player", player_id=add_pid))
+                _copy_candidate(base, d, [f"variant:{style}:player_plus"])
+
+            existing_players = [a for a in (deal_base.legs.get(buyer, []) or []) if isinstance(a, PlayerAsset)]
+            if existing_players:
+                replace_from = str(existing_players[-1].player_id)
+                replace_to: Optional[str] = None
+                for pid in pool:
+                    if pid == replace_from or pid in deal_players:
+                        continue
+                    replace_to = pid
+                    break
+                if replace_to is not None:
+                    d = _clone_deal(deal_base)
+                    new_leg = []
+                    replaced = False
+                    for a in d.legs.get(buyer, []) or []:
+                        if (not replaced) and isinstance(a, PlayerAsset) and str(a.player_id) == replace_from:
+                            new_leg.append(PlayerAsset(kind="player", player_id=replace_to))
+                            replaced = True
+                        else:
+                            new_leg.append(a)
+                    d.legs[buyer] = new_leg
+                    _copy_candidate(base, d, [f"variant:{style}:player_swap"])
+
+        # timeline/other domains: conservative sweetener-only diversification
+        if style not in {"pick_heavy", "player_heavy", "mixed"}:
+            d = _clone_deal(deal_base)
+            before = len(d.legs.get(buyer, []) or [])
+            _add_pick_package(
+                d,
+                from_team=buyer,
+                out_cat=buyer_out,
+                catalog=catalog,
+                config=config,
                 rng=rng,
                 prefer=("SECOND",),
                 max_picks=1,
-                config=config,
                 banned_asset_keys=banned_asset_keys,
             )
-            _push(
-                d,
-                "consolidate_2_for_1",
-                [f"need:{target.need_tag}", "pkg:consolidate", "var:consolidate"],
-            )
+            after = len(d.legs.get(buyer, []) or [])
+            if after > before:
+                _copy_candidate(base, d, ["variant:timeline:pick_plus"])
 
-    # 마지막으로 goal 수준에서만 남기기(상위에서 shuffle 후 slice하지만,
-    # 여기서도 폭발 방지 차원에서 한 번 더 컷)
     if len(out) > hard_cap:
         out = out[:hard_cap]
     return out
-
-
-def _top_k_fillers_by_salary_gap(
-    out: TeamOutgoingCatalog,
-    *,
-    target_salary_m: float,
-    k: int,
-    banned_players: Set[str],
-    receiver_team_id: Optional[str] = None,
-    banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
-    must_be_aggregation_friendly: bool = True,
-) -> List[str]:
-    """target salary 근처 filler 후보 top-k.
-
-    BUY 모드 variant 생성에서 invalid 낭비를 줄이기 위해,
-    - receiver_team_id가 주어지면 return_ban_teams 사전 필터를 적용한다.
-    - must_be_aggregation_friendly=True면 aggregation_solo_only 후보는 제외한다.
-    """
-    receiver = str(receiver_team_id).upper() if receiver_team_id else None
-
-    ids: List[str] = []
-    for b in ("FILLER_CHEAP", "FILLER_BAD_CONTRACT"):
-        ids.extend(list(out.player_ids_by_bucket.get(b, tuple())))
-
-    scored: List[Tuple[float, float, str]] = []
-    for pid in ids:
-        if pid in banned_players:
-            continue
-        c = out.players.get(pid)
-        if c is None:
-            continue
-
-        if receiver and receiver in (c.return_ban_teams or ()):
-            continue
-        if receiver and banned_receivers_by_player is not None:
-            if receiver in banned_receivers_by_player.get(str(pid), set()):
-                continue
-        if must_be_aggregation_friendly and bool(getattr(c, "aggregation_solo_only", False)):
-            continue
-
-        gap = abs(float(c.salary_m) - float(target_salary_m))
-        scored.append((gap, float(c.market.total), pid))
-    scored.sort(key=lambda x: (x[0], x[1], x[2]))
-    return [pid for _, _, pid in scored[: int(k)]]
-
-
-def _top_k_bucket_players_by_market(
-    out: TeamOutgoingCatalog,
-    *,
-    bucket: BucketId,
-    k: int,
-    banned_players: Set[str],
-    descending: bool,
-    receiver_team_id: Optional[str] = None,
-    banned_receivers_by_player: Optional[Dict[str, Set[str]]] = None,
-    must_be_aggregation_friendly: bool = True,
-) -> List[str]:
-    """특정 버킷에서 market.total 기준 top-k.
-
-    BUY 모드 variant 생성에서 invalid 낭비를 줄이기 위해,
-    - receiver_team_id가 주어지면 return_ban_teams 사전 필터를 적용한다.
-    - must_be_aggregation_friendly=True면 aggregation_solo_only 후보는 제외한다.
-    """
-    receiver = str(receiver_team_id).upper() if receiver_team_id else None
-
-    scored: List[Tuple[float, str]] = []
-    for pid in out.player_ids_by_bucket.get(bucket, tuple()):
-        if pid in banned_players:
-            continue
-        c = out.players.get(pid)
-        if c is None:
-            continue
-
-        if receiver and receiver in (c.return_ban_teams or ()):
-            continue
-        if receiver and banned_receivers_by_player is not None:
-            if receiver in banned_receivers_by_player.get(str(pid), set()):
-                continue
-        if must_be_aggregation_friendly and bool(getattr(c, "aggregation_solo_only", False)):
-            continue
-
-        scored.append((float(c.market.total), pid))
-
-    scored.sort(key=lambda x: (x[0], x[1]), reverse=bool(descending))
-    return [pid for _, pid in scored[: int(k)]]
 
 
 # =============================================================================

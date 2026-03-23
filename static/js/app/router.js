@@ -9,6 +9,7 @@ function activateScreen(target) {
     els.teamScreen,
     els.mainScreen,
     els.marketScreen,
+    els.tradeLabScreen,
     els.gameResultScreen,
     els.scheduleScreen,
     els.myTeamScreen,

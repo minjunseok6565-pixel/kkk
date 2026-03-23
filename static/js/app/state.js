@@ -66,6 +66,13 @@ const state = {
     rejectPending: false,
   },
   marketSelectedPlayerId: null,
+  tradeLab: {
+    selectedTeams: { left: null, right: null },
+    assetsByTeam: {},
+    packageByTeam: {},
+    evalResultByTeam: {},
+    dealHash: "",
+  },
   marketNegotiation: null,
   marketTradeModalPlayerId: null,
   marketTradeModalOtherTeamId: null,

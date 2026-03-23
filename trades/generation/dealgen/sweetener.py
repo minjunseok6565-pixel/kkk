@@ -11,9 +11,10 @@ from ..generation_tick import TradeGenerationTickContext
 from ..asset_catalog import TradeAssetCatalog, TeamOutgoingCatalog, PickBucketId
 
 from .types import DealGeneratorConfig, DealGeneratorBudget, DealGeneratorStats, DealProposal, RuleFailureKind, parse_trade_error
-from .utils import _clone_deal, _count_swaps, _count_picks, _count_seconds, _team_pick_flow, _is_locked_candidate
+from .utils import _clone_deal, _count_swaps, _count_picks, _count_seconds, _team_pick_flow
 from .dedupe import deal_signature_payload
 from .scoring import evaluate_and_score, _should_discard_prop
+from .pick_protection_decorator import maybe_apply_pick_protection_variants
 from .pick_protection_decorator import default_sweetener_protection
 
 # =============================================================================
@@ -103,14 +104,41 @@ def _sweetener_close_corridor(team_eval: TeamDealEvaluation, cfg: DealGeneratorC
     return float(close)
 
 
+def _allowed_verdicts_for_team(*, team_id: str, initiator_team_id: str) -> Tuple[DealVerdict, ...]:
+    """
+    Role-aware trigger policy for sweetener receiver selection.
+
+    - initiator side: REJECT / COUNTER
+    - acceptor side: REJECT only
+    """
+    team_u = str(team_id).upper()
+    initiator_u = str(initiator_team_id).upper()
+    if team_u == initiator_u:
+        return (DealVerdict.REJECT, DealVerdict.COUNTER)
+    return (DealVerdict.REJECT,)
+
+
+def _can_trigger_for_team(
+    *,
+    team_id: str,
+    decision: object,
+    initiator_team_id: str,
+) -> bool:
+    verdict = getattr(decision, "verdict", None)
+    return verdict in _allowed_verdicts_for_team(
+        team_id=str(team_id),
+        initiator_team_id=str(initiator_team_id),
+    )
+
+
 def maybe_apply_sweeteners(
     base: DealProposal,
     *,
+    initiator_team_id: str,
     tick_ctx: TradeGenerationTickContext,
     catalog: TradeAssetCatalog,
     config: DealGeneratorConfig,
     budget: DealGeneratorBudget,
-    allow_locked_by_deal_id: Optional[str],
     banned_asset_keys: Set[str],
     rng: random.Random,
     stats: DealGeneratorStats,
@@ -134,6 +162,23 @@ def maybe_apply_sweeteners(
     if stats.validations >= budget.max_validations or stats.evaluations >= budget.max_evaluations:
         return base, 0, 0
 
+    # pick protection variant를 sweetener 단계에서 먼저 시도한다.
+    # (기존 core 사전 단계에서 수행하던 로직을 이 단계로 이동)
+    base, prot_v, prot_e = maybe_apply_pick_protection_variants(
+        base,
+        tick_ctx=tick_ctx,
+        catalog=catalog,
+        config=config,
+        budget=budget,
+        opponent_repeat_count=0,
+        stats=stats,
+    )
+    extra_v = int(prot_v)
+    extra_e = int(prot_e)
+
+    if stats.validations + extra_v >= budget.max_validations or stats.evaluations + extra_e >= budget.max_evaluations:
+        return base, extra_v, extra_e
+
     def _margin_for(team_id: str, p: DealProposal) -> float:
         tid = str(team_id).upper()
         if tid == str(p.buyer_id).upper():
@@ -154,27 +199,41 @@ def maybe_apply_sweeteners(
     close_seller = _sweetener_close_corridor(base.seller_eval, config)
     close_buyer = _sweetener_close_corridor(base.buyer_eval, config)
 
-    if base.seller_decision.verdict in (DealVerdict.REJECT, DealVerdict.COUNTER) and ms < 0.0 and abs(ms) <= float(close_seller):
+    initiator_u = str(initiator_team_id).upper()
+    seller_triggerable = _can_trigger_for_team(
+        team_id=base.seller_id,
+        decision=base.seller_decision,
+        initiator_team_id=initiator_u,
+    )
+    buyer_triggerable = _can_trigger_for_team(
+        team_id=base.buyer_id,
+        decision=base.buyer_decision,
+        initiator_team_id=initiator_u,
+    )
+
+    if seller_triggerable and ms < 0.0 and abs(ms) <= float(close_seller):
         giver, receiver, deficit = base.buyer_id, base.seller_id, abs(ms)
-    elif base.buyer_decision.verdict in (DealVerdict.REJECT, DealVerdict.COUNTER) and mb < 0.0 and abs(mb) <= float(close_buyer):
+    elif buyer_triggerable and mb < 0.0 and abs(mb) <= float(close_buyer):
         giver, receiver, deficit = base.seller_id, base.buyer_id, abs(mb)
     else:
-        return base, 0, 0
+        return base, extra_v, extra_e
 
     if not giver or not receiver:
-        return base, 0, 0
+        return base, extra_v, extra_e
 
     giver_u = str(giver).upper()
     receiver_u = str(receiver).upper()
+    receiver_side = "initiator" if receiver_u == initiator_u else "acceptor"
+    trigger_verdict = (
+        base.buyer_decision.verdict if receiver_u == str(base.buyer_id).upper() else base.seller_decision.verdict
+    )
+    trigger_verdict_s = str(getattr(trigger_verdict, "value", str(trigger_verdict))).lower()
 
     out_cat = catalog.outgoing_by_team.get(giver_u)
     if out_cat is None:
-        return base, 0, 0
+        return base, extra_v, extra_e
 
     local_sweetener_bans: Set[str] = set()
-
-    extra_v = 0
-    extra_e = 0
 
     verdict_rank = {DealVerdict.REJECT: 0, DealVerdict.COUNTER: 1, DealVerdict.ACCEPT: 2}
 
@@ -194,7 +253,7 @@ def maybe_apply_sweeteners(
 
     max_add = max(0, int(config.sweetener_max_additions))
     if max_add <= 0:
-        return base, 0, 0
+        return base, extra_v, extra_e
 
     # deterministic shuffle inside same bucket selection
     bucket_order = list(config.sweetener_try_buckets)
@@ -261,7 +320,6 @@ def maybe_apply_sweeteners(
                 banned_asset_keys=(set(banned_asset_keys) | set(local_sweetener_bans)),
                 rng=rng,
                 limit=int(base_limit),
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
             )
             if not candidates:
                 continue
@@ -283,15 +341,15 @@ def maybe_apply_sweeteners(
 
                 # validate (no repair)
                 try:
-                    tick_ctx.validate_deal(deal2, allow_locked_by_deal_id=allow_locked_by_deal_id)
+                    tick_ctx.validate_deal(deal2)
                     extra_v += 1
                 except TradeError as err:
                     extra_v += 1
                     failure = parse_trade_error(err)
                     stats.bump_failure(str(failure.kind.value))
 
-                    # 근본적으로 금지/미소유/잠김/중복인 케이스는 global ban이 효과적
-                    if failure.kind in (RuleFailureKind.ASSET_LOCK, RuleFailureKind.OWNERSHIP, RuleFailureKind.DUPLICATE_ASSET):
+                    # 근본적으로 금지/미소유/중복인 케이스는 global ban이 효과적
+                    if failure.kind in (RuleFailureKind.OWNERSHIP, RuleFailureKind.DUPLICATE_ASSET):
                         banned_asset_keys.add(attempted_key)
                         if failure.asset_key:
                             banned_asset_keys.add(failure.asset_key)
@@ -329,6 +387,8 @@ def maybe_apply_sweeteners(
                         f'sweetener:{bucket}',
                         f'sweetener_from:{giver_u}',
                         f'sweetener_to:{receiver_u}',
+                        f'sweetener_trigger_side:{receiver_side}',
+                        f'sweetener_trigger_verdict:{trigger_verdict_s}',
                         f'sweetener_round:{int(trial_round)}',
                     ),
                     opponent_repeat_count=0,
@@ -427,7 +487,6 @@ def _collect_sweetener_candidates(
     banned_asset_keys: Set[str],
     rng: random.Random,
     limit: int,
-    allow_locked_by_deal_id: Optional[str],
 ) -> List[Asset]:
     """주어진 bucket에서 sweetener 후보를 여러 개 수집(Deal은 mutate하지 않음).
 
@@ -453,8 +512,6 @@ def _collect_sweetener_candidates(
         for sid in cands:
             s = out_cat.swaps.get(sid)
             if s is None:
-                continue
-            if _is_locked_candidate(getattr(s, 'lock', None), allow_locked_by_deal_id=allow_locked_by_deal_id):
                 continue
             a = s.as_asset(to_team=receiver_team)
             k = asset_key(a)
@@ -488,8 +545,6 @@ def _collect_sweetener_candidates(
             if p is None:
                 return False
             if not bool(getattr(p, 'within_max_years', True)):
-                return False
-            if _is_locked_candidate(getattr(p, 'lock', None), allow_locked_by_deal_id=allow_locked_by_deal_id):
                 return False
             return True
 
@@ -619,8 +674,6 @@ def _collect_sweetener_candidates(
             continue
         # intrinsic horizon: within_max_years가 false면 스킵(validator도 어차피 실패)
         if not bool(getattr(p, 'within_max_years', True)):
-            continue
-        if _is_locked_candidate(getattr(p, 'lock', None), allow_locked_by_deal_id=allow_locked_by_deal_id):
             continue
 
         # Stepien check for 1st

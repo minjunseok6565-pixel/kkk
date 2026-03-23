@@ -12,7 +12,6 @@ from ..asset_catalog import TradeAssetCatalog, IncomingPlayerRef, TeamOutgoingCa
 
 from .types import DealGeneratorConfig, DealGeneratorBudget, TargetCandidate, SellAssetCandidate
 from .config import _scale_buy_retrieval_limits
-from .utils import _is_locked_candidate
 
 
 def _safe_float(x: Any, default: float = 0.0) -> float:
@@ -614,6 +613,7 @@ def select_targets_buy(
                     salary_m=float(ref.salary_m),
                     remaining_years=float(ref.remaining_years),
                     age=ref.age,
+                    ovr=ref.ovr,
                 ),
                 _age_tiebreak_value(ref.age),
                 float(row.get("need_priority", 0.0) or 0.0),
@@ -634,12 +634,10 @@ def select_targets_sell(
     budget: DealGeneratorBudget,
     rng: random.Random,
     banned_players: Set[str],
-    allow_locked_by_deal_id: Optional[str] = None,
 ) -> List[SellAssetCandidate]:
     """SELL 모드: initiator가 내놓을 매물(선수) 후보를 고른다.
 
     v2 정합 로직:
-    - locked(allow_locked 예외 포함) 선필터
     - recent_signing_banned_until 선필터
     - 정렬: bucket priority -> public request signal(desc) -> raw_trade_block_score(desc), timing_liquidity(desc), contract_pressure(desc)
       -> market_total(asc) -> player_id
@@ -654,8 +652,6 @@ def select_targets_sell(
     max_targets = int(getattr(budget, "max_targets", 0) or 0)
     if max_targets <= 0:
         return []
-
-    allow_id = str(allow_locked_by_deal_id or "").strip() or None
 
     # v2와 동일한 우선순위(숫자 낮을수록 우선)
     bucket_pri: Dict[str, int] = {
@@ -676,17 +672,13 @@ def select_targets_sell(
         if pid in banned_players:
             continue
 
-        # (1) locked 선필터 (allow_locked 예외 포함)
-        if _is_locked_candidate(getattr(c, "lock", None), allow_locked_by_deal_id=allow_id):
-            continue
-
-        # (2) recent signing ban 선필터
+        # (1) recent signing ban 선필터
         if _is_ban_active(tick_ctx.current_date, getattr(c, "recent_signing_banned_until", None)):
             continue
 
         buckets = tuple(getattr(c, "buckets", None) or ())
 
-        # (3) 정렬 키 구성 (v2와 동일)
+        # (2) 정렬 키 구성 (v2와 동일)
         if buckets:
             pri = min(bucket_pri.get(b, 50) for b in buckets)
         else:

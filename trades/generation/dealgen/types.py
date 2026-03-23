@@ -8,7 +8,6 @@ from ...errors import (
     TradeError,
     DEAL_INVALIDATED,
     ROSTER_LIMIT,
-    ASSET_LOCKED,
     PLAYER_NOT_OWNED,
     PICK_NOT_OWNED,
     SWAP_NOT_OWNED,
@@ -66,7 +65,7 @@ class DealGeneratorConfig:
 
     # --- deal shape constraints (generator-side)
     skeleton_overhaul_enabled: bool = True
-    skeleton_modifiers_enabled: bool = True
+    skeleton_modifiers_enabled: bool = False
     modifier_max_variants_per_candidate: int = 3
     modifier_protection_enabled: bool = True
     modifier_swap_substitute_enabled: bool = True
@@ -79,122 +78,180 @@ class DealGeneratorConfig:
     max_picks_per_side: int = 4
     max_seconds_per_side: int = 4
 
-    # --- target tier routing (8-tier)
+    # --- template-first stage toggles
+    template_first_enabled: bool = True
+    template_first_max_templates_per_target: int = 7
+    template_first_fallback_enabled: bool = True
+    template_first_min_keep_after_eval: int = 1
+    template_first_allow_timeline_in_fallback: bool = True
+
+    # --- target tier routing (8-tier, legacy/combined)
+    # NOTE:
+    # - 기존 라우팅과의 완전 호환을 위해 유지한다.
+    # - template/fallback 분리 라우팅이 비어 있거나 phase=combined인 경우
+    #   이 필드들을 기본 경로로 사용한다.
     skeleton_route_mvp: Tuple[str, ...] = (
-        "compat.picks_only",
-        "compat.consolidate_2_for_1",
-        "compat.p4p_salary",
-        "player_swap.starter_for_two_rotation",
-        "player_swap.three_for_one_upgrade",
-        "player_swap.star_lateral_plus_delta",
+        "mvp.player_heavy",
+        "mvp.pick_heavy",
+        "mvp.mixed",
         "timeline.veteran_for_young_plus_protected_first",
         "timeline.bluechip_plus_first_plus_swap",
-        "salary_cleanup.partial_dump_for_expiring",
-        "salary_cleanup.bad_money_swap",
-        "pick_engineering.first_split",
-        "pick_engineering.swap_substitute_for_first",
     )
     skeleton_route_all_nba: Tuple[str, ...] = (
-        "compat.picks_only",
-        "compat.young_plus_pick",
-        "compat.p4p_salary",
-        "compat.consolidate_2_for_1",
-        "player_swap.fit_swap_2_for_2",
-        "player_swap.starter_for_two_rotation",
-        "player_swap.three_for_one_upgrade",
-        "player_swap.star_lateral_plus_delta",
+        "all_nba.player_heavy",
+        "all_nba.pick_heavy",
+        "all_nba.mixed",
         "timeline.veteran_for_young_plus_protected_first",
         "timeline.bluechip_plus_first_plus_swap",
-        "salary_cleanup.partial_dump_for_expiring",
-        "salary_cleanup.bad_money_swap",
-        "pick_engineering.first_split",
-        "pick_engineering.second_ladder_to_protected_first",
     )
     skeleton_route_all_star: Tuple[str, ...] = (
-        "compat.picks_only",
-        "compat.young_plus_pick",
-        "compat.p4p_salary",
-        "compat.consolidate_2_for_1",
-        "player_swap.role_swap_small_delta",
-        "player_swap.fit_swap_2_for_2",
-        "player_swap.starter_for_two_rotation",
-        "player_swap.three_for_one_upgrade",
-        "timeline.veteran_for_young_plus_protected_first",
-        "salary_cleanup.partial_dump_for_expiring",
-        "salary_cleanup.bad_money_swap",
-        "pick_engineering.first_split",
-        "pick_engineering.swap_purchase",
+        "all_star.player_heavy",
+        "all_star.pick_heavy",
+        "all_star.mixed",
     )
     skeleton_route_high_starter: Tuple[str, ...] = (
-        "compat.picks_only",
-        "compat.young_plus_pick",
-        "compat.p4p_salary",
-        "compat.consolidate_2_for_1",
-        "player_swap.role_swap_small_delta",
-        "player_swap.fit_swap_2_for_2",
-        "player_swap.one_for_two_depth",
-        "player_swap.starter_for_two_rotation",
-        "player_swap.three_for_one_upgrade",
-        "timeline.veteran_for_young",
-        "timeline.veteran_for_young_plus_protected_first",
-        "salary_cleanup.rental_expiring_plus_second",
-        "salary_cleanup.partial_dump_for_expiring",
-        "salary_cleanup.bad_money_swap",
-        "pick_engineering.first_split",
-        "pick_engineering.second_ladder_to_protected_first",
+        "high_starter.player_heavy",
+        "high_starter.pick_heavy",
+        "high_starter.mixed",
     )
     skeleton_route_starter: Tuple[str, ...] = (
-        "compat.picks_only",
-        "compat.young_plus_pick",
-        "compat.p4p_salary",
-        "compat.consolidate_2_for_1",
-        "player_swap.role_swap_small_delta",
-        "player_swap.fit_swap_2_for_2",
-        "player_swap.one_for_two_depth",
-        "player_swap.starter_for_two_rotation",
-        "player_swap.bench_bundle_for_role",
-        "timeline.veteran_for_young",
-        "salary_cleanup.rental_expiring_plus_second",
-        "salary_cleanup.partial_dump_for_expiring",
-        "pick_engineering.first_split",
-        "pick_engineering.second_ladder_to_protected_first",
+        "starter.player_heavy",
+        "starter.pick_heavy",
+        "starter.mixed",
     )
     skeleton_route_high_rotation: Tuple[str, ...] = (
-        "compat.picks_only",
-        "compat.young_plus_pick",
-        "compat.p4p_salary",
-        "player_swap.role_swap_small_delta",
-        "player_swap.one_for_two_depth",
-        "player_swap.bench_bundle_for_role",
-        "player_swap.change_of_scenery_young",
-        "timeline.veteran_for_young",
-        "salary_cleanup.rental_expiring_plus_second",
-        "salary_cleanup.pure_absorb_for_asset",
-        "pick_engineering.first_split",
-        "pick_engineering.swap_purchase",
+        "high_rotation.player_heavy",
+        "high_rotation.pick_heavy",
+        "high_rotation.mixed",
     )
     skeleton_route_rotation: Tuple[str, ...] = (
-        "compat.picks_only",
-        "compat.young_plus_pick",
-        "player_swap.role_swap_small_delta",
-        "player_swap.one_for_two_depth",
-        "player_swap.bench_bundle_for_role",
-        "player_swap.change_of_scenery_young",
-        "salary_cleanup.rental_expiring_plus_second",
-        "salary_cleanup.pure_absorb_for_asset",
-        "pick_engineering.first_split",
-        "pick_engineering.second_ladder_to_protected_first",
-        "pick_engineering.swap_purchase",
+        "rotation.player_heavy",
+        "rotation.pick_heavy",
+        "rotation.mixed",
     )
     skeleton_route_garbage: Tuple[str, ...] = (
-        "compat.picks_only",
-        "player_swap.bench_bundle_for_role",
-        "player_swap.change_of_scenery_young",
-        "salary_cleanup.pure_absorb_for_asset",
-        "pick_engineering.first_split",
-        "pick_engineering.second_ladder_to_protected_first",
-        "pick_engineering.swap_purchase",
-        "pick_engineering.swap_substitute_for_first",
+        "garbage.garbage",
+    )
+
+    # --- template-first route split (8-tier)
+    # planner는 아래 template route의 placeholder를 실제 template skeleton id로 교체하면 된다.
+    skeleton_route_template_mvp: Tuple[str, ...] = (
+        "template.mvp.placeholder_1",
+        "template.mvp.placeholder_2",
+        "template.mvp.placeholder_3",
+        "template.mvp.placeholder_4",
+        "template.mvp.placeholder_5",
+        "template.mvp.placeholder_6",
+        "template.mvp.placeholder_7",
+    )
+    skeleton_route_template_all_nba: Tuple[str, ...] = (
+        "template.all_nba.placeholder_1",
+        "template.all_nba.placeholder_2",
+        "template.all_nba.placeholder_3",
+        "template.all_nba.placeholder_4",
+        "template.all_nba.placeholder_5",
+        "template.all_nba.placeholder_6",
+        "template.all_nba.placeholder_7",
+    )
+    skeleton_route_template_all_star: Tuple[str, ...] = (
+        "template.all_star.placeholder_1",
+        "template.all_star.placeholder_2",
+        "template.all_star.placeholder_3",
+        "template.all_star.placeholder_4",
+        "template.all_star.placeholder_5",
+        "template.all_star.placeholder_6",
+        "template.all_star.placeholder_7",
+    )
+    skeleton_route_template_high_starter: Tuple[str, ...] = (
+        "template.high_starter.placeholder_1",
+        "template.high_starter.placeholder_2",
+        "template.high_starter.placeholder_3",
+        "template.high_starter.placeholder_4",
+        "template.high_starter.placeholder_5",
+        "template.high_starter.placeholder_6",
+        "template.high_starter.placeholder_7",
+    )
+    skeleton_route_template_starter: Tuple[str, ...] = (
+        "template.starter.placeholder_1",
+        "template.starter.placeholder_2",
+        "template.starter.placeholder_3",
+        "template.starter.placeholder_4",
+        "template.starter.placeholder_5",
+        "template.starter.placeholder_6",
+        "template.starter.placeholder_7",
+    )
+    skeleton_route_template_high_rotation: Tuple[str, ...] = (
+        "template.high_rotation.placeholder_1",
+        "template.high_rotation.placeholder_2",
+        "template.high_rotation.placeholder_3",
+        "template.high_rotation.placeholder_4",
+        "template.high_rotation.placeholder_5",
+        "template.high_rotation.placeholder_6",
+        "template.high_rotation.placeholder_7",
+    )
+    skeleton_route_template_rotation: Tuple[str, ...] = (
+        "template.rotation.placeholder_1",
+        "template.rotation.placeholder_2",
+        "template.rotation.placeholder_3",
+        "template.rotation.placeholder_4",
+        "template.rotation.placeholder_5",
+        "template.rotation.placeholder_6",
+        "template.rotation.placeholder_7",
+    )
+    skeleton_route_template_garbage: Tuple[str, ...] = (
+        "template.garbage.placeholder_1",
+        "template.garbage.placeholder_2",
+        "template.garbage.placeholder_3",
+        "template.garbage.placeholder_4",
+        "template.garbage.placeholder_5",
+        "template.garbage.placeholder_6",
+        "template.garbage.placeholder_7",
+    )
+
+    # --- fallback route split (8-tier)
+    # template stage가 실패(구성 실패/평가 탈락)했을 때 사용할 2차 자유 탐색 경로.
+    # 기본값은 기존 skeleton_route_* 내용을 복제한다.
+    skeleton_route_fallback_mvp: Tuple[str, ...] = (
+        "mvp.player_heavy",
+        "mvp.pick_heavy",
+        "mvp.mixed",
+        "timeline.veteran_for_young_plus_protected_first",
+        "timeline.bluechip_plus_first_plus_swap",
+    )
+    skeleton_route_fallback_all_nba: Tuple[str, ...] = (
+        "all_nba.player_heavy",
+        "all_nba.pick_heavy",
+        "all_nba.mixed",
+        "timeline.veteran_for_young_plus_protected_first",
+        "timeline.bluechip_plus_first_plus_swap",
+    )
+    skeleton_route_fallback_all_star: Tuple[str, ...] = (
+        "all_star.player_heavy",
+        "all_star.pick_heavy",
+        "all_star.mixed",
+    )
+    skeleton_route_fallback_high_starter: Tuple[str, ...] = (
+        "high_starter.player_heavy",
+        "high_starter.pick_heavy",
+        "high_starter.mixed",
+    )
+    skeleton_route_fallback_starter: Tuple[str, ...] = (
+        "starter.player_heavy",
+        "starter.pick_heavy",
+        "starter.mixed",
+    )
+    skeleton_route_fallback_high_rotation: Tuple[str, ...] = (
+        "high_rotation.player_heavy",
+        "high_rotation.pick_heavy",
+        "high_rotation.mixed",
+    )
+    skeleton_route_fallback_rotation: Tuple[str, ...] = (
+        "rotation.player_heavy",
+        "rotation.pick_heavy",
+        "rotation.mixed",
+    )
+    skeleton_route_fallback_garbage: Tuple[str, ...] = (
+        "garbage.garbage",
     )
 
     # --- sweetener loop
@@ -219,49 +276,6 @@ class DealGeneratorConfig:
     # 예산이 빡빡하면 sweetener.py에서 자동으로 더 줄인다.
     sweetener_candidate_width: int = 3
     
-    # --- fit swap counter (DecisionReason: FIT_FAILS)
-    # FIT_FAILS(=상대가 받는 incoming 플레이어들의 team-fit 불만)일 때,
-    # outgoing 플레이어 1명을 "더 맞는 선수"로 교체해보는 카운터를 시도한다.
-    fit_swap_enabled: bool = True
-    # base(=sweetener 이전) 딜 하나당 fit-swap 시도 상한
-    fit_swap_max_trials_per_base: int = 1
-    # replacement 후보 풀/시도 제한
-    fit_swap_candidate_pool: int = 18
-    fit_swap_try_top_n: int = 6
-    # 얼마나 fit이 좋아져야 교체 후보로 인정할지
-    fit_swap_min_fit_improvement: float = 0.02
-    # 샐러리 급격히 달라져 수리 비용이 폭증하는 것을 방지(단위: $M)
-    fit_swap_max_salary_diff_m: float = 10.0
-    # fit-swap 카운터에서 허용하는 최대 repair 횟수(최소 수리)
-    fit_swap_max_repairs: int = 1
-
-    # --- fit swap horizon-aware scoring (v2 absorption)
-    # receiver(=FIT_FAILS 낸 팀)의 타임라인/포스처 성향에 따라
-    # replacement 후보 랭킹 primary_score를 youth/fit/market_norm 가중합으로 계산한다.
-    # primary_score = w_youth*youth + w_fit*fit + w_market*market_norm
-    #
-    # - REBUILD: youth/years 우선, market은 약하게 감점
-    # - WIN_NOW: fit + market(즉시전력) 우선
-    # - NEUTRAL: 균형
-    #
-    # NOTE: fit_swap.py에서만 사용하며, False면 기존(v1)처럼 fit 중심으로 랭킹한다.
-    fit_swap_use_horizon_weights: bool = True
-
-    # market normalization: market_norm = market_total / divisor
-    fit_swap_market_norm_divisor: float = 50.0
-
-    # youth score shaping:
-    # youth = max(0, age_anchor - age) / age_span  +  min(years_cap, remaining_years) / years_span
-    fit_swap_youth_age_anchor: float = 30.0
-    fit_swap_youth_age_span: float = 10.0
-    fit_swap_youth_years_cap: float = 4.0
-    fit_swap_youth_years_span: float = 4.0
-
-    # weights are (w_youth, w_fit, w_market)
-    fit_swap_weights_rebuild: Tuple[float, float, float] = (0.55, 0.40, -0.05)
-    fit_swap_weights_win_now: Tuple[float, float, float] = (0.05, 0.70, 0.25)
-    fit_swap_weights_neutral: Tuple[float, float, float] = (0.20, 0.60, 0.20)
-
     # --- target diversity / spam prevention (v2 absorption)
     # 동일 타깃(같은 선수)이 결과 상단에 반복 노출되는 것을 억제하기 위한 soft penalty.
     # v2는 core 단계에서 target_seen 카운트 기반으로 score를 감점한다.
@@ -431,10 +445,6 @@ class DealGeneratorConfig:
     # --- RNG determinism
     deterministic_seed_salt: str = "deal_generator_v2"
 
-    # --- catalog behavior
-    # allow_locked_by_deal_id가 주어진 경우, catalog를 1회 재빌드하여 locked asset을 풀어줄지
-    rebuild_catalog_when_allow_locked: bool = True
-
     # --- soft guard (invalid 폭발 방지)
     # 딜 적용 후 추정 payroll_after가 second_apron 이상이면 one-for-one 형태만 남긴다(soft).
     # (SSOT: SalaryMatchingRule은 payroll_after 기반으로 apron status를 판정한다)
@@ -487,11 +497,6 @@ class DealGeneratorStats:
     sweetener_commits: int = 0
     sweetener_rollbacks: int = 0
 
-    # fit swap counter telemetry
-    fit_swap_triggers: int = 0
-    fit_swap_candidates_tried: int = 0
-    fit_swap_success: int = 0
-
     # hard-cap monitoring
     budget_validation_cap_hits: int = 0
     budget_evaluation_cap_hits: int = 0
@@ -507,7 +512,6 @@ class DealGeneratorStats:
     skeleton_id_counts: Dict[str, int] = field(default_factory=dict)
     skeleton_domain_counts: Dict[str, int] = field(default_factory=dict)
     target_tier_counts: Dict[str, int] = field(default_factory=dict)
-    contract_tag_counts: Dict[str, int] = field(default_factory=dict)
     arch_compat_counts: Dict[str, int] = field(default_factory=dict)
     modifier_trace_counts: Dict[str, int] = field(default_factory=dict)
 
@@ -541,6 +545,7 @@ class TargetCandidate:
     salary_m: float
     remaining_years: float
     age: Optional[float]
+    ovr: Optional[float] = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -571,7 +576,6 @@ class DealCandidate:
     skeleton_id: str = ""
     skeleton_domain: str = ""
     target_tier: str = ""
-    contract_tag: str = ""
     compat_archetype: str = ""
     modifier_trace: List[str] = field(default_factory=list)
 
@@ -588,7 +592,6 @@ class RuleFailureKind(str, Enum):
     DEADLINE = "deadline"
     SALARY_MATCHING = "salary_matching"
     ROSTER_LIMIT = "roster_limit"
-    ASSET_LOCK = "asset_lock"
     PLAYER_ELIGIBILITY = "player_eligibility"
     RETURN_TO_TRADING_TEAM = "return_to_trading_team_same_season"
     PICK_RULES = "pick_rules"
@@ -619,7 +622,7 @@ def parse_trade_error(err: TradeError) -> RuleFailure:
     """TradeError -> RuleFailure.
 
     - 대부분의 rules는 TradeError.details에 {"rule": rule_id, ...}를 넣는다.
-    - 일부는 code로만 구분한다(예: ROSTER_LIMIT, ASSET_LOCKED, DUPLICATE_ASSET, OWNERSHIP 계열).
+    - 일부는 code로만 구분한다(예: ROSTER_LIMIT, DUPLICATE_ASSET, OWNERSHIP 계열).
     """
 
     details: Dict[str, Any] = {}
@@ -642,15 +645,6 @@ def parse_trade_error(err: TradeError) -> RuleFailure:
             message=err.message,
             rule_id="roster_limit",
             team_id=str(details.get("team_id") or "") or None,
-            details=details,
-        )
-    if err.code == ASSET_LOCKED:
-        return RuleFailure(
-            kind=RuleFailureKind.ASSET_LOCK,
-            code=err.code,
-            message=err.message,
-            rule_id="asset_lock",
-            asset_key=str(details.get("asset_key") or "") or None,
             details=details,
         )
     if err.code in (PLAYER_NOT_OWNED, PICK_NOT_OWNED, SWAP_NOT_OWNED, SWAP_NOT_FOUND, SWAP_INVALID):

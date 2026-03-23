@@ -448,7 +448,6 @@ def _run_trade_orchestration_tick_impl(
                     a.team_id,
                     tick_ctx,
                     max_results=int(a.max_results),
-                    allow_locked_by_deal_id=None,
                 )
                 stats = getattr(gen, "last_stats", None)
                 batch = GeneratedBatch(initiator_team_id=a.team_id, proposals=list(props or []), stats=stats)

@@ -1212,7 +1212,6 @@ class LeagueService:
             validate_deal(
                 deal_obj,
                 current_date=trade_date_as_date,
-                allow_locked_by_deal_id=str(deal_id),
                 db_path=self.repo.db_path,
                 tick_ctx=tick_ctx,
             )
