@@ -34,7 +34,6 @@ class AssetCatalogExpendableTests(unittest.TestCase):
             salary_m=10.0,
             remaining_years=2.0,
             is_expiring=bool(is_expiring),
-            lock=ac.LockInfo(is_locked=False),
             recent_signing_banned_until=None,
             aggregation_banned_until=None,
             aggregation_solo_only=False,

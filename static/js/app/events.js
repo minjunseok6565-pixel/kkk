@@ -12,7 +12,14 @@ import {
   startOffseasonDevRunFromHome,
 } from "../features/main/mainScreen.js";
 import { showMyTeamScreen, rerenderMyTeamBoard } from "../features/myteam/myTeamScreen.js";
-import { showTacticsScreen, toggleTacticsOptions, saveTacticsDraft, hasUnsavedTacticsChanges } from "../features/tactics/tacticsScreen.js";
+import {
+  showTacticsScreen,
+  toggleTacticsOptions,
+  saveTacticsDraft,
+  hasUnsavedTacticsChanges,
+  openPresetOffenseModal,
+  openPresetDefenseModal,
+} from "../features/tactics/tacticsScreen.js";
 import { showScheduleScreen } from "../features/schedule/scheduleScreen.js";
 import { showTrainingScreen } from "../features/training/trainingScreen.js";
 import { showStandingsScreen } from "../features/standings/standingsScreen.js";
@@ -34,6 +41,7 @@ import {
   prefetchCollegeScoutingData,
 } from "../features/college/scouting.js";
 import { showMedicalScreen } from "../features/medical/medicalScreen.js";
+import { showTradeLabScreen } from "../features/tradeLab/tradeLabScreen.js";
 import { renderTrainingDetail } from "../features/training/trainingDetail.js";
 import {
   advanceOffseasonDevStep,
@@ -68,6 +76,7 @@ function bindEvents() {
   els.continueBtn.addEventListener("click", () => continueGame().catch((e) => alert(e.message)));
   els.myTeamBtn.addEventListener("click", () => showMyTeamScreen().catch((e) => alert(e.message)));
   els.marketMenuBtn?.addEventListener("click", () => showMarketScreen().catch((e) => alert(e.message)));
+  els.tradeLabMenuBtn?.addEventListener("click", () => showTradeLabScreen().catch((e) => alert(e.message)));
   els.tacticsMenuBtn.addEventListener("click", () => showTacticsScreen().catch((e) => alert(e.message)));
   els.nextGameTacticsBtn.addEventListener("click", () => showTacticsScreen().catch((e) => alert(e.message)));
   els.nextGamePlayBtn.addEventListener("click", () => progressNextGameFromHome().catch((e) => alert(e.message)));
@@ -183,11 +192,14 @@ function bindEvents() {
   els.tacticsSaveBtn?.addEventListener("click", () => saveTacticsDraft({ showSuccessMessage: true }).catch((e) => alert(e.message)));
   els.tacticsOffenseBtn.addEventListener("click", () => toggleTacticsOptions("offense"));
   els.tacticsDefenseBtn.addEventListener("click", () => toggleTacticsOptions("defense"));
+  els.presetOffenseOpenBtn?.addEventListener("click", () => openPresetOffenseModal());
+  els.presetDefenseOpenBtn?.addEventListener("click", () => openPresetDefenseModal());
   els.standingsMenuBtn.addEventListener("click", () => showStandingsScreen().catch((e) => alert(e.message)));
   els.collegeMenuBtn.addEventListener("click", () => showCollegeScreen().catch((e) => alert(e.message)));
   els.medicalMenuBtn.addEventListener("click", () => showMedicalScreen().catch((e) => alert(e.message)));
   els.trainingBackBtn.addEventListener("click", () => showMainScreen());
   els.medicalBackBtn.addEventListener("click", () => showMainScreen());
+  els.tradeLabBackBtn?.addEventListener("click", () => showMainScreen());
   els.standingsBackBtn.addEventListener("click", () => showMainScreen());
   els.collegeBackBtn.addEventListener("click", () => showMainScreen());
   els.marketBackBtn?.addEventListener("click", () => showMainScreen());

@@ -195,48 +195,73 @@ def compute_buy_retrieval_caps(team_situation: Any, cfg: DealGeneratorConfig) ->
     }
 
 
-def classify_target_tier(
+def _as_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _clamp01(x: Any) -> float:
+    return max(0.0, min(1.0, _as_float(x, 0.0)))
+
+
+def _resolve_ovr(focus: Any) -> Optional[float]:
+    raw = getattr(focus, "ovr", None)
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except Exception:
+        return None
+
+
+def _tier_from_ovr_hardcut(ovr: Optional[float]) -> str:
+    if ovr is None:
+        return "GARBAGE"
+    v = float(ovr)
+    if v >= 97.0:
+        return "MVP"
+    if v >= 93.0:
+        return "ALL_NBA"
+    if v >= 90.0:
+        return "ALL_STAR"
+    if v >= 85.0:
+        return "HIGH_STARTER"
+    if v >= 80.0:
+        return "STARTER"
+    if v >= 77.0:
+        return "HIGH_ROTATION"
+    if v >= 75.0:
+        return "ROTATION"
+    return "GARBAGE"
+
+
+def classify_target_profile(
     *,
     target: Optional[Any] = None,
     sale_asset: Optional[Any] = None,
     match_tag: str = "",
     config: Optional[DealGeneratorConfig] = None,
-) -> str:
-    """거래 focal asset을 tier로 분류한다.
+) -> Dict[str, Any]:
+    """Classify focal asset into OVR-hardcut 8-tier.
 
-    반환값: ROLE | STARTER | HIGH_STARTER | STAR | PICK_ONLY
-    - target(BUY) 또는 sale_asset(SELL) 중 하나를 입력한다.
-    - threshold는 문서 기준의 단순 초기값이며, strictness 파라미터로 완화/강화 가능.
+    Output keys:
+    - tier: MVP/ALL_NBA/ALL_STAR/HIGH_STARTER/STARTER/HIGH_ROTATION/ROTATION/GARBAGE
     """
-
-    _ = config  # phase-2: 인터페이스 고정(추후 strictness/bias 반영 시 사용)
-
+    _ = match_tag
     focus = target if target is not None else sale_asset
     if focus is None:
-        return "STARTER"
+        return {
+            "tier": "GARBAGE",
+        }
 
-    market = float(getattr(focus, "market_total", 0.0) or 0.0)
-    salary_m = float(getattr(focus, "salary_m", 0.0) or 0.0)
-    remaining_years = float(getattr(focus, "remaining_years", 0.0) or 0.0)
-    need_tag = str(getattr(focus, "need_tag", "") or "").upper()
-    tag = str(match_tag or "").upper()
-    is_expiring = bool(getattr(focus, "is_expiring", False)) or (remaining_years <= 1.1)
+    ovr = _resolve_ovr(focus)
+    tier = _tier_from_ovr_hardcut(ovr)
 
-    if "PICK" in need_tag or "PICK" in tag:
-        return "PICK_ONLY"
-
-    if is_expiring and market <= 58.0 and salary_m <= 30.0:
-        return "ROLE"
-
-    if market >= 86.0:
-        return "STAR"
-    if market >= 72.0:
-        return "HIGH_STARTER"
-    if market >= 52.0:
-        return "STARTER"
-    return "ROLE"
-
-
+    return {
+        "tier": str(tier),
+    }
 
 
 # -----------------------------------------------------------------------------
@@ -264,23 +289,6 @@ def _clone_deal(deal: Deal) -> Deal:
         teams=list(deal.teams),
         legs={tid: list(assets) for tid, assets in deal.legs.items()},
     )
-
-def _is_locked_candidate(lock: Any, *, allow_locked_by_deal_id: Optional[str]) -> bool:
-    """LockInfo precheck (SSOT).
-
-    - is_locked=True 이고 allow_locked_by_deal_id와 무관하면 잠김.
-    - allow_locked_by_deal_id가 lock.deal_id와 같으면(동일 딜 수정) 잠김으로 보지 않는다.
-    """
-    try:
-        if not bool(getattr(lock, "is_locked", False)):
-            return False
-        lock_deal = getattr(lock, "deal_id", None)
-        if allow_locked_by_deal_id and lock_deal and str(lock_deal) == str(allow_locked_by_deal_id):
-            return False
-        return True
-    except Exception:
-        return False
-
 
 def _shape_ok(deal: Deal, *, config: DealGeneratorConfig, catalog: Optional[TradeAssetCatalog] = None) -> bool:
     for assets in deal.legs.values():

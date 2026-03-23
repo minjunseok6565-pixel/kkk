@@ -28,10 +28,10 @@ from .utils import (
 from .dedupe import dedupe_hash
 from .targets import select_targets_buy, select_targets_sell, select_buyers_for_sale_asset, _active_public_listing_meta_by_player
 from .skeletons import build_offer_skeletons_buy, build_offer_skeletons_sell, expand_variants
-from .repair import repair_until_valid
+from .repair import repair_until_valid_many
 from .scoring import evaluate_and_score, _proposal_from_cached_eval, _should_discard_prop
-from .pick_protection_decorator import maybe_apply_pick_protection_variants
 from .sweetener import maybe_apply_sweeteners
+from .template_fallback_policy import decide_fallback_after_template_stage
 
 # =============================================================================
 # DealGenerator
@@ -45,77 +45,6 @@ class DealGenerator:
         self.config = config or DealGeneratorConfig()
         self.last_stats: Optional[DealGeneratorStats] = None
 
-        # Cache for per-call asset catalogs built with allow_locked_by_deal_id.
-        #
-        # NOTE:
-        # TradeGenerationTickContext is @dataclass(slots=True) and is NOT weakref-able.
-        # So we keep a single-tick cache keyed by allow_locked_by_deal_id, and clear it
-        # whenever the tick_ctx identity changes.
-        self._asset_catalog_cache_tick_id: Optional[int] = None
-        self._asset_catalog_cache: Dict[str, TradeAssetCatalog] = {}
-
-
-    def _get_asset_catalog_for_call(
-        self,
-        tick_ctx: TradeGenerationTickContext,
-        *,
-        allow_locked_by_deal_id: Optional[str],
-    ) -> Optional[TradeAssetCatalog]:
-        """이번 generate_for_team 호출에 사용할 TradeAssetCatalog를 반환.
-
-        정책:
-        - allow_locked_by_deal_id가 None/blank 이거나, config.rebuild_catalog_when_allow_locked=False면:
-          tick_ctx.asset_catalog을 재사용하되, 없으면 build해서 tick_ctx.asset_catalog에 주입 후 사용.
-        - allow_locked_by_deal_id가 유효하고 rebuild가 True면:
-          allow_locked_by_deal_id별로 catalog를 build하고, tick_ctx 단위(id 기준)로 캐싱하여 재사용.
-        - allow-locked rebuild 실패 시:
-          base catalog(tick_ctx.asset_catalog)을 fallback으로 사용하고,
-          같은 tick에서 반복 rebuild 시도를 막기 위해 fallback을 negative-cache로 저장.
-        """
-        # Normalize allow_locked_by_deal_id (treat empty/whitespace as None)
-        allow_id = str(allow_locked_by_deal_id or "").strip()
-
-        # If allow-locked rebuild is disabled OR allow_id is empty => base catalog path
-        if not allow_id or not bool(getattr(self.config, "rebuild_catalog_when_allow_locked", True)):
-            if tick_ctx.asset_catalog is None:
-                try:
-                    tick_ctx.asset_catalog = build_trade_asset_catalog(tick_ctx=tick_ctx)
-                except Exception:
-                    return None
-            return tick_ctx.asset_catalog
-
-        # Ensure base catalog exists for fallback
-        if tick_ctx.asset_catalog is None:
-            try:
-                tick_ctx.asset_catalog = build_trade_asset_catalog(tick_ctx=tick_ctx)
-            except Exception:
-                return None
-        base_cat = tick_ctx.asset_catalog
-
-        # Single-tick cache: clear whenever tick_ctx identity changes.
-        tick_id = id(tick_ctx)
-        if self._asset_catalog_cache_tick_id != tick_id:
-            self._asset_catalog_cache_tick_id = tick_id
-            self._asset_catalog_cache.clear()
-
-        cached = self._asset_catalog_cache.get(allow_id)
-        if cached is not None:
-            return cached
-
-        # Build allow-locked catalog (and cache)
-        try:
-            cat = build_trade_asset_catalog(
-                tick_ctx=tick_ctx,
-                allow_locked_by_deal_id=allow_id,
-            )
-        except Exception:
-            # Fallback to base catalog and negative-cache to avoid repeated rebuild attempts this tick.
-            self._asset_catalog_cache[allow_id] = base_cat
-            return base_cat
-
-        self._asset_catalog_cache[allow_id] = cat
-        return cat
-
 
     # ---------------------------------------------------------------------
     # Public API
@@ -126,7 +55,6 @@ class DealGenerator:
         tick_ctx: TradeGenerationTickContext,
         *,
         max_results: int = 8,
-        allow_locked_by_deal_id: Optional[str] = None,
     ) -> List[DealProposal]:
         """team_id를 기준으로 2-team 딜 후보를 생성.
 
@@ -141,11 +69,12 @@ class DealGenerator:
         """
 
         # --- asset catalog 확보
-        # allow_locked_by_deal_id가 주어진 경우, tick_ctx 단위 캐시를 사용해 1회만 재빌드/재사용한다.
-        # tick_ctx.asset_catalog이 None이면 자동으로 build한다.
-        catalog = self._get_asset_catalog_for_call(tick_ctx, allow_locked_by_deal_id=allow_locked_by_deal_id)
-        if catalog is None:
-            return []
+        if tick_ctx.asset_catalog is None:
+            try:
+                tick_ctx.asset_catalog = build_trade_asset_catalog(tick_ctx=tick_ctx)
+            except Exception:
+                return []
+        catalog = tick_ctx.asset_catalog
 
         tid = str(team_id).upper()
 
@@ -167,9 +96,6 @@ class DealGenerator:
             return []
 
         posture = str(getattr(ts, "trade_posture", "STAND_PAT") or "STAND_PAT").upper()
-        if posture == "STAND_PAT" and float(getattr(ts, "urgency", 0.0) or 0.0) < 0.35:
-            self.last_stats = DealGeneratorStats(mode="SKIP")
-            return []
 
         budget = _scale_budget(self.config, ts)
         rng = random.Random(_compute_seed(self.config, tick_ctx, tid))
@@ -185,7 +111,6 @@ class DealGenerator:
                 budget=budget,
                 rng=rng,
                 max_results=int(max_results),
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
                 stats=stats,
             )
         else:
@@ -197,7 +122,6 @@ class DealGenerator:
                 budget=budget,
                 rng=rng,
                 max_results=int(max_results),
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
                 stats=stats,
             )
 
@@ -300,7 +224,6 @@ def _generate_buy_mode(
     budget: DealGeneratorBudget,
     rng: random.Random,
     max_results: int,
-    allow_locked_by_deal_id: Optional[str],
     stats: DealGeneratorStats,
 ) -> List[DealProposal]:
     buyer_id = str(initiator_buyer_id).upper()
@@ -322,8 +245,6 @@ def _generate_buy_mode(
 
     # 같은 base deal에서 sweetener를 여러 번 시도할 수 있게 하되 비용 폭증을 막기 위한 카운터
     sweetener_trials_by_base: Dict[str, int] = {}
-    # 같은 base deal에서 fit-swap(FIT_FAILS counter)을 여러 번 시도할 수 있게 하되 비용 폭증을 막기 위한 카운터
-    fit_swap_trials_by_base: Dict[str, int] = {}
     banned_asset_keys: Set[str] = set()
     banned_players: Set[str] = set()
     banned_receivers_by_player: Dict[str, Set[str]] = {}
@@ -347,7 +268,6 @@ def _generate_buy_mode(
         pool_cap = max(pool_cap, int(max_results) * 2)
 
     max_sweetener_trials_per_base = int(getattr(config, "sweetener_max_trials_per_base", 2))
-    max_fit_swap_trials_per_base = int(getattr(config, "fit_swap_max_trials_per_base", 1))
 
     retrieval_cfg = _derive_buy_retrieval_budget_guard_config(config, budget)
 
@@ -388,47 +308,18 @@ def _generate_buy_mode(
     soft_val_stop = max(1, int(math.floor(float(budget.max_validations) * 0.92)))
     soft_eval_stop = max(1, int(math.floor(float(budget.max_evaluations) * 0.92)))
 
-    for t in targets:
-        if len(proposals) >= pool_cap:
-            break
-        if _budget_or_hard_cap_reached(stats, budget, config):
-            break
-
-        # Tier2 early-stop linkage: budget 임계치 근접 시 탐색을 조기 종료.
-        if (
-            stats.validations >= soft_val_stop or stats.evaluations >= soft_eval_stop
-        ) and len(proposals) >= max(1, int(max_results // 2)):
-            stats.bump_failure("buy_budget_soft_stop")
-            break
-
-        stats.targets_considered += 1
-
-        target_pid = str(getattr(t, "player_id", "") or "")
-
-        seller_id = str(t.from_team).upper()
-        if seller_id == buyer_id:
-            continue
-
-        ts_seller = tick_ctx.get_team_situation(seller_id)
-        if bool(getattr(ts_seller, "constraints", None) and ts_seller.constraints.cooldown_active):
-            continue
-
-        candidates = build_offer_skeletons_buy(
-            buyer_id,
-            seller_id,
-            t,
-            tick_ctx,
-            catalog,
-            config=config,
-            budget=budget,
-            rng=rng,
-            banned_asset_keys=banned_asset_keys,
-            banned_players=banned_players,
-            banned_receivers_by_player=banned_receivers_by_player,
-        )
-
+    def _process_buy_candidates_for_target(
+        *,
+        target: object,
+        seller_id: str,
+        target_pid: str,
+        candidates: List[DealCandidate],
+    ) -> int:
+        nonlocal proposals
         if not candidates:
-            continue
+            return 0
+
+        pushed_before = len(proposals)
 
         stats.skeletons_built += len(candidates)
         for c in candidates:
@@ -438,7 +329,7 @@ def _generate_buy_mode(
         candidates = expand_variants(
             buyer_id,
             seller_id,
-            t,
+            target,
             candidates,
             tick_ctx,
             catalog,
@@ -455,7 +346,7 @@ def _generate_buy_mode(
         if getattr(config, "soft_guard_second_apron_by_constraints", False):
             candidates = _soft_guard_second_apron_candidates(candidates, tick_ctx)
             if not candidates:
-                continue
+                return 0
 
         candidates = _beam_select_candidates(
             candidates,
@@ -484,12 +375,11 @@ def _generate_buy_mode(
                 continue
             seen_skeleton.add(h)
 
-            ok, cand2, v_used = repair_until_valid(
+            cand_list, v_used = repair_until_valid_many(
                 cand,
                 tick_ctx,
                 catalog,
                 config,
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
                 budget=budget,
                 banned_asset_keys=banned_asset_keys,
                 banned_players=banned_players,
@@ -497,215 +387,239 @@ def _generate_buy_mode(
                 stats=stats,
             )
             stats.validations += v_used
-            if not ok or cand2 is None:
+            if not cand_list:
                 continue
 
-            # (A) repair 이후 base deal identity (수리 과정에서 서로 다른 스켈레톤이 같은 딜로 수렴 가능)
-            h_valid = dedupe_hash(cand2.deal)
+            for cand2 in cand_list:
+                # (A) repair 이후 base deal identity (수리 과정에서 서로 다른 스켈레톤이 같은 딜로 수렴 가능)
+                h_valid = dedupe_hash(cand2.deal)
 
-            # 이미 출력된 base라면, sweetener/fit-swap 둘 다 더 시도할 여지가 없을 때만 스킵(비용 가드)
-            if h_valid in seen_output:
-                sweet_left = (
-                    bool(getattr(config, "sweetener_enabled", True))
-                    and int(getattr(config, "sweetener_max_additions", 0)) > 0
-                    and int(sweetener_trials_by_base.get(h_valid, 0)) < int(max_sweetener_trials_per_base)
-                )
-                fit_left = (
-                    bool(getattr(config, "fit_swap_enabled", True))
-                    and int(max_fit_swap_trials_per_base) > 0
-                    and int(fit_swap_trials_by_base.get(h_valid, 0)) < int(max_fit_swap_trials_per_base)
-                )
-                if not sweet_left and not fit_left:
+                # 이미 출력된 base라면, sweetener를 더 시도할 여지가 없을 때만 스킵(비용 가드)
+                if h_valid in seen_output:
+                    sweet_left = (
+                        bool(getattr(config, "sweetener_enabled", True))
+                        and int(getattr(config, "sweetener_max_additions", 0)) > 0
+                        and int(sweetener_trials_by_base.get(h_valid, 0)) < int(max_sweetener_trials_per_base)
+                    )
+                    if not sweet_left:
+                        continue
+
+                # evaluate (cache)
+                cached = base_eval_cache.get(h_valid)
+                if cached is None:
+                    base_prop, e_used = evaluate_and_score(
+                        cand2.deal,
+                        buyer_id=buyer_id,
+                        seller_id=seller_id,
+                        tick_ctx=tick_ctx,
+                        config=config,
+                        tags=tuple(cand2.tags),
+                        opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
+                        stats=stats,
+                    )
+                    stats.evaluations += e_used
+                    if base_prop is None:
+                        continue
+                    base_eval_cache[h_valid] = (
+                        base_prop.buyer_decision,
+                        base_prop.seller_decision,
+                        base_prop.buyer_eval,
+                        base_prop.seller_eval,
+                    )
+                else:
+                    bd, sd, be, se = cached
+                    base_prop = _proposal_from_cached_eval(
+                        cand2.deal,
+                        buyer_id=buyer_id,
+                        seller_id=seller_id,
+                        buyer_decision=bd,
+                        seller_decision=sd,
+                        buyer_eval=be,
+                        seller_eval=se,
+                        config=config,
+                        tags=tuple(cand2.tags),
+                        opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
+                    )
+
+                # filter: 너무 말도 안 되는 손해
+                if _should_discard_prop(base_prop, config):
                     continue
 
-            # evaluate (cache)
-            cached = base_eval_cache.get(h_valid)
-            if cached is None:
-                base_prop, e_used = evaluate_and_score(
-                    cand2.deal,
-                    buyer_id=buyer_id,
-                    seller_id=seller_id,
-                    tick_ctx=tick_ctx,
-                    config=config,
-                    tags=tuple(cand2.tags),
-                    opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
-                    stats=stats,
-                )
-                stats.evaluations += e_used
-                if base_prop is None:
-                    continue
-                base_eval_cache[h_valid] = (
-                    base_prop.buyer_decision,
-                    base_prop.seller_decision,
-                    base_prop.buyer_eval,
-                    base_prop.seller_eval,
-                )
-            else:
-                bd, sd, be, se = cached
-                base_prop = _proposal_from_cached_eval(
-                    cand2.deal,
-                    buyer_id=buyer_id,
-                    seller_id=seller_id,
-                    buyer_decision=bd,
-                    seller_decision=sd,
-                    buyer_eval=be,
-                    seller_eval=se,
-                    config=config,
-                    tags=tuple(cand2.tags),
-                    opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
-                )
+                pre_sweet_prop = base_prop
+                pre_sweet_hash = dedupe_hash(pre_sweet_prop.deal)
 
-            # --- pick protection decorator (post-pick, deal-local)
-            base_prop, pv_used, pe_used = maybe_apply_pick_protection_variants(
-                base_prop,
-                tick_ctx=tick_ctx,
-                catalog=catalog,
-                config=config,
-                budget=budget,
-                allow_locked_by_deal_id=allow_locked_by_deal_id,
-                opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
-                stats=stats,
-            )
-            stats.validations += pv_used
-            stats.evaluations += pe_used
-
-            # filter: 너무 말도 안 되는 손해
-            if _should_discard_prop(base_prop, config):
-                continue
-
-            # --- FIT_FAILS -> fit swap counter (v2 absorption)
-            pre_sweet_prop = base_prop
-            pre_sweet_hash = dedupe_hash(pre_sweet_prop.deal)
-
-            fit_enabled = bool(getattr(config, "fit_swap_enabled", True))
-            if fit_enabled and int(max_fit_swap_trials_per_base) > 0:
-                if int(fit_swap_trials_by_base.get(h_valid, 0)) < int(max_fit_swap_trials_per_base):
-                    try:
-                        from .fit_swap import maybe_apply_fit_swap  # local import to avoid cycles
-                    except ImportError:
-                        maybe_apply_fit_swap = None  # type: ignore
-
-                    if maybe_apply_fit_swap is not None:
-                        val_rem = max(0, int(budget.max_validations) - int(stats.validations))
-                        eval_rem = max(0, int(budget.max_evaluations) - int(stats.evaluations))
-
-                        trial_idx = int(fit_swap_trials_by_base.get(h_valid, 0))
+                # sweetener loop (대개 buyer -> seller)
+                best_prop = pre_sweet_prop
+                if config.sweetener_enabled and int(config.sweetener_max_additions) > 0:
+                    trial_idx = int(sweetener_trials_by_base.get(pre_sweet_hash, 0))
+                    if trial_idx < int(max_sweetener_trials_per_base):
+                        sweetener_trials_by_base[pre_sweet_hash] = trial_idx + 1
                         local_seed = _compute_sweetener_seed(
                             config,
                             tick_ctx,
                             initiator_team_id=buyer_id,
                             counterparty_team_id=seller_id,
                             base_hash=pre_sweet_hash,
-                            skeleton_hash=f"fit_swap|{h}",
+                            skeleton_hash=h,
                             trial_index=trial_idx,
                         )
                         local_rng = random.Random(int(local_seed))
 
-                        res = maybe_apply_fit_swap(
+                        best_prop, extra_v, extra_e = maybe_apply_sweeteners(
                             pre_sweet_prop,
+                            initiator_team_id=buyer_id,
                             tick_ctx=tick_ctx,
                             catalog=catalog,
                             config=config,
                             budget=budget,
-                            validations_remaining=int(val_rem),
-                            evaluations_remaining=int(eval_rem),
-                            allow_locked_by_deal_id=allow_locked_by_deal_id,
                             banned_asset_keys=banned_asset_keys,
-                            banned_players=banned_players,
-                            banned_receivers_by_player=banned_receivers_by_player,
-                            protected_player_id=cand2.focal_player_id,
-                            opponent_repeat_count=int(partner_counts.get(seller_id, 0)),
                             rng=local_rng,
                             stats=stats,
                         )
+                        stats.validations += extra_v
+                        stats.evaluations += extra_e
 
-                        # maybe_apply_fit_swap can return None (e.g. no FIT_FAILS / empty pool / budget gate).
-                        # Count it as a trial to avoid repeatedly retrying the same base deal.
-                        if res is None:
-                            fit_swap_trials_by_base[h_valid] = int(fit_swap_trials_by_base.get(h_valid, 0)) + 1
-                            
-                        # budget counters
-                        stats.validations += int(getattr(res, "validations_used", 0) or 0)
-                        stats.evaluations += int(getattr(res, "evaluations_used", 0) or 0)
+                # (B) 최종 중복 제거는 '실제로 push된 딜'만 기준으로 한다.
+                #     - sweetener 결과가 중복이면 base 딜을 fallback으로 push할 수 있어야 한다.
+                pushed: Optional[DealProposal] = None
 
-                        # telemetry
-                        tried = int(getattr(res, "candidates_tried", 0) or 0)
-                        if tried > 0:
-                            stats.fit_swap_triggers += 1
-                            stats.fit_swap_candidates_tried += tried
-                            fit_swap_trials_by_base[h_valid] = int(fit_swap_trials_by_base.get(h_valid, 0)) + 1
+                h_best = dedupe_hash(best_prop.deal)
+                if h_best not in seen_output:
+                    pushed = best_prop
+                    seen_output.add(h_best)
+                else:
+                    # sweetened가 중복이면 현재 base라도 유니크할 때는 결과로 남긴다.
+                    if pre_sweet_hash not in seen_output:
+                        pushed = pre_sweet_prop
+                        seen_output.add(pre_sweet_hash)
 
-                            if bool(getattr(res, "swapped", False)):
-                                stats.fit_swap_success += 1
+                if pushed is None:
+                    continue
 
-                        # update base for sweetener stage
-                        pre_sweet_prop = getattr(res, "proposal", pre_sweet_prop) or pre_sweet_prop
-                        pre_sweet_hash = dedupe_hash(pre_sweet_prop.deal)
-
-            # sweetener loop (대개 buyer -> seller)
-            best_prop = pre_sweet_prop
-            if config.sweetener_enabled and int(config.sweetener_max_additions) > 0:
-                trial_idx = int(sweetener_trials_by_base.get(pre_sweet_hash, 0))
-                if trial_idx < int(max_sweetener_trials_per_base):
-                    sweetener_trials_by_base[pre_sweet_hash] = trial_idx + 1
-                    local_seed = _compute_sweetener_seed(
-                        config,
-                        tick_ctx,
-                        initiator_team_id=buyer_id,
-                        counterparty_team_id=seller_id,
-                        base_hash=pre_sweet_hash,
-                        skeleton_hash=h,
-                        trial_index=trial_idx,
+                # (C) target repetition penalty (v2 absorption) - apply only at final push stage
+                if target_pid:
+                    pushed = _apply_target_repeat_penalty(
+                        pushed,
+                        target_repeat_count=int(target_counts.get(target_pid, 0)),
+                        cfg=config,
                     )
-                    local_rng = random.Random(int(local_seed))
 
-                    best_prop, extra_v, extra_e = maybe_apply_sweeteners(
-                        pre_sweet_prop,
-                        tick_ctx=tick_ctx,
-                        catalog=catalog,
-                        config=config,
-                        budget=budget,
-                        allow_locked_by_deal_id=allow_locked_by_deal_id,
-                        banned_asset_keys=banned_asset_keys,
-                        rng=local_rng,
-                        stats=stats,
-                    )
-                    stats.validations += extra_v
-                    stats.evaluations += extra_e
-
-            # (B) 최종 중복 제거는 '실제로 push된 딜'만 기준으로 한다.
-            #     - sweetener 결과가 중복이면 base 딜을 fallback으로 push할 수 있어야 한다.
-            pushed: Optional[DealProposal] = None
-
-            h_best = dedupe_hash(best_prop.deal)
-            if h_best not in seen_output:
-                pushed = best_prop
-                seen_output.add(h_best)
-            else:
-                # sweetened가 중복이면 (fit-swap 포함) 현재 base라도 유니크할 때는 결과로 남긴다.
-                if pre_sweet_hash not in seen_output:
-                    pushed = pre_sweet_prop
-                    seen_output.add(pre_sweet_hash)
-
-            if pushed is None:
-                continue
-
-            # (C) target repetition penalty (v2 absorption) - apply only at final push stage
-            if target_pid:
-                pushed = _apply_target_repeat_penalty(
+                proposals = _push_best(
+                    proposals,
                     pushed,
-                    target_repeat_count=int(target_counts.get(target_pid, 0)),
-                    cfg=config,
+                    max_results=pool_cap,
                 )
+                partner_counts[pushed.seller_id] = int(partner_counts.get(pushed.seller_id, 0)) + 1
+                if target_pid:
+                    target_counts[target_pid] = int(target_counts.get(target_pid, 0)) + 1
 
-            proposals = _push_best(
-                proposals,
-                pushed,
-                max_results=pool_cap,
+        return max(0, len(proposals) - pushed_before)
+
+    for t in targets:
+        if len(proposals) >= pool_cap:
+            break
+        if _budget_or_hard_cap_reached(stats, budget, config):
+            break
+
+        # Tier2 early-stop linkage: budget 임계치 근접 시 탐색을 조기 종료.
+        if (
+            stats.validations >= soft_val_stop or stats.evaluations >= soft_eval_stop
+        ) and len(proposals) >= max(1, int(max_results // 2)):
+            stats.bump_failure("buy_budget_soft_stop")
+            break
+
+        stats.targets_considered += 1
+
+        target_pid = str(getattr(t, "player_id", "") or "")
+
+        seller_id = str(t.from_team).upper()
+        if seller_id == buyer_id:
+            continue
+
+        ts_seller = tick_ctx.get_team_situation(seller_id)
+        if bool(getattr(ts_seller, "constraints", None) and ts_seller.constraints.cooldown_active):
+            continue
+
+        template_enabled = bool(getattr(config, "template_first_enabled", True))
+        fallback_enabled = bool(getattr(config, "template_first_fallback_enabled", True))
+        min_keep = max(1, int(getattr(config, "template_first_min_keep_after_eval", 1) or 1))
+
+        if not template_enabled:
+            candidates = build_offer_skeletons_buy(
+                buyer_id,
+                seller_id,
+                t,
+                tick_ctx,
+                catalog,
+                config=config,
+                budget=budget,
+                rng=rng,
+                banned_asset_keys=banned_asset_keys,
+                banned_players=banned_players,
+                banned_receivers_by_player=banned_receivers_by_player,
+                generation_phase="combined",
             )
-            partner_counts[pushed.seller_id] = int(partner_counts.get(pushed.seller_id, 0)) + 1
-            if target_pid:
-                target_counts[target_pid] = int(target_counts.get(target_pid, 0)) + 1
+            _process_buy_candidates_for_target(target=t, seller_id=seller_id, target_pid=target_pid, candidates=candidates)
+            continue
+
+        template_candidates = build_offer_skeletons_buy(
+            buyer_id,
+            seller_id,
+            t,
+            tick_ctx,
+            catalog,
+            config=config,
+            budget=budget,
+            rng=rng,
+            banned_asset_keys=banned_asset_keys,
+            banned_players=banned_players,
+            banned_receivers_by_player=banned_receivers_by_player,
+            generation_phase="template",
+        )
+        template_built = len(template_candidates)
+        template_kept = _process_buy_candidates_for_target(
+            target=t,
+            seller_id=seller_id,
+            target_pid=target_pid,
+            candidates=template_candidates,
+        )
+
+        fallback_decision = decide_fallback_after_template_stage(
+            template_enabled=template_enabled,
+            fallback_enabled=fallback_enabled,
+            template_candidates_built=template_built,
+            template_proposals_kept=template_kept,
+            min_keep_after_eval=min_keep,
+        )
+        if fallback_decision.reason in {"template_stage_empty", "template_stage_all_discarded"}:
+            stats.bump_failure(fallback_decision.reason)
+
+        if not fallback_decision.should_fallback:
+            continue
+        if _budget_or_hard_cap_reached(stats, budget, config):
+            continue
+
+        stats.bump_failure("fallback_stage_invoked")
+        fallback_candidates = build_offer_skeletons_buy(
+            buyer_id,
+            seller_id,
+            t,
+            tick_ctx,
+            catalog,
+            config=config,
+            budget=budget,
+            rng=rng,
+            banned_asset_keys=banned_asset_keys,
+            banned_players=banned_players,
+            banned_receivers_by_player=banned_receivers_by_player,
+            generation_phase="fallback",
+        )
+        _process_buy_candidates_for_target(
+            target=t,
+            seller_id=seller_id,
+            target_pid=target_pid,
+            candidates=fallback_candidates,
+        )
 
     proposals.sort(key=lambda p: p.score, reverse=True)
     proposals = _apply_partner_cap(
@@ -727,7 +641,6 @@ def _generate_sell_mode(
     budget: DealGeneratorBudget,
     rng: random.Random,
     max_results: int,
-    allow_locked_by_deal_id: Optional[str],
     stats: DealGeneratorStats,
 ) -> List[DealProposal]:
     seller_id = str(initiator_seller_id).upper()
@@ -749,8 +662,6 @@ def _generate_sell_mode(
 
     # 같은 base deal에서 sweetener를 여러 번 시도할 수 있게 하되 비용 폭증을 막기 위한 카운터
     sweetener_trials_by_base: Dict[str, int] = {}
-    # 같은 base deal에서 fit-swap(FIT_FAILS counter)을 여러 번 시도할 수 있게 하되 비용 폭증을 막기 위한 카운터
-    fit_swap_trials_by_base: Dict[str, int] = {}
     banned_asset_keys: Set[str] = set()
     banned_players: Set[str] = set()
     banned_receivers_by_player: Dict[str, Set[str]] = {}
@@ -770,7 +681,6 @@ def _generate_sell_mode(
         pool_cap = max(pool_cap, int(max_results) * 2)
 
     max_sweetener_trials_per_base = int(getattr(config, "sweetener_max_trials_per_base", 2))
-    max_fit_swap_trials_per_base = int(getattr(config, "fit_swap_max_trials_per_base", 1))
 
     sale_assets = select_targets_sell(
         seller_id,
@@ -780,129 +690,84 @@ def _generate_sell_mode(
         budget=budget,
         rng=rng,
         banned_players=banned_players,
-        allow_locked_by_deal_id=allow_locked_by_deal_id,
     )
 
-    for s in sale_assets:
-        if len(proposals) >= pool_cap:
-            break
-        if _budget_or_hard_cap_reached(stats, budget, config):
-            break
+    def _process_sell_candidates_for_pair(
+        *,
+        buyer_id: str,
+        target_pid: str,
+        candidates: List[DealCandidate],
+    ) -> int:
+        nonlocal proposals
+        if not candidates:
+            return 0
 
-        stats.targets_considered += 1
+        pushed_before = len(proposals)
 
-        target_pid = str(getattr(s, "player_id", "") or "")
+        stats.skeletons_built += len(candidates)
+        for c in candidates:
+            _record_candidate_observability(stats, c)
 
-        buyer_candidates = select_buyers_for_sale_asset(
-            seller_id,
-            s,
-            tick_ctx,
-            catalog,
-            config=config,
-            budget=budget,
+        # soft guard: payroll_after_est 기준 2nd apron one-for-one 위반 가능 후보 제거(탐색 낭비/invalid 감소)
+        if getattr(config, "soft_guard_second_apron_by_constraints", False):
+            candidates = _soft_guard_second_apron_candidates(candidates, tick_ctx)
+            if not candidates:
+                return 0
+
+        candidates = _beam_select_candidates(
+            candidates,
+            buyer_id=buyer_id,
+            seller_id=seller_id,
+            tick_ctx=tick_ctx,
+            catalog=catalog,
             rng=rng,
+            cap=max(1, int(budget.beam_width)),
         )
 
-        for buyer_id, match_tag in buyer_candidates:
+        attempts = 0
+        for cand in candidates:
+            if attempts >= budget.max_attempts_per_target:
+                break
             if len(proposals) >= pool_cap:
                 break
             if _budget_or_hard_cap_reached(stats, budget, config):
                 break
 
-            buyer_id = str(buyer_id).upper()
-            if buyer_id == seller_id:
-                continue
-            ts_buyer = tick_ctx.get_team_situation(buyer_id)
-            if bool(getattr(ts_buyer, "constraints", None) and ts_buyer.constraints.cooldown_active):
-                continue
+            attempts += 1
+            stats.candidates_attempted += 1
 
-            candidates = build_offer_skeletons_sell(
-                seller_id=seller_id,
-                buyer_id=buyer_id,
-                sale_asset=s,
-                match_tag=match_tag,
-                tick_ctx=tick_ctx,
-                catalog=catalog,
-                config=config,
+            h = dedupe_hash(cand.deal)
+            if h in seen_skeleton:
+                continue
+            seen_skeleton.add(h)
+
+            cand_list, v_used = repair_until_valid_many(
+                cand,
+                tick_ctx,
+                catalog,
+                config,
                 budget=budget,
-                rng=rng,
                 banned_asset_keys=banned_asset_keys,
                 banned_players=banned_players,
                 banned_receivers_by_player=banned_receivers_by_player,
+                stats=stats,
             )
-
-            if not candidates:
+            stats.validations += v_used
+            if not cand_list:
                 continue
 
-            stats.skeletons_built += len(candidates)
-            for c in candidates:
-                _record_candidate_observability(stats, c)
-
-            # soft guard: payroll_after_est 기준 2nd apron one-for-one 위반 가능 후보 제거(탐색 낭비/invalid 감소)
-            if getattr(config, "soft_guard_second_apron_by_constraints", False):
-                candidates = _soft_guard_second_apron_candidates(candidates, tick_ctx)
-                if not candidates:
-                    continue
-
-            candidates = _beam_select_candidates(
-                candidates,
-                buyer_id=buyer_id,
-                seller_id=seller_id,
-                tick_ctx=tick_ctx,
-                catalog=catalog,
-                rng=rng,
-                cap=max(1, int(budget.beam_width)),
-            )
-
-            attempts = 0
-            for cand in candidates:
-                if attempts >= budget.max_attempts_per_target:
-                    break
-                if len(proposals) >= pool_cap:
-                    break
-                if _budget_or_hard_cap_reached(stats, budget, config):
-                    break
-
-                attempts += 1
-                stats.candidates_attempted += 1
-
-                h = dedupe_hash(cand.deal)
-                if h in seen_skeleton:
-                    continue
-                seen_skeleton.add(h)
-
-                ok, cand2, v_used = repair_until_valid(
-                    cand,
-                    tick_ctx,
-                    catalog,
-                    config,
-                    allow_locked_by_deal_id=allow_locked_by_deal_id,
-                    budget=budget,
-                    banned_asset_keys=banned_asset_keys,
-                    banned_players=banned_players,
-                    banned_receivers_by_player=banned_receivers_by_player,
-                    stats=stats,
-                )
-                stats.validations += v_used
-                if not ok or cand2 is None:
-                    continue
-
+            for cand2 in cand_list:
                 # (A) repair 이후 base deal identity (수리 과정에서 서로 다른 스켈레톤이 같은 딜로 수렴 가능)
                 h_valid = dedupe_hash(cand2.deal)
 
-                # 이미 출력된 base라면, sweetener/fit-swap 둘 다 더 시도할 여지가 없을 때만 스킵(비용 가드)
+                # 이미 출력된 base라면, sweetener를 더 시도할 여지가 없을 때만 스킵(비용 가드)
                 if h_valid in seen_output:
                     sweet_left = (
                         bool(getattr(config, "sweetener_enabled", True))
                         and int(getattr(config, "sweetener_max_additions", 0)) > 0
                         and int(sweetener_trials_by_base.get(h_valid, 0)) < int(max_sweetener_trials_per_base)
                     )
-                    fit_left = (
-                        bool(getattr(config, "fit_swap_enabled", True))
-                        and int(max_fit_swap_trials_per_base) > 0
-                        and int(fit_swap_trials_by_base.get(h_valid, 0)) < int(max_fit_swap_trials_per_base)
-                    )
-                    if not sweet_left and not fit_left:
+                    if not sweet_left:
                         continue
 
                 # evaluate (cache)
@@ -942,90 +807,12 @@ def _generate_sell_mode(
                         opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
                     )
 
-                # --- pick protection decorator (post-pick, deal-local)
-                base_prop, pv_used, pe_used = maybe_apply_pick_protection_variants(
-                    base_prop,
-                    tick_ctx=tick_ctx,
-                    catalog=catalog,
-                    config=config,
-                    budget=budget,
-                    allow_locked_by_deal_id=allow_locked_by_deal_id,
-                    opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
-                    stats=stats,
-                )
-                stats.validations += pv_used
-                stats.evaluations += pe_used
-
+                # filter: 너무 말도 안 되는 손해
                 if _should_discard_prop(base_prop, config):
                     continue
 
-                # --- FIT_FAILS -> fit swap counter (v2 absorption)
                 pre_sweet_prop = base_prop
                 pre_sweet_hash = dedupe_hash(pre_sweet_prop.deal)
-
-                fit_enabled = bool(getattr(config, "fit_swap_enabled", True))
-                if fit_enabled and int(max_fit_swap_trials_per_base) > 0:
-                    if int(fit_swap_trials_by_base.get(h_valid, 0)) < int(max_fit_swap_trials_per_base):
-                        try:
-                            from .fit_swap import maybe_apply_fit_swap  # local import to avoid cycles
-                        except ImportError:
-                            maybe_apply_fit_swap = None  # type: ignore
-
-                        if maybe_apply_fit_swap is not None:
-                            val_rem = max(0, int(budget.max_validations) - int(stats.validations))
-                            eval_rem = max(0, int(budget.max_evaluations) - int(stats.evaluations))
-
-                            trial_idx = int(fit_swap_trials_by_base.get(h_valid, 0))
-                            local_seed = _compute_sweetener_seed(
-                                config,
-                                tick_ctx,
-                                initiator_team_id=seller_id,
-                                counterparty_team_id=buyer_id,
-                                base_hash=pre_sweet_hash,
-                                skeleton_hash=f"fit_swap|{h}",
-                                trial_index=trial_idx,
-                            )
-                            local_rng = random.Random(int(local_seed))
-
-                            res = maybe_apply_fit_swap(
-                                pre_sweet_prop,
-                                tick_ctx=tick_ctx,
-                                catalog=catalog,
-                                config=config,
-                                budget=budget,
-                                validations_remaining=int(val_rem),
-                                evaluations_remaining=int(eval_rem),
-                                allow_locked_by_deal_id=allow_locked_by_deal_id,
-                                banned_asset_keys=banned_asset_keys,
-                                banned_players=banned_players,
-                                banned_receivers_by_player=banned_receivers_by_player,
-                                protected_player_id=cand2.focal_player_id,
-                                opponent_repeat_count=int(partner_counts.get(buyer_id, 0)),
-                                rng=local_rng,
-                                stats=stats,
-                            )
-                            # maybe_apply_fit_swap can return None (e.g. no FIT_FAILS / empty pool / budget gate).
-                            # Count it as a trial to avoid repeatedly retrying the same base deal.
-                            if res is None:
-                                fit_swap_trials_by_base[h_valid] = int(fit_swap_trials_by_base.get(h_valid, 0)) + 1
-
-                            # budget counters
-                            stats.validations += int(getattr(res, "validations_used", 0) or 0)
-                            stats.evaluations += int(getattr(res, "evaluations_used", 0) or 0)
-
-                            # telemetry
-                            tried = int(getattr(res, "candidates_tried", 0) or 0)
-                            if tried > 0:
-                                stats.fit_swap_triggers += 1
-                                stats.fit_swap_candidates_tried += tried
-                                fit_swap_trials_by_base[h_valid] = int(fit_swap_trials_by_base.get(h_valid, 0)) + 1
-
-                                if bool(getattr(res, "swapped", False)):
-                                    stats.fit_swap_success += 1
-
-                            # update base for sweetener stage
-                            pre_sweet_prop = getattr(res, "proposal", pre_sweet_prop) or pre_sweet_prop
-                            pre_sweet_hash = dedupe_hash(pre_sweet_prop.deal)
 
                 best_prop = pre_sweet_prop
                 if config.sweetener_enabled and int(config.sweetener_max_additions) > 0:
@@ -1045,11 +832,11 @@ def _generate_sell_mode(
 
                         best_prop, extra_v, extra_e = maybe_apply_sweeteners(
                             pre_sweet_prop,
+                            initiator_team_id=seller_id,
                             tick_ctx=tick_ctx,
                             catalog=catalog,
                             config=config,
                             budget=budget,
-                            allow_locked_by_deal_id=allow_locked_by_deal_id,
                             banned_asset_keys=banned_asset_keys,
                             rng=local_rng,
                             stats=stats,
@@ -1083,6 +870,123 @@ def _generate_sell_mode(
                 partner_counts[pushed.buyer_id] = int(partner_counts.get(pushed.buyer_id, 0)) + 1
                 if target_pid:
                     target_counts[target_pid] = int(target_counts.get(target_pid, 0)) + 1
+
+        return max(0, len(proposals) - pushed_before)
+
+    for s in sale_assets:
+        if len(proposals) >= pool_cap:
+            break
+        if _budget_or_hard_cap_reached(stats, budget, config):
+            break
+
+        stats.targets_considered += 1
+
+        target_pid = str(getattr(s, "player_id", "") or "")
+
+        buyer_candidates = select_buyers_for_sale_asset(
+            seller_id,
+            s,
+            tick_ctx,
+            catalog,
+            config=config,
+            budget=budget,
+            rng=rng,
+        )
+
+        for buyer_id, match_tag in buyer_candidates:
+            if len(proposals) >= pool_cap:
+                break
+            if _budget_or_hard_cap_reached(stats, budget, config):
+                break
+
+            buyer_id = str(buyer_id).upper()
+            if buyer_id == seller_id:
+                continue
+            ts_buyer = tick_ctx.get_team_situation(buyer_id)
+            if bool(getattr(ts_buyer, "constraints", None) and ts_buyer.constraints.cooldown_active):
+                continue
+
+            template_enabled = bool(getattr(config, "template_first_enabled", True))
+            fallback_enabled = bool(getattr(config, "template_first_fallback_enabled", True))
+            min_keep = max(1, int(getattr(config, "template_first_min_keep_after_eval", 1) or 1))
+
+            if not template_enabled:
+                candidates = build_offer_skeletons_sell(
+                    seller_id=seller_id,
+                    buyer_id=buyer_id,
+                    sale_asset=s,
+                    match_tag=match_tag,
+                    tick_ctx=tick_ctx,
+                    catalog=catalog,
+                    config=config,
+                    budget=budget,
+                    rng=rng,
+                    banned_asset_keys=banned_asset_keys,
+                    banned_players=banned_players,
+                    banned_receivers_by_player=banned_receivers_by_player,
+                    generation_phase="combined",
+                )
+                _process_sell_candidates_for_pair(buyer_id=buyer_id, target_pid=target_pid, candidates=candidates)
+                continue
+
+            template_candidates = build_offer_skeletons_sell(
+                seller_id=seller_id,
+                buyer_id=buyer_id,
+                sale_asset=s,
+                match_tag=match_tag,
+                tick_ctx=tick_ctx,
+                catalog=catalog,
+                config=config,
+                budget=budget,
+                rng=rng,
+                banned_asset_keys=banned_asset_keys,
+                banned_players=banned_players,
+                banned_receivers_by_player=banned_receivers_by_player,
+                generation_phase="template",
+            )
+            template_built = len(template_candidates)
+            template_kept = _process_sell_candidates_for_pair(
+                buyer_id=buyer_id,
+                target_pid=target_pid,
+                candidates=template_candidates,
+            )
+
+            fallback_decision = decide_fallback_after_template_stage(
+                template_enabled=template_enabled,
+                fallback_enabled=fallback_enabled,
+                template_candidates_built=template_built,
+                template_proposals_kept=template_kept,
+                min_keep_after_eval=min_keep,
+            )
+            if fallback_decision.reason in {"template_stage_empty", "template_stage_all_discarded"}:
+                stats.bump_failure(fallback_decision.reason)
+
+            if not fallback_decision.should_fallback:
+                continue
+            if _budget_or_hard_cap_reached(stats, budget, config):
+                continue
+
+            stats.bump_failure("fallback_stage_invoked")
+            fallback_candidates = build_offer_skeletons_sell(
+                seller_id=seller_id,
+                buyer_id=buyer_id,
+                sale_asset=s,
+                match_tag=match_tag,
+                tick_ctx=tick_ctx,
+                catalog=catalog,
+                config=config,
+                budget=budget,
+                rng=rng,
+                banned_asset_keys=banned_asset_keys,
+                banned_players=banned_players,
+                banned_receivers_by_player=banned_receivers_by_player,
+                generation_phase="fallback",
+            )
+            _process_sell_candidates_for_pair(
+                buyer_id=buyer_id,
+                target_pid=target_pid,
+                candidates=fallback_candidates,
+            )
 
 
     proposals.sort(key=lambda p: p.score, reverse=True)
@@ -1330,16 +1234,9 @@ def _prescore_candidate(
     seller_out = catalog.outgoing_by_team.get(seller)
 
     d = cand.deal
-    n_assets = sum(len(v) for v in d.legs.values())
-    n_players = sum(1 for leg in d.legs.values() for a in leg if isinstance(a, PlayerAsset))
-
     score = 0.0
 
-    # 1) 복잡도: 단순할수록 우선
-    score -= 0.10 * max(0, int(n_assets) - 2)
-    score -= 0.08 * max(0, int(n_players) - 2)
-
-    # 2) salary plausibility (양쪽 모두 대충 체크)
+    # 1) salary plausibility (양쪽 모두 대충 체크)
     try:
         ts_buyer = tick_ctx.get_team_situation(buyer)
     except Exception:

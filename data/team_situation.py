@@ -24,7 +24,6 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, Literal
 
 import logging
 import math
-from role_need_tags import role_to_need_tag
 
 # SSOT: contract schedule interpretation (remaining years, salary for a season).
 try:  # project layout
@@ -40,6 +39,7 @@ from league_repo import LeagueRepo
 from derived_formulas import compute_derived
 from team_utils import get_conference_standings
 from config import ALL_TEAM_IDS
+from data.team_situation_config import TEAM_SITUATION_NEED_TAG_CONFIG, TEAM_SITUATION_TIER_MODEL
 
 def _load_trade_rule_helpers():
     """Lazy-load trade-rule helpers to avoid import cycles at module import time.
@@ -94,7 +94,6 @@ class TeamConstraints:
     cap_space: float
     apron_status: Literal["BELOW_CAP", "OVER_CAP", "ABOVE_1ST_APRON", "ABOVE_2ND_APRON"]
     hard_flags: Dict[str, bool] = field(default_factory=dict)
-    locks_count: int = 0
     # Market-level constraint: team temporarily throttled from trading activity (anti-spam / recent-action cooldown).
     cooldown_active: bool = False
     deadline_pressure: float = 0.0
@@ -165,7 +164,6 @@ class TeamSituationContext:
     trade_market: Dict[str, Any]
     trade_memory: Dict[str, Any]
     negotiations: Dict[str, Any]
-    asset_locks: Dict[str, Any]
     # Precomputed per-team ratings and percentiles for league-relative evaluation.
     team_ratings_index: Dict[str, Dict[str, float]]
     # Precomputed per-team trade eligibility summaries (SSOT-backed).
@@ -380,7 +378,6 @@ def build_team_situation_context(
         trade_market=_to_plain(workflow_state.get("trade_market", {}) or {}),
         trade_memory=_to_plain(workflow_state.get("trade_memory", {}) or {}),
         negotiations=_to_plain(workflow_state.get("negotiations", {}) or {}),
-        asset_locks=_to_plain(trade_state.get("asset_locks", {}) or {}),
         team_ratings_index=ratings_index,
         team_ban_index=_to_plain(team_ban_index),
     )
@@ -420,6 +417,7 @@ class TeamSituationEvaluator:
             or (str(getattr(repo, "db_path", "")) if repo is not None else None)
             or _safe_get_db_path()
         )
+        self._league_rank_snapshot_cache: Optional[Dict[str, Any]] = None
 
     def _get_roster(self, team_id: str, roster: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """Single roster access gate.
@@ -433,6 +431,119 @@ class TeamSituationEvaluator:
             return roster
         return self._load_roster_with_derived(team_id)
 
+    def _get_league_rank_snapshot(self) -> Dict[str, Any]:
+        if self._league_rank_snapshot_cache is None:
+            self._league_rank_snapshot_cache = self._build_league_blended_table()
+        return self._league_rank_snapshot_cache
+
+    def _build_league_blended_table(self) -> Dict[str, Any]:
+        rows: List[Dict[str, Any]] = []
+        ids = _active_team_ids_from_ctx(self.ctx)
+        for tid in ids:
+            perf = self._compute_performance(tid)
+            roster = self._get_roster(tid)
+            roster_sig = self._compute_roster_signals(tid, roster)
+            season_progress = _safe_float(self.ctx.records_index.get(tid, {}).get("season_progress"), 0.0)
+
+            sig = TeamSituationSignals(
+                win_pct=float(perf["win_pct"]),
+                conf_rank=perf.get("rank"),
+                gb=perf.get("gb"),
+                gb_to_6th=perf.get("gb_to_6th"),
+                gb_to_10th=perf.get("gb_to_10th"),
+                point_diff_pg=float(perf["point_diff_pg"]),
+                last10_win_pct=float(perf["last10_win_pct"]),
+                trend=float(perf["trend"]),
+                net_rating=float(perf["net_rating"]),
+                ortg=0.0,
+                drtg=0.0,
+                ortg_pct=0.5,
+                def_pct=0.5,
+                net_pct=0.5,
+                star_power=float(roster_sig.get("star_power", 0.0)),
+                depth=float(roster_sig.get("depth", 0.0)),
+                core_age=float(roster_sig.get("core_age", 0.0)),
+                young_core=float(roster_sig.get("young_core", 0.0)),
+                asset_score=0.0,
+                flexibility=0.0,
+                style_3_rate=0.0,
+                style_rim_rate=0.0,
+                role_fit_health=0.5,
+                expiring_top8_count=0,
+                expiring_top8_ovr_sum=0.0,
+                re_sign_pressure=0.0,
+            )
+            performance_score = _compute_perf_score(sig, season_progress)
+            overall_score = _compute_overall_strength_score(sig)
+            w_perf = _performance_weight_by_progress(season_progress)
+            w_overall = _overall_weight_by_progress(season_progress)
+            blended = _clamp((w_overall * overall_score) + (w_perf * performance_score), 0.0, 1.0)
+            rows.append(
+                {
+                    "team_id": tid,
+                    "season_progress": float(_clamp(season_progress, 0.0, 1.0)),
+                    "overall_score": float(overall_score),
+                    "performance_score": float(performance_score),
+                    "w_overall": float(w_overall),
+                    "w_perf": float(w_perf),
+                    "blended": float(blended),
+                }
+            )
+
+        rows.sort(key=lambda r: (-float(r.get("blended", 0.0)), str(r.get("team_id", ""))))
+        rank_float_map = _compute_rank_float_map(rows)
+        by_team: Dict[str, Dict[str, Any]] = {}
+        for idx, row in enumerate(rows, start=1):
+            tid = str(row.get("team_id", "")).upper()
+            by_team[tid] = {
+                **row,
+                "league_rank_int": int(idx),
+                "league_rank_float": float(rank_float_map.get(tid, float(idx))),
+            }
+        return {"rows": rows, "by_team": by_team}
+
+    def _classify_tier_by_league_rank(
+        self,
+        *,
+        tid: str,
+        fallback_blended: float,
+    ) -> Tuple[CompetitiveTier, Dict[str, Any]]:
+        snap = self._get_league_rank_snapshot()
+        by_team = snap.get("by_team", {}) if isinstance(snap, dict) else {}
+        row = by_team.get(tid, {}) if isinstance(by_team, dict) else {}
+        if not isinstance(row, dict) or not row:
+            pseudo_rank = 1.0 + (1.0 - _clamp(fallback_blended, 0.0, 1.0)) * 29.0
+            tier, soft_scores = _map_rank_to_tier_soft(rank_float=pseudo_rank, blended=fallback_blended, with_scores=True)
+            return (
+                tier,
+                {
+                    "league_rank_float": float(pseudo_rank),
+                    "league_rank_int": int(max(1, min(30, round(pseudo_rank)))),
+                    "tier_soft_scores": {k: float(v) for k, v in soft_scores.items()},
+                    "rank_boundaries": _rank_boundaries(),
+                    "rank_quota": _rank_quota_config(),
+                },
+            )
+        total_rows = len((snap.get("rows", []) if isinstance(snap, dict) else []) or [])
+        blended = float(row.get("blended", fallback_blended))
+        rank_float = float(row.get("league_rank_float", row.get("league_rank_int", 1)))
+        if total_rows < 30:
+            # In partial/synthetic contexts (e.g., unit tests with sparse league state),
+            # project blended into a 30-team pseudo-rank to avoid pathological rank=1 bias.
+            rank_float = 1.0 + (1.0 - _clamp(blended, 0.0, 1.0)) * 29.0
+        rank_int = int(max(1, min(30, round(rank_float))))
+        tier, soft_scores = _map_rank_to_tier_soft(rank_float=rank_float, blended=blended, with_scores=True)
+        return (
+            tier,
+            {
+                "league_rank_float": float(rank_float),
+                "league_rank_int": int(rank_int),
+                "tier_soft_scores": {k: float(v) for k, v in soft_scores.items()},
+                "rank_boundaries": _rank_boundaries(),
+                "rank_quota": _rank_quota_config(),
+            },
+        )
+
     def evaluate_team(self, team_id: str) -> TeamSituation:
         tid = str(normalize_team_id(team_id, strict=True))
 
@@ -444,7 +555,17 @@ class TeamSituationEvaluator:
         contract_sig = self._compute_contract_pressure(tid, roster)
         constraints = self._compute_constraints(tid, roster, perf)
         style_sig = self._compute_style_signals(tid)
-        role_sig, role_needs = self._compute_role_fit_and_needs(tid, roster)
+        season_progress = _safe_float(self.ctx.records_index.get(tid, {}).get("season_progress"), 0.0)
+        stat_trust = _early_stat_trust(season_progress)
+        role_sig, role_needs = self._compute_role_fit_and_needs(
+            tid,
+            roster,
+            style_sig=style_sig,
+            roster_sig=roster_sig,
+            ortg_pct=float(rt.get("ortg_pct", 0.5) or 0.5),
+            def_pct=float(rt.get("def_pct", 0.5) or 0.5),
+            stat_trust=float(stat_trust),
+        )
 
         signals = TeamSituationSignals(
             win_pct=float(perf["win_pct"]),
@@ -912,9 +1033,6 @@ class TeamSituationEvaluator:
         if acquired_ban > 0:
             hard_flags["AGGREGATION_BAN"] = True
 
-        # asset locks that touch this team
-        locks_count = self._count_team_related_locks(team_id, roster)
-
         # market cooldown (from workflow_state["trade_market"]["cooldowns"])
         cooldown_active = _cooldown_active(self.ctx.trade_market, team_id)
         if cooldown_active:
@@ -928,7 +1046,6 @@ class TeamSituationEvaluator:
             cap_space=float(cap_space),
             apron_status=apron_status,
             hard_flags=hard_flags,
-            locks_count=int(locks_count),
             cooldown_active=bool(cooldown_active),
             deadline_pressure=float(deadline_pressure),
         )
@@ -1008,71 +1125,372 @@ class TeamSituationEvaluator:
             "has_breakdowns": bool(isinstance(breakdowns, dict) and len(breakdowns) > 0),
         }
 
-    def _compute_role_fit_and_needs(self, team_id: str, roster: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], List[TeamNeed]]:
-        # Evaluate role fit using role_fit tables.
+    def _compute_role_fit_and_needs(
+        self,
+        team_id: str,
+        roster: List[Dict[str, Any]],
+        *,
+        style_sig: Optional[Dict[str, Any]] = None,
+        roster_sig: Optional[Dict[str, Any]] = None,
+        ortg_pct: float = 0.5,
+        def_pct: float = 0.5,
+        stat_trust: float = 1.0,
+    ) -> Tuple[Dict[str, Any], List[TeamNeed]]:
+        """Aggressive replacement: build needs from role scores + usage/coverage + position shortage.
+
+        - OFF_* / DEF_* tags are primary.
+        - G_/W_/B_ prefix is added only when position shortage is confirmed
+          (relative shortage + absolute count <= 3).
+        """
         try:
-            # Project standard: matchengine_v3.*
             from matchengine_v3.role_fit_data import ROLE_FIT_WEIGHTS  # type: ignore
-            from matchengine_v3.role_fit import role_fit_score, role_fit_grade  # type: ignore
-
+            from matchengine_v3.role_fit import role_fit_score  # type: ignore
         except Exception:
-            # If role fit data isn't available, return neutral.
             return ({"role_fit_health": 0.5, "role_best": {}}, [])
 
-        roles = [r for r in ROLE_FIT_WEIGHTS.keys()]
-        if not roles or not roster:
+        rotation = (roster or [])[:10]
+        if not rotation:
             return ({"role_fit_health": 0.5, "role_best": {}}, [])
 
-        rotation = roster[:8]
+        cfg = TEAM_SITUATION_NEED_TAG_CONFIG
+        style = style_sig or self._compute_style_signals(team_id)
+        pos_counts = ((roster_sig or {}).get("pos_counts") if isinstance(roster_sig, dict) else None) or _count_positions(rotation)
+        total_pos = max(1, int(pos_counts.get("G", 0) + pos_counts.get("W", 0) + pos_counts.get("B", 0)))
+        rel = {
+            "G": float(pos_counts.get("G", 0)) / total_pos,
+            "W": float(pos_counts.get("W", 0)) / total_pos,
+            "B": float(pos_counts.get("B", 0)) / total_pos,
+        }
+        shortage = {
+            k: bool(rel.get(k, 0.0) <= float(cfg.pos_shortage_rel_max) and int(pos_counts.get(k, 0)) <= int(cfg.pos_shortage_abs_max))
+            for k in ("G", "W", "B")
+        }
+
+        OFF_TAG_BY_ROLE = {
+            "Engine_Primary": "OFF_ENGINE_PRIMARY",
+            "Engine_Secondary": "OFF_ENGINE_SECONDARY",
+            "Transition_Engine": "OFF_TRANSITION_ENGINE",
+            "Shot_Creator": "OFF_SHOT_CREATOR",
+            "Rim_Pressure": "OFF_RIM_PRESSURE",
+            "SpotUp_Spacer": "OFF_SPOTUP_SPACER",
+            "Movement_Shooter": "OFF_MOVEMENT_SHOOTER",
+            "Cutter_Finisher": "OFF_CUTTER_FINISHER",
+            "Connector": "OFF_CONNECTOR",
+            "Roll_Man": "OFF_ROLL_MAN",
+            "ShortRoll_Hub": "OFF_SHORTROLL_HUB",
+            "Pop_Threat": "OFF_POP_THREAT",
+            "Post_Anchor": "OFF_POST_ANCHOR",
+        }
+
+        DEF_TAG_BY_ROLE = {
+            "Zone_Top_Left": "DEF_ZONE_TOP_LEFT",
+            "Zone_Top_Right": "DEF_ZONE_TOP_RIGHT",
+            "PnR_POA_Defender": "DEF_PNR_POA_DEFENDER",
+            "PnR_POA_Blitz": "DEF_PNR_POA_BLITZ",
+            "PnR_POA_Switch": "DEF_PNR_POA_SWITCH",
+            "PnR_POA_Switch_1_4": "DEF_PNR_POA_SWITCH_1_4",
+            "PnR_POA_AtTheLevel": "DEF_PNR_POA_AT_THE_LEVEL",
+            "Lowman_Helper": "DEF_LOWMAN_HELPER",
+            "Nail_Helper": "DEF_NAIL_HELPER",
+            "Weakside_Rotator": "DEF_WEAKSIDE_ROTATOR",
+            "Switch_Wing_Strong": "DEF_SWITCH_WING_STRONG",
+            "Switch_Wing_Weak": "DEF_SWITCH_WING_WEAK",
+            "Switch_Wing_Strong_1_4": "DEF_SWITCH_WING_STRONG_1_4",
+            "Switch_Wing_Weak_1_4": "DEF_SWITCH_WING_WEAK_1_4",
+            "Zone_Bottom_Left": "DEF_ZONE_BOTTOM_LEFT",
+            "Zone_Bottom_Right": "DEF_ZONE_BOTTOM_RIGHT",
+            "Zone_Bottom_Center": "DEF_ZONE_BOTTOM_CENTER",
+            "PnR_Cover_Big_Drop": "DEF_PNR_COVER_BIG_DROP",
+            "PnR_Cover_Big_Blitz": "DEF_PNR_COVER_BIG_BLITZ",
+            "Backline_Anchor": "DEF_BACKLINE_ANCHOR",
+            "PnR_Cover_Big_Switch": "DEF_PNR_COVER_BIG_SWITCH",
+            "PnR_Cover_Big_Switch_1_4": "DEF_PNR_COVER_BIG_SWITCH_1_4",
+            "PnR_Cover_Big_HedgeRecover": "DEF_PNR_COVER_BIG_HEDGE_RECOVER",
+            "PnR_Cover_Big_AtTheLevel": "DEF_PNR_COVER_BIG_AT_THE_LEVEL",
+        }
+
+        def _role_key(role: str, phase: str) -> str:
+            if str(phase).upper() == "OFF":
+                return str(OFF_TAG_BY_ROLE.get(role, f"OFF_{str(role).upper()}"))
+            return str(DEF_TAG_BY_ROLE.get(role, f"DEF_{str(role).upper()}"))
+
+        def _prefix_if_short(tag: str, buckets: Optional[tuple[str, ...]]) -> str:
+            # Keep canonical tag unless at least one allowed position bucket is in shortage.
+            if not buckets:
+                return tag
+            for bucket in buckets:
+                if bucket in ("G", "W", "B") and shortage.get(bucket, False):
+                    return f"{bucket}_{tag}"
+            return tag
+
+        # Must stay aligned with need_attr_profiles.TAG_POSITIONS.
+        OFF_BUCKETS = {
+            "Engine_Primary": ("G",),
+            "Engine_Secondary": ("G",),
+            "Transition_Engine": ("G", "W"),
+            "Shot_Creator": ("G", "W"),
+            "Rim_Pressure": ("W", "B"),
+            "SpotUp_Spacer": ("G", "W", "B"),
+            "Movement_Shooter": ("G", "W"),
+            "Cutter_Finisher": ("W",),
+            "Connector": ("W", "B"),
+            "Roll_Man": ("W", "B"),
+            "ShortRoll_Hub": ("B",),
+            "Pop_Threat": ("B",),
+            "Post_Anchor": ("B",),
+        }
+
+        DEF_BUCKETS = {
+            "Zone_Top_Left": ("G",),
+            "Zone_Top_Right": ("G",),
+            "PnR_POA_Defender": ("G",),
+            "PnR_POA_Blitz": ("G",),
+            "PnR_POA_Switch": ("G",),
+            "PnR_POA_Switch_1_4": ("G",),
+            "PnR_POA_AtTheLevel": ("G",),
+            "Lowman_Helper": ("W",),
+            "Nail_Helper": ("W",),
+            "Weakside_Rotator": ("W",),
+            "Switch_Wing_Strong": ("W",),
+            "Switch_Wing_Weak": ("W",),
+            "Switch_Wing_Strong_1_4": ("W",),
+            "Switch_Wing_Weak_1_4": ("W",),
+            "Zone_Bottom_Left": ("B",),
+            "Zone_Bottom_Right": ("B",),
+            "Zone_Bottom_Center": ("B",),
+            "PnR_Cover_Big_Drop": ("B",),
+            "PnR_Cover_Big_Blitz": ("B",),
+            "Backline_Anchor": ("B",),
+            "PnR_Cover_Big_Switch": ("B",),
+            "PnR_Cover_Big_Switch_1_4": ("B",),
+            "PnR_Cover_Big_HedgeRecover": ("B",),
+            "PnR_Cover_Big_AtTheLevel": ("B",),
+        }
+
+        roles_off = list(ROLE_FIT_WEIGHTS.keys())
 
         class _P:
             def __init__(self, derived: Dict[str, Any]):
                 self._d = derived or {}
             def get(self, key: str) -> Any:
-                # role_fit expects 0..100; missing -> 50 baseline
                 try:
                     v = self._d.get(key, 50.0)
                     return float(v) if v is not None else 50.0
                 except Exception:
                     return 50.0
 
+        # offense role score/cov aggregation via per-player top3
+        off_acc: Dict[str, float] = {r: 0.0 for r in roles_off}
+        off_w: Dict[str, float] = {r: 0.0 for r in roles_off}
+        off_cov: Dict[str, float] = {r: 0.0 for r in roles_off}
+        rank_w = (1.0, 0.75, 0.55)
+
+        for p in rotation:
+            d = p.get("derived") if isinstance(p, dict) else None
+            if not isinstance(d, dict):
+                continue
+            scored = sorted([(r, float(role_fit_score(_P(d), r))) for r in roles_off], key=lambda x: x[1], reverse=True)[:3]
+            for i, (r, sc) in enumerate(scored):
+                w = rank_w[i] if i < len(rank_w) else 0.5
+                off_acc[r] += sc * w
+                off_w[r] += w
+                if sc >= float(cfg.coverage_score_min):
+                    off_cov[r] += 1.0
+
+        off_score = {r: (off_acc[r] / off_w[r] if off_w[r] > 1e-9 else 50.0) for r in roles_off}
+        off_coverage = {r: _clamp(off_cov[r] / max(1.0, float(len(rotation))), 0.0, 1.0) for r in roles_off}
+
+        # defensive role scoring from quality profiles (top3 per player)
+        try:
+            from matchengine_v3.quality_data.role_stat_profiles import ROLE_STAT_PROFILES  # type: ignore
+            from matchengine_v3.quality_data.group_scheme_role_weights import GROUP_SCHEME_ROLE_WEIGHTS  # type: ignore
+        except Exception:
+            ROLE_STAT_PROFILES = {}
+            GROUP_SCHEME_ROLE_WEIGHTS = {}
+
+        def _dot_derived(derived: Dict[str, Any], profile: Dict[str, float]) -> float:
+            num = 0.0
+            den = 0.0
+            for k, w in (profile or {}).items():
+                if w <= 0:
+                    continue
+                num += w * _safe_float(derived.get(k), 50.0)
+                den += w
+            return (num / den) if den > 1e-9 else 50.0
+
+        role_profiles_def: Dict[str, Dict[str, float]] = {}
+        for scheme_profiles in (ROLE_STAT_PROFILES or {}).values():
+            if not isinstance(scheme_profiles, dict):
+                continue
+            for r, prof in scheme_profiles.items():
+                if r not in role_profiles_def and isinstance(prof, dict):
+                    role_profiles_def[r] = dict(prof)
+        roles_def = sorted(role_profiles_def.keys())
+
+        def_acc: Dict[str, float] = {r: 0.0 for r in roles_def}
+        def_w: Dict[str, float] = {r: 0.0 for r in roles_def}
+        def_cov: Dict[str, float] = {r: 0.0 for r in roles_def}
+
+        for p in rotation:
+            d = p.get("derived") if isinstance(p, dict) else None
+            if not isinstance(d, dict) or not roles_def:
+                continue
+            scored = sorted([(r, _dot_derived(d, role_profiles_def.get(r, {}))) for r in roles_def], key=lambda x: x[1], reverse=True)[:3]
+            for i, (r, sc) in enumerate(scored):
+                w = rank_w[i] if i < len(rank_w) else 0.5
+                def_acc[r] += sc * w
+                def_w[r] += w
+                if sc >= float(cfg.coverage_score_min):
+                    def_cov[r] += 1.0
+
+        def_score = {r: (def_acc[r] / def_w[r] if def_w[r] > 1e-9 else 50.0) for r in roles_def}
+        def_coverage = {r: _clamp(def_cov[r] / max(1.0, float(len(rotation))), 0.0, 1.0) for r in roles_def}
+
+        # usage for offense from style action shares
+        usage_off = {r: 0.0 for r in roles_off}
+        usage_off_map: Dict[str, Dict[str, float]] = {
+            "pnr_rate": {"Engine_Primary": 0.45, "Engine_Secondary": 0.20, "Roll_Man": 0.25, "ShortRoll_Hub": 0.10},
+            "drive_rate": {"Rim_Pressure": 0.45, "Shot_Creator": 0.35, "Transition_Engine": 0.20},
+            "dho_rate": {"Movement_Shooter": 0.45, "SpotUp_Spacer": 0.30, "Connector": 0.25},
+            "post_rate": {"Post_Anchor": 0.60, "Pop_Threat": 0.20, "Connector": 0.20},
+            "transition_rate": {"Transition_Engine": 0.55, "Cutter_Finisher": 0.30, "Rim_Pressure": 0.15},
+            "setplay_rate": {"Connector": 0.35, "SpotUp_Spacer": 0.25, "Roll_Man": 0.25, "ShortRoll_Hub": 0.15},
+            "iso_rate": {"Shot_Creator": 0.60, "Engine_Primary": 0.25, "Rim_Pressure": 0.15},
+        }
+        for k, mapping in usage_off_map.items():
+            v = _clamp(_safe_float(style.get(k), 0.0), 0.0, 1.0)
+            if v <= 0:
+                continue
+            for r, w in mapping.items():
+                if r in usage_off:
+                    usage_off[r] += v * w
+        sum_off = sum(usage_off.values())
+        if sum_off > 1e-9:
+            usage_off = {r: usage_off[r] / sum_off for r in usage_off}
+
+        # usage for defense from scheme-role weights; unknown scheme share -> uniform by scheme
+        usage_def = {r: 0.0 for r in roles_def}
+        scheme_share: Dict[str, float] = {}
+        # Optional: get from trade_state tactics snapshot if available
+        teams_obj = ((self.ctx.trade_state.get("teams", {}) or {}).get(str(team_id).upper(), {}) or {})
+        ds = teams_obj.get("defense_scheme_share") if isinstance(teams_obj, dict) else None
+        if isinstance(ds, dict):
+            for k, v in ds.items():
+                scheme_share[str(k)] = max(0.0, _safe_float(v, 0.0))
+        if not scheme_share:
+            for group_obj in (GROUP_SCHEME_ROLE_WEIGHTS or {}).values():
+                if isinstance(group_obj, dict):
+                    for s in group_obj.keys():
+                        scheme_share[str(s)] = 1.0
+        ss = sum(scheme_share.values())
+        if ss <= 1e-9:
+            scheme_share = {"drop": 1.0}
+            ss = 1.0
+        scheme_share = {k: v / ss for k, v in scheme_share.items()}
+
+        for group_obj in (GROUP_SCHEME_ROLE_WEIGHTS or {}).values():
+            if not isinstance(group_obj, dict):
+                continue
+            for sch, role_w in group_obj.items():
+                s_w = scheme_share.get(str(sch), 0.0)
+                if s_w <= 0 or not isinstance(role_w, dict):
+                    continue
+                for r, rw in role_w.items():
+                    if r in usage_def:
+                        usage_def[r] += s_w * max(0.0, _safe_float(rw, 0.0))
+        sum_def = sum(usage_def.values())
+        if sum_def > 1e-9:
+            usage_def = {r: usage_def[r] / sum_def for r in usage_def}
+
         role_best: Dict[str, Dict[str, Any]] = {}
-        grades: List[str] = []
         needs: List[TeamNeed] = []
 
-        for role in roles:
-            best_fit = -1.0
-            best_pid = None
-            for p in rotation:
-                d = p.get("derived") if isinstance(p, dict) else None
-                if not isinstance(d, dict):
-                    continue
-                fit = float(role_fit_score(_P(d), role))
-                if fit > best_fit:
-                    best_fit = fit
-                    best_pid = p.get("player_id")
-            g = role_fit_grade(role, best_fit)
-            grades.append(g)
-            role_best[role] = {"fit": float(best_fit), "grade": g, "best_pid": best_pid}
+        def _emit(role: str, phase: str, score_100: float, coverage: float, usage: float, buckets: Optional[tuple[str, ...]]) -> None:
+            score_n = _clamp(score_100 / 100.0, 0.0, 1.0)
+            low_score = _clamp((float(cfg.low_score_center) - score_n) / max(1e-9, float(cfg.low_score_span)), 0.0, 1.0)
+            low_cov = _clamp((float(cfg.low_cov_center) - coverage) / max(1e-9, float(cfg.low_cov_span)), 0.0, 1.0)
+            base = max(low_score, low_cov)
+            delta = usage - coverage
+            adj = 0.0
+            dz = float(cfg.usage_cov_delta_deadzone)
+            span = max(1e-9, float(cfg.usage_cov_delta_span))
+            if delta > dz:
+                adj += _clamp((delta - dz) / span, 0.0, 1.0) * float(cfg.usage_cov_positive_boost)
+            elif delta < -dz:
+                adj -= _clamp((-delta - dz) / span, 0.0, 1.0) * float(cfg.usage_cov_negative_penalty)
 
-            # needs for weak roles
-            if g in ("C", "D"):
-                tag, label = role_to_need_tag(role)
-                weight = _clamp((62.0 - best_fit) / 25.0, 0.15, 1.0) if best_fit < 62.0 else 0.15
-                needs.append(
-                    TeamNeed(
-                        tag=tag,
-                        weight=float(weight),
-                        reason=f"{label} 역할 커버리지가 약함(베스트 핏 {best_fit:.0f}, 등급 {g}).",
-                        evidence={"role": role, "best_fit": best_fit, "grade": g},
-                    )
+            if phase == "OFF":
+                weak = _clamp((float(cfg.eff_bad_pct_center_off) - float(ortg_pct)) / max(1e-9, float(cfg.eff_bad_pct_center_off)), 0.0, 1.0)
+                add_scale = float(cfg.eff_add_scale_off)
+                mult_scale = float(cfg.eff_mult_scale_off)
+                relax_max = float(cfg.eff_emit_relax_max_off)
+            else:
+                weak = _clamp((float(cfg.eff_bad_pct_center_def) - float(def_pct)) / max(1e-9, float(cfg.eff_bad_pct_center_def)), 0.0, 1.0)
+                add_scale = float(cfg.eff_add_scale_def)
+                mult_scale = float(cfg.eff_mult_scale_def)
+                relax_max = float(cfg.eff_emit_relax_max_def)
+
+            weak *= _clamp(float(stat_trust), float(cfg.eff_early_dampen_min), 1.0)
+            eff_add = weak * add_scale
+            eff_mult = 1.0 + weak * mult_scale
+            w = _clamp((base + adj + eff_add) * eff_mult, 0.0, 1.0)
+
+            effective_min_emit = max(0.0, float(cfg.min_emit_weight) - weak * relax_max)
+            tau = max(1e-6, float(cfg.soft_gate_tau))
+            z = _clamp((w - effective_min_emit) / tau, -60.0, 60.0)
+            gate = 1.0 / (1.0 + math.exp(-z))
+            w = _clamp(w * gate, 0.0, 1.0)
+            if w <= 1e-9:
+                return
+            tag = _prefix_if_short(_role_key(role, phase), buckets)
+            needs.append(
+                TeamNeed(
+                    tag=tag,
+                    weight=float(w),
+                    reason=f"{phase} {role} 역할 보강 필요(점수 {score_100:.1f}, 커버리지 {coverage:.2f}, 사용량 {usage:.2f}).",
+                    evidence={
+                        "role": role,
+                        "phase": phase,
+                        "score": float(score_100),
+                        "coverage": float(coverage),
+                        "usage": float(usage),
+                        "usage_minus_coverage": float(delta),
+                        "pos_counts": dict(pos_counts),
+                        "pos_rel": dict(rel),
+                        "pos_shortage": dict(shortage),
+                        "efficiency_context": {
+                            "ortg_pct": float(ortg_pct),
+                            "def_pct": float(def_pct),
+                            "phase_weakness": float(weak),
+                            "eff_add": float(eff_add),
+                            "eff_mult": float(eff_mult),
+                            "effective_min_emit": float(effective_min_emit),
+                        },
+                    },
                 )
+            )
 
-        # health: S/A/B roles proportion with weighting
-        grade_points = {"S": 1.0, "A": 0.85, "B": 0.70, "C": 0.50, "D": 0.30}
-        health = _avg([grade_points.get(g, 0.6) for g in grades])
+        for r in roles_off:
+            sc = float(off_score.get(r, 50.0))
+            cov = float(off_coverage.get(r, 0.0))
+            use = float(usage_off.get(r, 0.0))
+            role_best[r] = {"fit": sc, "phase": "OFF", "coverage": cov, "usage": use}
+            _emit(r, "OFF", sc, cov, use, OFF_BUCKETS.get(r))
 
-        return ({"role_fit_health": float(_clamp(health, 0.0, 1.0)), "role_best": role_best}, needs)
+        for r in roles_def:
+            sc = float(def_score.get(r, 50.0))
+            cov = float(def_coverage.get(r, 0.0))
+            use = float(usage_def.get(r, 0.0))
+            role_best[r] = {"fit": sc, "phase": "DEF", "coverage": cov, "usage": use}
+            _emit(r, "DEF", sc, cov, use, DEF_BUCKETS.get(r))
+
+        health_scores = [
+            _clamp(v.get("fit", 50.0) / 100.0, 0.0, 1.0)
+            for v in role_best.values()
+            if isinstance(v, dict)
+        ]
+        health = _avg(health_scores) if health_scores else 0.5
+        return ({"role_fit_health": float(_clamp(health, 0.0, 1.0)), "role_best": role_best}, _merge_and_clip_needs(needs))
 
     def _classify_and_build_outputs(
         self,
@@ -1088,35 +1506,35 @@ class TeamSituationEvaluator:
         # 1) competitive score
         season_progress = _safe_float(self.ctx.records_index.get(tid, {}).get("season_progress"), 0.0)
         stat_trust = _early_stat_trust(season_progress)  # 0~0.2 구간: 스타일/효율 신호 영향 완화(최저 0.5)
-
-        perf_score = _compute_perf_score(signals, season_progress)
-        roster_score = 0.62 * signals.star_power + 0.38 * signals.depth
-        composite = _lerp(roster_score, perf_score, _clamp(season_progress, 0.15, 0.85))
+        performance_score = _compute_perf_score(signals, season_progress)
+        overall_score = _compute_overall_strength_score(signals)
+        w_perf = _performance_weight_by_progress(season_progress)
+        w_overall = _overall_weight_by_progress(season_progress)
+        blended = _clamp((w_overall * overall_score) + (w_perf * performance_score), 0.0, 1.0)
 
         # 2) tier
         tier: CompetitiveTier
-        rank = signals.conf_rank
         wp = signals.win_pct
-        nr = signals.net_rating
         tr = signals.trend
         gb6 = signals.gb_to_6th
         gb10 = signals.gb_to_10th
 
-        # "reset" special: strong roster but bad record
-        if composite >= 0.62 and wp < 0.46 and signals.star_power >= 0.70:
-            tier = "RESET"
-        elif (rank is not None and rank <= 4 and wp >= 0.58) or (wp >= 0.64 and nr >= 1.0):
-            tier = "CONTENDER"
-        elif (rank is not None and rank <= 8 and wp >= 0.50) or (wp >= 0.54 and nr >= 0.0):
-            tier = "PLAYOFF_BUYER"
-        elif (rank is not None and rank <= 12 and wp >= 0.42) or (wp >= 0.45 and season_progress > 0.2):
-            tier = "FRINGE"
-        else:
-            # bottom teams: distinguish rebuild vs tank
-            if wp <= 0.34 and (signals.young_core < 0.35) and (signals.star_power < 0.55):
-                tier = "TANK"
-            else:
-                tier = "REBUILD"
+        tier, rank_diag = self._classify_tier_by_league_rank(tid=tid, fallback_blended=float(blended))
+
+        # Early-season protection: avoid overreacting to noisy records when roster strength is clear.
+        if season_progress <= float(TEAM_SITUATION_TIER_MODEL.early_protection_max_progress):
+            if overall_score >= float(TEAM_SITUATION_TIER_MODEL.early_protection_high_overall_floor):
+                tier = "PLAYOFF_BUYER" if tier in ("FRINGE", "RESET", "REBUILD", "TANK") else tier
+
+        # "reset" special: strong roster + underperforming results (only after enough sample).
+        if (
+            season_progress >= float(TEAM_SITUATION_TIER_MODEL.reset_min_progress)
+            and w_perf >= float(TEAM_SITUATION_TIER_MODEL.reset_min_perf_weight)
+            and overall_score >= float(TEAM_SITUATION_TIER_MODEL.reset_min_overall_score)
+            and performance_score <= float(TEAM_SITUATION_TIER_MODEL.reset_max_perf_score)
+        ):
+            if tier not in ("REBUILD", "TANK"):
+                tier = "RESET"
 
         # Bubble nuance: near the 6/10 cut lines (especially later season) behaves differently from pure rank buckets.
         # - within ~3GB of 6th late -> treat like a buyer-tier (more realistic "push for playoffs")
@@ -1142,17 +1560,8 @@ class TeamSituationEvaluator:
             else:
                 horizon = "RE_TOOL"
 
-        # 4) needs: merge role + style + roster gaps
-        needs: List[TeamNeed] = []
-        needs.extend(_dedupe_needs(role_needs))
-        # Season-early dampening: use stat_trust so style/efficiency signals don't overreact on small samples.
-        needs.extend(_style_to_needs(tid, signals, style_sig, stat_trust=stat_trust))
-        needs.extend(_roster_gap_needs(tid, roster_sig, signals))
-        needs = _merge_and_clip_needs(needs)
-
-        # ORtg/DRtg percentile based boosting (align needs with clear team weaknesses).
-        needs = _boost_needs_by_efficiency_percentiles(needs, signals, stat_trust=stat_trust)
-        needs = _merge_and_clip_needs(needs)
+        # 4) needs: aggressive replacement uses role+usage+coverage output only.
+        needs: List[TeamNeed] = _merge_and_clip_needs(_dedupe_needs(role_needs))
 
         need_intensity = _avg([n.weight for n in needs]) if needs else 0.0
 
@@ -1266,7 +1675,32 @@ class TeamSituationEvaluator:
             urgency = _clamp(float(urgency) * 0.85, 0.0, 1.0)
 
         # 8) reasons (Korean, for player-facing realism)
-        reasons = _build_reasons(tid, tier, horizon, posture, signals, constraints, roster_sig, asset_sig, style_sig, prefs, needs)
+        reasons = _build_reasons(
+            tid,
+            tier,
+            horizon,
+            posture,
+            signals,
+            constraints,
+            roster_sig,
+            asset_sig,
+            style_sig,
+            prefs,
+            needs,
+            tier_diagnostics={
+                "season_progress": float(_clamp(season_progress, 0.0, 1.0)),
+                "overall_score": float(overall_score),
+                "performance_score": float(performance_score),
+                "w_overall": float(w_overall),
+                "w_perf": float(w_perf),
+                "blended": float(blended),
+                "league_rank_float": float(rank_diag.get("league_rank_float", 0.0)),
+                "league_rank_int": int(rank_diag.get("league_rank_int", 0)),
+                "tier_soft_scores": dict(rank_diag.get("tier_soft_scores", {}) or {}),
+                "rank_boundaries": list(rank_diag.get("rank_boundaries", []) or []),
+                "rank_quota": dict(rank_diag.get("rank_quota", {}) or {}),
+            },
+        )
         # Add a short transparency note for early season dampening (helps debugging/explanations).
         if stat_trust < 1.0:
             reasons.insert(
@@ -1475,76 +1909,6 @@ class TeamSituationEvaluator:
 
         return float(total)
 
-    def _count_team_related_locks(self, team_id: str, roster: Optional[List[Dict[str, Any]]] = None) -> int:
-        locks = self.ctx.asset_locks or {}
-        if not isinstance(locks, dict) or not locks:
-            return 0
-
-        # Build quick membership sets
-        if roster is None:
-            # Fallback: keep method safe when called outside the main evaluation path.
-            try:
-                roster = self._get_roster(team_id)
-            except Exception:
-                roster = []
- 
-        roster_pids = {str(p.get("player_id")) for p in roster if isinstance(p, dict) and p.get("player_id")}
-
-        pick_ids_owned = set()
-        for pick in (self.ctx.assets_snapshot.get("draft_picks", {}) or {}).values():
-            if not isinstance(pick, dict):
-                continue
-            if str(pick.get("owner_team", "")).upper() != team_id:
-                continue
-            if pick.get("pick_id"):
-                pick_ids_owned.add(str(pick.get("pick_id")))
-
-        swap_ids_owned = set()
-        for sw in (self.ctx.assets_snapshot.get("swap_rights", {}) or {}).values():
-            if not isinstance(sw, dict):
-                continue
-            if str(sw.get("owner_team", "")).upper() != team_id:
-                continue
-            # swap_rights table has `active` (1/0). Only count active by default.
-            try:
-                if int(sw.get("active", 1) or 0) == 0:
-                    continue
-            except Exception:
-                pass
-            if sw.get("swap_id"):
-                swap_ids_owned.add(str(sw.get("swap_id")))
-
-        fixed_ids_owned = set()
-        for fa in (self.ctx.assets_snapshot.get("fixed_assets", {}) or {}).values():
-            if not isinstance(fa, dict):
-                continue
-            if str(fa.get("owner_team", "")).upper() != team_id:
-                continue
-            if fa.get("asset_id"):
-                fixed_ids_owned.add(str(fa.get("asset_id")))
-
-        n = 0
-        for key in locks.keys():
-            if not isinstance(key, str):
-                continue
-            if key.startswith("player:"):
-                pid = key.split(":", 1)[1]
-                if pid in roster_pids:
-                    n += 1
-            elif key.startswith("pick:"):
-                pid = key.split(":", 1)[1]
-                if pid in pick_ids_owned:
-                    n += 1
-            elif key.startswith("swap:"):
-                sid = key.split(":", 1)[1]
-                if sid in swap_ids_owned:
-                    n += 1
-            elif key.startswith("fixed_asset:"):
-                aid = key.split(":", 1)[1]
-                if aid in fixed_ids_owned:
-                    n += 1
-        return n
-
 
 # ------------------------------------------------------------
 # Records index
@@ -1712,18 +2076,178 @@ def _standings_winpct_map(standings: Dict[str, Any]) -> Dict[str, float]:
 
 
 def _compute_perf_score(sig: TeamSituationSignals, season_progress: float) -> float:
-    # win% is primary; point diff + net rating as stabilizers
+    # In-season performance score. Early/late-season weighting is handled by
+    # _performance_weight_by_progress(), so this function stays focused on
+    # "how well this team is actually performing right now".
     wp = _clamp(sig.win_pct, 0.0, 1.0)
-    pd = sig.point_diff_pg
-    pd_norm = 0.5 + 0.5 * math.tanh(pd / 8.0)
+    pd_norm = 0.5 + 0.5 * math.tanh(sig.point_diff_pg / 8.0)
     nr_norm = 0.5 + 0.5 * math.tanh(sig.net_rating / 8.0)
 
-    # when season is young, trust roster more; still include trend
     trend = _clamp(sig.trend, -0.3, 0.3)
     trend_norm = 0.5 + (trend / 0.6)
 
-    score = 0.58 * wp + 0.20 * pd_norm + 0.12 * nr_norm + 0.10 * trend_norm
+    # Bubble context is only meaningful once the table has stabilized enough.
+    bubble_bonus = 0.0
+    sp = _clamp(_safe_float(season_progress, 0.0), 0.0, 1.0)
+    if sp >= float(TEAM_SITUATION_TIER_MODEL.bubble_bonus_min_progress):
+        gb6 = sig.gb_to_6th
+        gb10 = sig.gb_to_10th
+        if gb6 is not None and gb6 <= float(TEAM_SITUATION_TIER_MODEL.bubble_bonus_gb6_max):
+            bubble_bonus = max(bubble_bonus, float(TEAM_SITUATION_TIER_MODEL.bubble_bonus_gb6_raw))
+        if gb10 is not None and gb10 <= float(TEAM_SITUATION_TIER_MODEL.bubble_bonus_gb10_max):
+            bubble_bonus = max(bubble_bonus, float(TEAM_SITUATION_TIER_MODEL.bubble_bonus_gb10_raw))
+
+    score = (
+        float(TEAM_SITUATION_TIER_MODEL.perf_weight_win_pct) * wp
+        + float(TEAM_SITUATION_TIER_MODEL.perf_weight_net_rating_norm) * nr_norm
+        + float(TEAM_SITUATION_TIER_MODEL.perf_weight_point_diff_norm) * pd_norm
+        + float(TEAM_SITUATION_TIER_MODEL.perf_weight_trend_norm) * trend_norm
+        + float(TEAM_SITUATION_TIER_MODEL.perf_weight_bubble_bonus) * bubble_bonus
+    )
     return float(_clamp(score, 0.0, 1.0))
+
+
+def _compute_overall_strength_score(sig: TeamSituationSignals) -> float:
+    """Compute roster-anchored team strength score (0..1)."""
+    score = (
+        float(TEAM_SITUATION_TIER_MODEL.overall_weight_star_power) * _clamp(sig.star_power, 0.0, 1.0)
+        + float(TEAM_SITUATION_TIER_MODEL.overall_weight_depth) * _clamp(sig.depth, 0.0, 1.0)
+    )
+    return float(_clamp(score, 0.0, 1.0))
+
+
+def _piecewise_linear_weight(progress: float, points: List[Tuple[float, float]]) -> float:
+    """Return y-value at x=progress for piecewise-linear control points."""
+    p = _clamp(_safe_float(progress, 0.0), 0.0, 1.0)
+    if not points:
+        return 0.5
+    if p <= points[0][0]:
+        return float(_clamp(points[0][1], 0.0, 1.0))
+    for i in range(1, len(points)):
+        x0, y0 = points[i - 1]
+        x1, y1 = points[i]
+        if p <= x1:
+            if abs(x1 - x0) <= 1e-9:
+                return float(_clamp(y1, 0.0, 1.0))
+            t = _clamp((p - x0) / (x1 - x0), 0.0, 1.0)
+            return float(_clamp(_lerp(y0, y1, t), 0.0, 1.0))
+    return float(_clamp(points[-1][1], 0.0, 1.0))
+
+
+def _performance_weight_by_progress(season_progress: float) -> float:
+    """Performance weight schedule: low early, high late."""
+    control_points = list(getattr(TEAM_SITUATION_TIER_MODEL, "performance_weight_points", ()) or [])
+    if not control_points:
+        control_points = [(0.00, 0.15), (1.00, 0.80)]
+    return float(_piecewise_linear_weight(season_progress, control_points))
+
+
+def _overall_weight_by_progress(season_progress: float) -> float:
+    return float(_clamp(1.0 - _performance_weight_by_progress(season_progress), 0.0, 1.0))
+
+
+def _rank_quota_config() -> Dict[str, int]:
+    return {
+        "CONTENDER": int(getattr(TEAM_SITUATION_TIER_MODEL, "rank_quota_contender", 5)),
+        "PLAYOFF_BUYER": int(getattr(TEAM_SITUATION_TIER_MODEL, "rank_quota_playoff_buyer", 5)),
+        "FRINGE": int(getattr(TEAM_SITUATION_TIER_MODEL, "rank_quota_fringe", 8)),
+        "REBUILD": int(getattr(TEAM_SITUATION_TIER_MODEL, "rank_quota_rebuild", 7)),
+        "TANK": int(getattr(TEAM_SITUATION_TIER_MODEL, "rank_quota_tank", 5)),
+    }
+
+
+def _rank_boundaries() -> List[int]:
+    q = _rank_quota_config()
+    b1 = q["CONTENDER"]
+    b2 = b1 + q["PLAYOFF_BUYER"]
+    b3 = b2 + q["FRINGE"]
+    b4 = b3 + q["REBUILD"]
+    return [b1, b2, b3, b4]
+
+
+def _compute_rank_float_map(rows: List[Dict[str, Any]]) -> Dict[str, float]:
+    out: Dict[str, float] = {}
+    i = 0
+    n = len(rows)
+    while i < n:
+        j = i + 1
+        vi = float((rows[i] or {}).get("blended", 0.0))
+        while j < n:
+            vj = float((rows[j] or {}).get("blended", 0.0))
+            if abs(vj - vi) > 1e-9:
+                break
+            j += 1
+        avg_rank = ((i + 1) + j) / 2.0
+        for k in range(i, j):
+            tid = str((rows[k] or {}).get("team_id", "")).upper()
+            if tid:
+                out[tid] = float(avg_rank)
+        i = j
+    return out
+
+
+def _map_rank_to_tier_soft(
+    *,
+    rank_float: float,
+    blended: float,
+    with_scores: bool = False,
+) -> Any:
+    rank = float(max(1.0, rank_float))
+    boundaries = _rank_boundaries()
+    width = float(getattr(TEAM_SITUATION_TIER_MODEL, "rank_boundary_width", 1.25))
+    tau = float(getattr(TEAM_SITUATION_TIER_MODEL, "rank_boundary_tau", 0.55))
+    eps = 1e-9
+
+    if rank <= boundaries[0]:
+        anchor: CompetitiveTier = "CONTENDER"
+    elif rank <= boundaries[1]:
+        anchor = "PLAYOFF_BUYER"
+    elif rank <= boundaries[2]:
+        anchor = "FRINGE"
+    elif rank <= boundaries[3]:
+        anchor = "REBUILD"
+    else:
+        anchor = "TANK"
+
+    soft_scores: Dict[CompetitiveTier, float] = {
+        "CONTENDER": -1e9,
+        "PLAYOFF_BUYER": -1e9,
+        "FRINGE": -1e9,
+        "REBUILD": -1e9,
+        "TANK": -1e9,
+    }
+    soft_scores[anchor] = max(soft_scores[anchor], 0.0)
+
+    boundary_pairs: List[Tuple[int, CompetitiveTier, CompetitiveTier]] = [
+        (boundaries[0], "CONTENDER", "PLAYOFF_BUYER"),
+        (boundaries[1], "PLAYOFF_BUYER", "FRINGE"),
+        (boundaries[2], "FRINGE", "REBUILD"),
+        (boundaries[3], "REBUILD", "TANK"),
+    ]
+    for b, upper, lower in boundary_pairs:
+        d = rank - float(b)
+        if abs(d) > width:
+            continue
+        p_upper = 1.0 / (1.0 + math.exp(d / max(tau, eps)))
+        p_lower = 1.0 - p_upper
+        soft_scores[upper] = max(soft_scores[upper], float(p_upper))
+        soft_scores[lower] = max(soft_scores[lower], float(p_lower))
+
+    # tie-break by deterministic priority near same soft score:
+    # better rank wins, then better blended wins.
+    tier_order = {"CONTENDER": 0, "PLAYOFF_BUYER": 1, "FRINGE": 2, "REBUILD": 3, "TANK": 4}
+    final_tier = max(
+        soft_scores.keys(),
+        key=lambda t: (
+            float(soft_scores[t]),
+            -float(tier_order[t]),
+            float(blended),
+            -rank,
+        ),
+    )
+    if with_scores:
+        return final_tier, soft_scores
+    return final_tier
  
  
 def _early_stat_trust(season_progress: float, *, full_at: float = 0.20, min_trust: float = 0.50) -> float:
@@ -1806,138 +2330,13 @@ def _style_to_needs(
     *,
     stat_trust: float = 1.0,
 ) -> List[TeamNeed]:
-    needs: List[TeamNeed] = []
-
-    raw_three = _safe_float(style_sig.get("three_rate"), 0.0)
-    raw_rim = _safe_float(style_sig.get("rim_rate"), 0.0)
-    raw_tov = _safe_float(style_sig.get("tov_rate"), 0.0)
-    raw_pnr = _safe_float(style_sig.get("pnr_rate"), 0.0)
-
-    # Early season dampening: shrink toward neutral baselines used in the weight formulas.
-    # This makes the "signal strength" scale ~linearly with stat_trust (0.5 -> half effect).
-    tr = _clamp(_safe_float(stat_trust, 1.0), 0.0, 1.0)
-    three_rate = 0.34 + (raw_three - 0.34) * tr
-    rim_rate = 0.28 + (raw_rim - 0.28) * tr
-    tov_rate = 0.155 + (raw_tov - 0.155) * tr
-    pnr_rate = 0.28 + (raw_pnr - 0.28) * tr
-
-    # Baselines (NBA-ish feel)
-    if three_rate < 0.32:
-        w = _clamp((0.34 - three_rate) / 0.12, 0.25, 1.0)
-        needs.append(
-            TeamNeed(
-                tag="SPACING",
-                weight=float(w),
-                reason=f"3점 시도 비중이 낮음({raw_three:.0%}) → 스페이싱/슈터 보강 필요.",
-                evidence={"three_rate_raw": raw_three, "three_rate_used": three_rate, "stat_trust": tr},
-            )
-        )
-
-    if rim_rate < 0.26:
-        w = _clamp((0.28 - rim_rate) / 0.12, 0.25, 1.0)
-        label = "림 어택" if pnr_rate >= 0.22 else "컷/전환 공격"
-        needs.append(
-            TeamNeed(
-                tag="RIM_PRESSURE",
-                weight=float(w),
-                reason=f"림 공격 비중이 낮음({raw_rim:.0%}) → {label} 자원 필요.",
-                evidence={"rim_rate_raw": raw_rim, "rim_rate_used": rim_rate, "pnr_rate_raw": raw_pnr, "pnr_rate_used": pnr_rate, "stat_trust": tr},
-            )
-        )
-
-    if tov_rate > 0.155:
-        w = _clamp((tov_rate - 0.155) / 0.08, 0.25, 1.0)
-        needs.append(
-            TeamNeed(
-                tag="BALL_SECURITY",
-                weight=float(w),
-                reason=f"턴오버 비중이 높음({raw_tov:.1%}) → 안정적인 볼핸들/패스 필요.",
-                evidence={"tov_rate_raw": raw_tov, "tov_rate_used": tov_rate, "stat_trust": tr},
-            )
-        )
-
-    # if PnR heavy but no rim pressure / spacing -> prioritize initiator or roller
-    if pnr_rate >= 0.28 and (three_rate < 0.34 or rim_rate < 0.28):
-        w = _clamp((pnr_rate - 0.28) / 0.25, 0.20, 0.80)
-        needs.append(
-            TeamNeed(
-                tag="PNR_ENGINE",
-                weight=float(w),
-                reason=f"PnR 의존도가 높음({raw_pnr:.0%}) → 핸들러/롤러의 질을 끌어올릴 필요.",
-                evidence={
-                    "pnr_rate_raw": raw_pnr, "pnr_rate_used": pnr_rate,
-                    "three_rate_raw": raw_three, "three_rate_used": three_rate,
-                    "rim_rate_raw": raw_rim, "rim_rate_used": rim_rate,
-                    "stat_trust": tr,
-                },
-            )
-        )
-
-    return needs
+    """Legacy style->need mapper removed in aggressive replacement."""
+    return []
 
 
 def _roster_gap_needs(team_id: str, roster_sig: Dict[str, Any], sig: TeamSituationSignals) -> List[TeamNeed]:
-    needs: List[TeamNeed] = []
-    pos_counts = roster_sig.get("pos_counts", {}) or {}
-
-    g = int(pos_counts.get("G", 0) or 0)
-    w = int(pos_counts.get("W", 0) or 0)
-    b = int(pos_counts.get("B", 0) or 0)
-
-    if g <= 1:
-        needs.append(
-            TeamNeed(
-                tag="GUARD_DEPTH",
-                weight=0.55,
-                reason="가드 로테이션이 얇음 → 볼 운반/수비 가드 보강 필요.",
-                evidence={"pos_counts": pos_counts},
-            )
-        )
-    if w <= 1:
-        needs.append(
-            TeamNeed(
-                tag="WING_DEPTH",
-                weight=0.55,
-                reason="윙 로테이션이 얇음 → 3&D/수비 윙 보강 필요.",
-                evidence={"pos_counts": pos_counts},
-            )
-        )
-    if b <= 1:
-        needs.append(
-            TeamNeed(
-                tag="BIG_DEPTH",
-                weight=0.55,
-                reason="빅맨 로테이션이 얇음 → 리바운드/림프로텍션 자원 보강 필요.",
-                evidence={"pos_counts": pos_counts},
-            )
-        )
-
-    # "star + no depth" classic
-    top3_avg = _safe_float(roster_sig.get("top3_avg"), 0.0)
-    top8_avg = _safe_float(roster_sig.get("top8_avg"), 0.0)
-    if top3_avg >= 84.0 and (top3_avg - top8_avg) >= 8.0:
-        ww = _clamp((top3_avg - top8_avg) / 16.0, 0.35, 1.0)
-        needs.append(
-            TeamNeed(
-                tag="BENCH_DEPTH",
-                weight=float(ww),
-                reason="상위 전력 대비 벤치/뎁스 격차가 큼 → 즉전 롤플레이어 확보 필요.",
-                evidence={"top3_avg": top3_avg, "top8_avg": top8_avg},
-            )
-        )
-
-    # aging core can trigger cap-flex need
-    if sig.core_age >= 30.5 and sig.win_pct < 0.52:
-        needs.append(
-            TeamNeed(
-                tag="CAP_FLEX",
-                weight=0.45,
-                reason="코어가 노장화되는 반면 성적이 애매함 → 계약 정리/유연성 확보가 중요.",
-                evidence={"core_age": sig.core_age, "win_pct": sig.win_pct},
-            )
-        )
-
-    return needs
+    """Legacy roster-gap mapper removed in aggressive replacement."""
+    return []
 
 
 def _merge_and_clip_needs(needs: List[TeamNeed]) -> List[TeamNeed]:
@@ -1969,91 +2368,8 @@ def _boost_needs_by_efficiency_percentiles(
     *,
     stat_trust: float = 1.0,
 ) -> List[TeamNeed]:
-    """Boost need weights based on ORtg/DRtg percentiles and inject directional needs when missing.
-
-    - If offense percentile is low, boost offensive creation/spacing/rim pressure needs.
-    - If defense percentile is low, boost guard/wing/big depth (defense-capable slots) and add DEFENSE_UPGRADE if absent.
-    """
-    if not needs:
-        needs = []
-
-    tr = _clamp(_safe_float(stat_trust, 1.0), 0.0, 1.0)
-    ortg_pct_raw = _clamp(_safe_float(getattr(sig, "ortg_pct", 0.5), 0.5), 0.0, 1.0)
-    def_pct_raw = _clamp(_safe_float(getattr(sig, "def_pct", 0.5), 0.5), 0.0, 1.0)
-    # Early season dampening: shrink percentiles toward 0.5.
-    # This makes weakness scale ~linearly with tr (0.5 -> half effect).
-    ortg_pct = _clamp(0.5 + (ortg_pct_raw - 0.5) * tr, 0.0, 1.0)
-    def_pct = _clamp(0.5 + (def_pct_raw - 0.5) * tr, 0.0, 1.0)
-
-    # Weakness in 0..1 (bottom half ramps up; bottom ~20% is strong signal).
-    off_weak = _clamp((0.50 - ortg_pct) / 0.50, 0.0, 1.0)
-    def_weak = _clamp((0.50 - def_pct) / 0.50, 0.0, 1.0)
-
-    offense_tags = {
-        "PRIMARY_INITIATOR", "SECONDARY_CREATOR", "TRANSITION_ENGINE", "SHOT_CREATION",
-        "RIM_PRESSURE", "SPACING", "MOVEMENT_SHOOTING", "CONNECTOR_PLAY",
-        "ROLL_THREAT", "SHORT_ROLL_PLAY", "POP_BIG", "POST_HUB",
-        "BALL_SECURITY", "PNR_ENGINE",
-    }
-    defense_tags = {
-        "DEFENSE", "GUARD_DEPTH", "WING_DEPTH", "BIG_DEPTH",
-    }
-
-    def _bump(w: float, weak: float) -> float:
-        # Add up to +0.20 when weakness is max, but with diminishing returns near 1.0
-        add = 0.20 * weak
-        return _clamp(w + add * (1.0 - w), 0.0, 1.0)
-
-    out: List[TeamNeed] = []
-    for n in needs:
-        w = float(n.weight)
-        ev = dict(n.evidence or {})
-        # Always attach percentile evidence (useful for debugging/explanations).
-        ev.setdefault("ortg", float(getattr(sig, "ortg", 0.0)))
-        ev.setdefault("drtg", float(getattr(sig, "drtg", 0.0)))
-        ev.setdefault("ortg_pct_raw", float(ortg_pct_raw))
-        ev.setdefault("def_pct_raw", float(def_pct_raw))
-        ev.setdefault("ortg_pct_used", float(ortg_pct))
-        ev.setdefault("def_pct_used", float(def_pct))
-        ev.setdefault("stat_trust", float(tr))
-        ev.setdefault("net_pct", float(_clamp(_safe_float(getattr(sig, "net_pct", 0.5), 0.5), 0.0, 1.0)))
-
-        if n.tag in offense_tags and off_weak > 0.0:
-            w2 = _bump(w, off_weak)
-            out.append(TeamNeed(tag=n.tag, weight=w2, reason=n.reason, evidence=ev))
-            continue
-        if n.tag in defense_tags and def_weak > 0.0:
-            w2 = _bump(w, def_weak)
-            out.append(TeamNeed(tag=n.tag, weight=w2, reason=n.reason, evidence=ev))
-            continue
-
-        out.append(TeamNeed(tag=n.tag, weight=w, reason=n.reason, evidence=ev))
-
-    # Inject directional needs if a side is clearly bottom-tier but no strong needs exist.
-    strong_off_need = any((n.tag in offense_tags and n.weight >= 0.45) for n in out)
-    strong_def_need = any((n.tag in defense_tags and n.weight >= 0.45) for n in out)
-
-    if off_weak >= 0.60 and not strong_off_need:
-        out.append(
-            TeamNeed(
-                tag="OFFENSE_UPGRADE",
-                weight=_clamp(0.55 + 0.25 * off_weak, 0.55, 0.85),
-                reason=f"공격 효율이 리그 하위권(ORtg {sig.ortg:.1f}, {ortg_pct:.0%}p) → 즉전 창출/슈팅 보강이 최우선.",
-                evidence={"ortg": sig.ortg, "ortg_pct": ortg_pct, "net_pct": getattr(sig, 'net_pct', 0.5)},
-            )
-        )
-
-    if def_weak >= 0.60 and not strong_def_need:
-        out.append(
-            TeamNeed(
-                tag="DEFENSE_UPGRADE",
-                weight=_clamp(0.55 + 0.25 * def_weak, 0.55, 0.85),
-                reason=f"수비 효율이 리그 하위권(DRtg {sig.drtg:.1f}, {def_pct:.0%}p) → 수비수/림프로텍션 보강이 최우선.",
-                evidence={"drtg": sig.drtg, "def_pct": def_pct, "net_pct": getattr(sig, 'net_pct', 0.5)},
-            )
-        )
-
-    return out
+    """Legacy efficiency-based boosts removed in aggressive replacement."""
+    return list(needs or [])
 
 
 def _build_team_ratings_index(
@@ -2331,6 +2647,7 @@ def _build_reasons(
     style_sig: Dict[str, Any],
     prefs: Dict[str, float],
     needs: List[TeamNeed],
+    tier_diagnostics: Optional[Dict[str, float]] = None,
 ) -> List[str]:
     r: List[str] = []
 
@@ -2378,8 +2695,6 @@ def _build_reasons(
     if constraints.hard_flags:
         keys = ", ".join(sorted(constraints.hard_flags.keys()))
         r.append(f"룰/제약 플래그: {keys} → 트레이드 설계가 까다로울 수 있음.")
-    if constraints.locks_count > 0:
-        r.append(f"현재 협상/락 걸린 자산이 {constraints.locks_count}개 있어 선택지가 일부 제한됨.")
     if getattr(constraints, "cooldown_active", False):
         r.append("현재 트레이드 시장 쿨다운 상태: 당분간 적극적인 제안/협상 빈도를 낮춤.")
 
@@ -2399,6 +2714,19 @@ def _build_reasons(
 
     # headline decision
     r.append(f"상황 평가: {tier} / {horizon} / 트레이드 스탠스 {posture}.")
+    if isinstance(tier_diagnostics, dict):
+        sp = _safe_float(tier_diagnostics.get("season_progress"), 0.0)
+        overall = _safe_float(tier_diagnostics.get("overall_score"), 0.0)
+        perf = _safe_float(tier_diagnostics.get("performance_score"), 0.0)
+        w_overall = _safe_float(tier_diagnostics.get("w_overall"), 0.0)
+        w_perf = _safe_float(tier_diagnostics.get("w_perf"), 0.0)
+        blended = _safe_float(tier_diagnostics.get("blended"), 0.0)
+        r.append(
+            "분류 근거 점수: "
+            f"overall {overall:.3f} × {w_overall:.2f} + "
+            f"performance {perf:.3f} × {w_perf:.2f} = blended {blended:.3f} "
+            f"(시즌 진행도 {sp:.0%})."
+        )
 
     # prefs
     r.append(f"선호도(0~1): 즉전감 {prefs.get('WIN_NOW', 0.0):.2f}, 픽/유망주 {prefs.get('PICKS', 0.0):.2f}, 캡유연성 {prefs.get('CAP_FLEX', 0.0):.2f}.")

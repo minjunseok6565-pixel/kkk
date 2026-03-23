@@ -18,10 +18,10 @@ Design constraints (mirrors original behavior)
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple, List
+from typing import Any, Dict, Mapping, Optional, Tuple, List
 
 from decision_context import DecisionContext
-from role_need_tags import ROLE_TO_NEED_TAG as ROLE_TO_NEED_TAG_SSOT, role_to_need_tag_only
+from need_attr_profiles import ALL_NEW_NEED_TAGS, tag_supply
 
 from .types import (
     FitAssessment,
@@ -56,7 +56,7 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 # fit 계산에서 “측정 가능한(=공급 벡터로 정의된)” 태그만 반영한다.
 # - depth/upgrade/cap-flex 같은 구조적 니즈 태그는 여기서 0점으로 끌어내리지 않도록 제외.
 # - custom supply extractor가 추가 태그를 제공하는 경우(supply.keys)에는 그 태그도 자동 지원.
-FIT_SUPPORTED_TAGS_BASE = frozenset(set(ROLE_TO_NEED_TAG_SSOT.values()) | {"DEFENSE"})
+FIT_SUPPORTED_TAGS_BASE = frozenset(ALL_NEW_NEED_TAGS)
 
 
 # =============================================================================
@@ -70,54 +70,24 @@ class FitEngineConfig:
     """
 
     # --- Fit scoring
-    fit_neutral_score: float = 0.50
+    fit_neutral_score: float = 0.666
     fit_factor_floor: float = 0.70
     fit_factor_cap: float = 1.35
     fit_below_threshold_floor: float = 0.35
     fit_below_threshold_strength: float = 2.0  # threshold 아래면 더 빠르게 할인
 
-    # --- Supply extraction hooks (heuristic fallback when role_fit is absent)
-    # These keys MUST match the SSOT key names stored in `players.attrs_json`.
-    # See: derived_formulas.COL.values(), ratings_2k.REQUIRED_2K_KEYS, training/mapping.CATEGORY_KEYS.
-    attr_keys_spacing: Tuple[str, ...] = (
-        "Three-Point Shot",
-    )
-    attr_keys_rim_pressure: Tuple[str, ...] = (
-        "Layup",
-        "Driving Dunk",
-        "Standing Dunk",
-        "Draw Foul",
-        "Close Shot",
-    )
-    attr_keys_primary_initiator: Tuple[str, ...] = (
-        "Ball Handle",
-        "Pass Accuracy",
-        "Pass Vision",
-        "Pass IQ",
-        "Speed with Ball",
-    )
-    attr_keys_shot_creation: Tuple[str, ...] = (
-        "Ball Handle",
-        "Speed with Ball",
-        "Mid-Range Shot",
-    )
-    attr_keys_defense: Tuple[str, ...] = (
-        "Perimeter Defense",
-        "Interior Defense",
-        "Help Defense IQ",
-        "Pass Perception",
-        "Steal",
-        "Block",
-        "Defensive Consistency",
-    )
+    # attrs validation policy for need_attr_profiles.tag_supply
+    supply_strict_attrs_0_99: bool = True
 
+    # Need-weighted soft gating for supply contribution
+    supply_gate_enabled: bool = True
+    supply_gate_threshold_min: float = 0.25
+    supply_gate_threshold_max: float = 0.45
+    supply_gate_hard_floor_cap: float = 0.12
+    supply_gate_soft_width: float = 0.20
 
-    # attrs scale handling
-    attr_scale_max: float = 99.0  # 2K-like scale fallback
+    # keep epsilon for numeric safety
     eps: float = 1e-9
-
-    # Custom extractor override (원하면 외부에서 주입)
-    custom_player_supply_extractor: Optional[Callable[[PlayerSnapshot], Dict[str, float]]] = None
 
 
 # =============================================================================
@@ -129,8 +99,15 @@ class FitScoreBreakdown:
     used_need_tags: Tuple[str, ...]
     ignored_need_tags: Tuple[str, ...]
     weight_by_tag: Dict[str, float]
+    raw_supply_by_tag: Dict[str, float]
+    effective_supply_by_tag: Dict[str, float]
+    threshold_by_tag: Dict[str, float]
+    gate_by_tag: Dict[str, float]
+    hard_floor_blocked_tags: Tuple[str, ...]
     supply_by_tag: Dict[str, float]
     contribution_by_tag: Dict[str, float]
+    unmet_by_tag: Dict[str, float]
+    excess_by_tag: Dict[str, float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,80 +147,70 @@ class FitEngine:
     # 2) Supply vector extraction from a player snapshot
     # ---------------------------------------------------------------------
     def compute_player_supply_vector(self, snap: PlayerSnapshot) -> Dict[str, float]:
-        """Compute player supply vector.
-
-        Copied from TeamUtilityAdjuster._player_supply_vector.
-        """
+        """Compute player supply vector from attrs only (aggressive replacement)."""
         cfg = self.config
-
-        if cfg.custom_player_supply_extractor is not None:
-            try:
-                out = cfg.custom_player_supply_extractor(snap) or {}
-                return {str(k): _clamp(_safe_float(v, 0.0), 0.0, 1.0) for k, v in out.items()}
-            except Exception:
-                pass
-
-        supply: Dict[str, float] = {}
-
-        # (A) role_fit 기반 공급 (있다면 가장 신뢰)
-        # 기대 형태: snap.meta["role_fit"] = {"Engine_Primary": 0.72, ...}
-        role_fit = None
-        if isinstance(snap.meta, dict):
-            role_fit = snap.meta.get("role_fit")
-        if role_fit is None and isinstance(snap.attrs, dict):
-            role_fit = snap.attrs.get("role_fit")
-
-        if isinstance(role_fit, dict):
-            for role, score in role_fit.items():
-                tag = role_to_need_tag_only(str(role))
-                # ROLE_GAP은 "정의되지 않은 역할"이므로 공급 태그로 쓰지 않는다.
-                if tag == "ROLE_GAP":
-                    continue
-                s = _clamp(_safe_float(score, 0.0), 0.0, 1.0)
-                supply[tag] = max(supply.get(tag, 0.0), s)
-
-        # (B) attrs 기반 휴리스틱 공급 (role_fit이 부족할 때 보강)
-        if isinstance(snap.attrs, dict):
-
-            def attr_norm(keys: Tuple[str, ...]) -> float:
-                # 여러 키 중 가장 큰 신호를 사용 (키가 섞여도 안정적)
-                best = 0.0
-                for k in keys:
-                    if k in snap.attrs:
-                        v = _safe_float(snap.attrs.get(k), 0.0)
-                        # 0..99 또는 0..1 형태 모두 방어 처리
-                        if v > 1.5:
-                            v = v / max(cfg.attr_scale_max, cfg.eps)
-                        best = max(best, _clamp(v, 0.0, 1.0))
-                return best
-
-            spacing = attr_norm(cfg.attr_keys_spacing)
-            rim = attr_norm(cfg.attr_keys_rim_pressure)
-            init = attr_norm(cfg.attr_keys_primary_initiator)
-            create = attr_norm(cfg.attr_keys_shot_creation)
-            defense = attr_norm(cfg.attr_keys_defense)
-
-            if spacing > 0.0:
-                supply["SPACING"] = max(supply.get("SPACING", 0.0), spacing)
-            if rim > 0.0:
-                supply["RIM_PRESSURE"] = max(supply.get("RIM_PRESSURE", 0.0), rim)
-            if init > 0.0:
-                supply["PRIMARY_INITIATOR"] = max(supply.get("PRIMARY_INITIATOR", 0.0), init)
-            if create > 0.0:
-                supply["SHOT_CREATION"] = max(supply.get("SHOT_CREATION", 0.0), create)
-            if defense > 0.0:
-                supply["DEFENSE"] = max(supply.get("DEFENSE", 0.0), defense)
-
-        return supply
+        attrs_raw = snap.attrs if isinstance(snap.attrs, dict) else {}
+        # SSOT ratings payload includes Potential as a grade string("C-".."A+").
+        # Potential is not part of need_attr_profiles scoring inputs, so exclude it
+        # before strict numeric validation to avoid dropping the whole supply vector.
+        attrs = {k: v for k, v in attrs_raw.items() if str(k) != "Potential"}
+        try:
+            out = tag_supply(attrs, strict=bool(cfg.supply_strict_attrs_0_99)) or {}
+        except Exception:
+            # strict validation failure or malformed attrs -> no supply signal
+            out = {}
+        return {str(k): _clamp(_safe_float(v, 0.0), 0.0, 1.0) for k, v in out.items()}
 
     # ---------------------------------------------------------------------
     # 3) Fit scoring
     # ---------------------------------------------------------------------
-    def _fit_supported_tags(self, supply: Mapping[str, float]) -> set[str]:
-        # base(역할/휴리스틱) + custom extractor가 실제로 제공하는 태그 확장
-        s = set(FIT_SUPPORTED_TAGS_BASE)
-        s.update(str(k) for k in supply.keys())
-        return s
+    def _fit_supported_tags(self, need_map: Mapping[str, float], supply: Mapping[str, float]) -> set[str]:
+        # Base: new tag namespace. Dynamic: active prefixed tags in need_map/supply.
+        out = set(FIT_SUPPORTED_TAGS_BASE)
+        for src in (need_map, supply):
+            for k in src.keys():
+                t = str(k or "").strip().upper()
+                if not t:
+                    continue
+                if t in FIT_SUPPORTED_TAGS_BASE:
+                    out.add(t)
+                    continue
+                for pref in ("G_", "W_", "B_"):
+                    if t.startswith(pref) and t[len(pref):] in FIT_SUPPORTED_TAGS_BASE:
+                        out.add(t)
+                        break
+        return out
+
+    def _need_threshold(self, need_w: float) -> float:
+        cfg = self.config
+        n = _clamp(_safe_float(need_w, 0.0), 0.0, 1.0)
+
+        t_min = _clamp(_safe_float(cfg.supply_gate_threshold_min, 0.0), 0.0, 1.0)
+        t_max = _clamp(_safe_float(cfg.supply_gate_threshold_max, 1.0), 0.0, 1.0)
+        if t_min > t_max:
+            t_min, t_max = t_max, t_min
+
+        return t_max - (t_max - t_min) * n
+
+    def _effective_supply(self, raw_supply: float, need_w: float) -> Tuple[float, float, float, bool]:
+        """Return (effective, gate, threshold, hard_floor_blocked)."""
+        cfg = self.config
+        s_raw = _clamp(_safe_float(raw_supply, 0.0), 0.0, 1.0)
+
+        if not bool(cfg.supply_gate_enabled):
+            return s_raw, 1.0, self._need_threshold(need_w), False
+
+        floor_cap = _clamp(_safe_float(cfg.supply_gate_hard_floor_cap, 0.0), 0.0, 1.0)
+        if s_raw < floor_cap:
+            return 0.0, 0.0, self._need_threshold(need_w), True
+
+        threshold = self._need_threshold(need_w)
+        soft_width = max(_safe_float(cfg.supply_gate_soft_width, 0.0), cfg.eps)
+
+        x = (s_raw - threshold) / soft_width
+        u = _clamp(0.5 + 0.5 * x, 0.0, 1.0)
+        gate = _clamp(u * u * (3.0 - 2.0 * u), 0.0, 1.0)
+        return _clamp(s_raw * gate, 0.0, 1.0), gate, threshold, False
 
     def score_fit(
         self,
@@ -261,7 +228,7 @@ class FitEngine:
 
         # (옵션 1) unknown need 태그는 fit 계산에서 제외한다.
         # - "선수가 못 채움"과 "평가 불가(정의되지 않은 태그)"를 구분하기 위함.
-        supported_tags = self._fit_supported_tags(supply)
+        supported_tags = self._fit_supported_tags(need_map, supply)
 
         total_w = 0.0
         acc = 0.0
@@ -270,11 +237,18 @@ class FitEngine:
         used_need_tags: List[str] = []
         ignored_need_tags: List[str] = []
         weight_by_tag: Dict[str, float] = {}
+        raw_supply_by_tag: Dict[str, float] = {}
+        effective_supply_by_tag: Dict[str, float] = {}
+        threshold_by_tag: Dict[str, float] = {}
+        gate_by_tag: Dict[str, float] = {}
+        hard_floor_blocked_tags: List[str] = []
         supply_by_tag: Dict[str, float] = {}
         contribution_by_tag: Dict[str, float] = {}
+        unmet_by_tag: Dict[str, float] = {}
+        excess_by_tag: Dict[str, float] = {}
 
         for tag, w in need_map.items():
-            tag_s = str(tag)
+            tag_s = str(tag).strip().upper()
             if tag_s not in supported_tags:
                 ignored_need_tags.append(tag_s)
                 continue
@@ -282,16 +256,26 @@ class FitEngine:
             if ww <= 0.0:
                 ignored_need_tags.append(tag_s)
                 continue
-            # NOTE: keep original semantics: lookup uses the original `tag` key.
-            s = _clamp(_safe_float(supply.get(tag, 0.0), 0.0), 0.0, 1.0)
+            s_raw = _clamp(_safe_float(supply.get(tag_s, 0.0), 0.0), 0.0, 1.0)
+            s, gate, thr, hard_floor_blocked = self._effective_supply(s_raw, ww)
+            if hard_floor_blocked:
+                hard_floor_blocked_tags.append(tag_s)
 
             total_w += ww
             acc += ww * s
 
             used_need_tags.append(tag_s)
             weight_by_tag[tag_s] = ww
-            supply_by_tag[tag_s] = s
+            raw_supply_by_tag[tag_s] = s_raw
+            effective_supply_by_tag[tag_s] = s
+            threshold_by_tag[tag_s] = thr
+            gate_by_tag[tag_s] = gate
+            # Backward-compat: keep legacy supply_by_tag as raw (pre-gating) supply.
+            supply_by_tag[tag_s] = s_raw
             contribution_by_tag[tag_s] = ww * s
+
+            unmet_by_tag[tag_s] = _clamp(max(0.0, ww - s), 0.0, 1.0)
+            excess_by_tag[tag_s] = _clamp(max(0.0, s - ww), 0.0, 1.0)
 
             if s > 0.0:
                 matched[tag_s] = s
@@ -304,8 +288,15 @@ class FitEngine:
                 used_need_tags=tuple(),
                 ignored_need_tags=tuple(dict.fromkeys(ignored_need_tags)),
                 weight_by_tag=weight_by_tag,
+                raw_supply_by_tag=raw_supply_by_tag,
+                effective_supply_by_tag=effective_supply_by_tag,
+                threshold_by_tag=threshold_by_tag,
+                gate_by_tag=gate_by_tag,
+                hard_floor_blocked_tags=tuple(dict.fromkeys(hard_floor_blocked_tags)),
                 supply_by_tag=supply_by_tag,
                 contribution_by_tag=contribution_by_tag,
+                unmet_by_tag=unmet_by_tag,
+                excess_by_tag=excess_by_tag,
             )
             return score, {}, breakdown
 
@@ -317,8 +308,15 @@ class FitEngine:
             used_need_tags=tuple(used_need_tags),
             ignored_need_tags=tuple(dict.fromkeys(ignored_need_tags)),
             weight_by_tag=weight_by_tag,
+            raw_supply_by_tag=raw_supply_by_tag,
+            effective_supply_by_tag=effective_supply_by_tag,
+            threshold_by_tag=threshold_by_tag,
+            gate_by_tag=gate_by_tag,
+            hard_floor_blocked_tags=tuple(dict.fromkeys(hard_floor_blocked_tags)),
             supply_by_tag=supply_by_tag,
             contribution_by_tag=contribution_by_tag,
+            unmet_by_tag=unmet_by_tag,
+            excess_by_tag=excess_by_tag,
         )
         return score, matched, breakdown
 

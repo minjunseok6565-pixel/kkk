@@ -67,3 +67,35 @@ def test_evaluate_and_maybe_end_marks_closed_when_probability_is_forced(monkeypa
     assert out["ended"] is True
     assert called["session_id"] == "s1"
     assert called["reason"]
+
+
+def test_evaluate_and_maybe_end_marks_closed_on_hard_cap(monkeypatch):
+    session = _base_session(created_at="2025-12-15T00:00:00Z")
+
+    monkeypatch.setattr("trades.orchestration.ai_end_policy.negotiation_store.get_session", lambda _sid: dict(session))
+
+    called = {}
+
+    def _mark(session_id, reason, score=None, detail=None):
+        called["session_id"] = session_id
+        called["reason"] = reason
+        called["score"] = score
+        called["detail"] = dict(detail or {})
+        return {"session": {"session_id": session_id, "status": "CLOSED", "phase": "EXPIRED_BY_AI"}, "idempotent": False}
+
+    monkeypatch.setattr("trades.orchestration.ai_end_policy.negotiation_store.mark_auto_ended", _mark)
+
+    cfg = OrchestrationConfig(ai_auto_end_hard_cap_days=20)
+    out = evaluate_and_maybe_end(
+        "s1",
+        today=date(2026, 1, 10),
+        seed_context={"config": cfg, "seed_salt": "test"},
+    )
+
+    assert out["evaluated"] is True
+    assert out["ended"] is True
+    assert out["reason_code"] == "MAX_AGE_CAP"
+    assert called["session_id"] == "s1"
+    assert called["reason"] == "MAX_AGE_CAP"
+    assert called["score"] == 1.0
+    assert called["detail"]["session_age_days"] >= 20

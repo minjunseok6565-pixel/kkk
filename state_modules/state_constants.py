@@ -34,6 +34,7 @@ DEFAULT_TRADE_RULES: Dict[str, Any] = {
     "new_fa_sign_ban_days": 90,
     "two_way_sign_ban_days": 30,
     "aggregation_ban_days": 60,
+    "roster_limit_rule_enabled": False,
     "max_pick_years_ahead": 7,
     "stepien_lookahead": 7,
 }

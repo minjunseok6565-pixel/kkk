@@ -67,6 +67,7 @@
           <button type="button" id="standings-menu-btn" class="top-league-tab">순위</button>
           <button type="button" id="college-menu-btn" class="top-league-tab">대학</button>
           <button type="button" id="market-menu-btn" class="top-league-tab">시장</button>
+          <button type="button" id="trade-lab-menu-btn" class="top-league-tab">Trade Lab</button>
           <button type="button" id="medical-menu-btn" class="top-league-tab">메디컬 센터</button>
         </nav>
       </header>
@@ -174,6 +175,57 @@
         <div id="offseason-dev-actions" class="next-game-actions">
           <button type="button" id="offseason-dev-next-btn" class="menu-card next-game-action-btn">다음으로</button>
         </div>
+    <section id="trade-lab-screen" class="panel" aria-hidden="true">
+      <div class="screen-header-row">
+        <div>
+          <p class="eyebrow">TRADE TEST MACHINE</p>
+          <h2>Trade Lab</h2>
+          <p class="subtitle">양 팀 자산을 구성하고 팀별 관점으로 밸류에이션을 비교하세요.</p>
+        </div>
+        <button id="trade-lab-back-btn" class="btn btn-secondary" type="button">메인으로</button>
+      </div>
+
+      <section class="trade-lab-controls" aria-label="트레이드 랩 팀 선택">
+        <article class="trade-lab-control-card">
+          <h3>좌측 팀</h3>
+          <select id="trade-lab-left-team-select" class="trade-lab-team-select"></select>
+        </article>
+        <article class="trade-lab-control-card">
+          <h3>우측 팀</h3>
+          <select id="trade-lab-right-team-select" class="trade-lab-team-select"></select>
+        </article>
+      </section>
+
+      <section class="trade-lab-assets-grid" aria-label="자산 선택">
+        <article class="trade-lab-team-panel">
+          <h3 id="trade-lab-left-title">좌측 팀 자산</h3>
+          <div class="trade-lab-subhead">선수</div>
+          <ul id="trade-lab-left-players" class="trade-lab-asset-list"></ul>
+          <div class="trade-lab-subhead">1라운드 픽</div>
+          <ul id="trade-lab-left-picks" class="trade-lab-asset-list"></ul>
+        </article>
+        <article class="trade-lab-team-panel">
+          <h3 id="trade-lab-right-title">우측 팀 자산</h3>
+          <div class="trade-lab-subhead">선수</div>
+          <ul id="trade-lab-right-players" class="trade-lab-asset-list"></ul>
+          <div class="trade-lab-subhead">1라운드 픽</div>
+          <ul id="trade-lab-right-picks" class="trade-lab-asset-list"></ul>
+        </article>
+      </section>
+
+      <section class="trade-lab-package-grid" aria-label="트레이드 패키지">
+        <article class="trade-lab-team-panel">
+          <h3>좌측 팀 Outgoing 패키지</h3>
+          <ul id="trade-lab-left-package" class="trade-lab-package-list"></ul>
+          <button id="trade-lab-evaluate-left-btn" class="btn btn-primary" type="button" disabled>좌측 팀 관점 밸류에이션</button>
+          <div id="trade-lab-left-result" class="trade-lab-result"></div>
+        </article>
+        <article class="trade-lab-team-panel">
+          <h3>우측 팀 Outgoing 패키지</h3>
+          <ul id="trade-lab-right-package" class="trade-lab-package-list"></ul>
+          <button id="trade-lab-evaluate-right-btn" class="btn btn-primary" type="button" disabled>우측 팀 관점 밸류에이션</button>
+          <div id="trade-lab-right-result" class="trade-lab-result"></div>
+        </article>
       </section>
     </section>
 
@@ -655,6 +707,15 @@
               <span class="tactics-scheme-desc">볼 핸들링과 오프볼 흐름 중심 운영</span>
             </button>
             <div id="tactics-offense-options" class="tactics-options hidden"></div>
+            <button
+              type="button"
+              id="preset-offense-open-btn"
+              class="btn btn-secondary hidden"
+              aria-haspopup="dialog"
+              aria-controls="preset-offense-modal"
+            >
+              프리셋 공격 상세 설정
+            </button>
           </div>
           <div class="tactics-scheme-picker">
             <button type="button" id="tactics-defense-btn" class="tactics-scheme-card">
@@ -663,6 +724,15 @@
               <span class="tactics-scheme-desc">PnR 대응과 로테이션 안정성 조정</span>
             </button>
             <div id="tactics-defense-options" class="tactics-options hidden"></div>
+            <button
+              type="button"
+              id="preset-defense-open-btn"
+              class="btn btn-secondary hidden"
+              aria-haspopup="dialog"
+              aria-controls="preset-defense-modal"
+            >
+              프리셋 수비 상세 설정
+            </button>
           </div>
         </section>
 
@@ -715,6 +785,64 @@
           <div id="tactics-roster-list" class="tactics-roster-list"></div>
         </section>
       </section>
+
+      <div
+        id="preset-offense-modal"
+        class="modal hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="preset-offense-modal-title"
+        aria-describedby="preset-offense-modal-desc"
+        aria-hidden="true"
+      >
+        <div id="preset-offense-modal-backdrop" class="modal-backdrop" data-close="preset-offense-modal"></div>
+        <div class="modal-card" role="document" tabindex="-1">
+          <span tabindex="0" aria-hidden="true" data-focus-sentinel="start"></span>
+          <div class="modal-header">
+            <h3 id="preset-offense-modal-title">Preset Offense 상세 설정</h3>
+            <button type="button" id="preset-offense-close-btn" class="btn btn-secondary" aria-label="모달 닫기">닫기</button>
+          </div>
+          <p id="preset-offense-modal-desc" class="subtitle">상세 슬라이더/토글로 프리셋 공격 전술을 조정합니다.</p>
+          <div id="preset-offense-errors" class="empty-copy" role="status" aria-live="polite"></div>
+          <form id="preset-offense-form" class="modal-body" novalidate>
+            <p class="empty-copy">프리셋 공격 상세 설정 UI가 여기에 렌더됩니다.</p>
+          </form>
+          <div class="modal-actions">
+            <button type="button" id="preset-offense-reset-btn" class="btn btn-secondary">초기화</button>
+            <button type="button" id="preset-offense-apply-btn" class="btn btn-primary">적용</button>
+          </div>
+          <span tabindex="0" aria-hidden="true" data-focus-sentinel="end"></span>
+        </div>
+      </div>
+
+      <div
+        id="preset-defense-modal"
+        class="modal hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="preset-defense-modal-title"
+        aria-describedby="preset-defense-modal-desc"
+        aria-hidden="true"
+      >
+        <div id="preset-defense-modal-backdrop" class="modal-backdrop" data-close="preset-defense-modal"></div>
+        <div class="modal-card" role="document" tabindex="-1">
+          <span tabindex="0" aria-hidden="true" data-focus-sentinel="start"></span>
+          <div class="modal-header">
+            <h3 id="preset-defense-modal-title">Preset Defense 상세 설정</h3>
+            <button type="button" id="preset-defense-close-btn" class="btn btn-secondary" aria-label="모달 닫기">닫기</button>
+          </div>
+          <p id="preset-defense-modal-desc" class="subtitle">액션 버짓과 억제 정책, 전역 압박 강도를 설정합니다.</p>
+          <div id="preset-defense-errors" class="empty-copy" role="status" aria-live="polite"></div>
+          <form id="preset-defense-form" class="modal-body" novalidate>
+            <p class="empty-copy">프리셋 수비 상세 설정 UI가 여기에 렌더됩니다.</p>
+          </form>
+          <div class="modal-actions">
+            <button type="button" id="preset-defense-reset-btn" class="btn btn-secondary">초기화</button>
+            <button type="button" id="preset-defense-apply-btn" class="btn btn-primary">적용</button>
+          </div>
+          <span tabindex="0" aria-hidden="true" data-focus-sentinel="end"></span>
+        </div>
+      </div>
     </section>
 
 

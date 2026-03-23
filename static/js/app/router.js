@@ -11,6 +11,7 @@ function activateScreen(target) {
     els.offseasonDevChampionScreen,
     els.offseasonDevFlowScreen,
     els.marketScreen,
+    els.tradeLabScreen,
     els.gameResultScreen,
     els.scheduleScreen,
     els.myTeamScreen,

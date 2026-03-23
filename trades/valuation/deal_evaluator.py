@@ -187,6 +187,7 @@ class DealEvaluator:
             recv = team_id
             tv, snap = self._value_one_asset(
                 asset=asset,
+                direction="incoming",
                 ctx=ctx,
                 provider=provider,
                 env=env,
@@ -201,6 +202,7 @@ class DealEvaluator:
             recv = resolve_asset_receiver(deal, team_id, asset)
             tv, snap = self._value_one_asset(
                 asset=asset,
+                direction="outgoing",
                 ctx=ctx,
                 provider=provider,
                 env=env
@@ -284,6 +286,7 @@ class DealEvaluator:
         self,
         *,
         asset: Asset,
+        direction: str,
         ctx: DecisionContext,
         provider: ValuationDataProvider,
         env: ValuationEnv,
@@ -296,6 +299,13 @@ class DealEvaluator:
 
         snap = self._resolve_snapshot(asset=asset, provider=provider)
         kind = snapshot_kind(snap)
+
+        # Propagate leg direction into player snapshot meta so team utility can
+        # apply outgoing-only behavior (e.g., fan-favorite guard).
+        if kind == AssetKind.PLAYER and isinstance(snap, PlayerSnapshot):
+            meta = dict(snap.meta) if isinstance(snap.meta, dict) else {}
+            meta["direction"] = str(direction)
+            snap = replace(snap, meta=meta)
 
         pick_exp = None
         resolved_a = None

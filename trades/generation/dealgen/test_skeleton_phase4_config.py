@@ -2,7 +2,7 @@ import unittest
 
 from trades.generation.dealgen.types import DealGeneratorConfig, DealGeneratorStats
 from trades.generation.dealgen.types import SellAssetCandidate, TargetCandidate
-from trades.generation.dealgen.utils import classify_target_tier
+from trades.generation.dealgen.utils import classify_target_profile
 
 
 class SkeletonPhase4ConfigTests(unittest.TestCase):
@@ -33,7 +33,7 @@ class SkeletonPhase4ConfigTests(unittest.TestCase):
         self.assertTrue(hasattr(st, "arch_compat_counts"))
         self.assertTrue(hasattr(st, "modifier_trace_counts"))
 
-    def test_classify_target_tier_buy_target(self):
+    def test_classify_target_profile_buy_target(self):
         high = TargetCandidate(
             player_id="p1",
             from_team="BOS",
@@ -54,10 +54,13 @@ class SkeletonPhase4ConfigTests(unittest.TestCase):
             remaining_years=1.0,
             age=31.0,
         )
-        self.assertEqual(classify_target_tier(target=high, config=DealGeneratorConfig()), "HIGH_STARTER")
-        self.assertEqual(classify_target_tier(target=role, config=DealGeneratorConfig()), "ROLE")
+        high_profile = classify_target_profile(target=high, config=DealGeneratorConfig())
+        role_profile = classify_target_profile(target=role, config=DealGeneratorConfig())
 
-    def test_classify_target_tier_sell_pick_only(self):
+        self.assertEqual(high_profile.get("tier"), "GARBAGE")
+        self.assertEqual(role_profile.get("tier"), "GARBAGE")
+
+    def test_classify_target_profile_sell_asset(self):
         sale = SellAssetCandidate(
             player_id="p3",
             market_total=60.0,
@@ -66,13 +69,33 @@ class SkeletonPhase4ConfigTests(unittest.TestCase):
             is_expiring=False,
             top_tags=("VETERAN_SALE",),
         )
-        self.assertEqual(classify_target_tier(sale_asset=sale, match_tag="pick_bridge", config=DealGeneratorConfig()), "PICK_ONLY")
+        sale_profile = classify_target_profile(sale_asset=sale, match_tag="pick_bridge", config=DealGeneratorConfig())
+        self.assertEqual(sale_profile.get("tier"), "GARBAGE")
 
-    def test_route_tables_include_new_depth_skeleton(self):
+    def test_classify_target_profile_ovr_hardcut_boundaries(self):
+        class Probe:
+            def __init__(self, ovr: float):
+                self.ovr = ovr
+
+        self.assertEqual(classify_target_profile(target=Probe(97.0)).get("tier"), "MVP")
+        self.assertEqual(classify_target_profile(target=Probe(93.0)).get("tier"), "ALL_NBA")
+        self.assertEqual(classify_target_profile(target=Probe(90.0)).get("tier"), "ALL_STAR")
+        self.assertEqual(classify_target_profile(target=Probe(85.0)).get("tier"), "HIGH_STARTER")
+        self.assertEqual(classify_target_profile(target=Probe(80.0)).get("tier"), "STARTER")
+        self.assertEqual(classify_target_profile(target=Probe(77.0)).get("tier"), "HIGH_ROTATION")
+        self.assertEqual(classify_target_profile(target=Probe(75.0)).get("tier"), "ROTATION")
+        self.assertEqual(classify_target_profile(target=Probe(74.0)).get("tier"), "GARBAGE")
+
+    def test_route_tables_include_tier_score_skeletons(self):
         cfg = DealGeneratorConfig()
-        self.assertIn("player_swap.one_for_two_depth", cfg.skeleton_route_role)
-        self.assertIn("player_swap.one_for_two_depth", cfg.skeleton_route_starter)
-        self.assertIn("player_swap.one_for_two_depth", cfg.skeleton_route_high_starter)
+        self.assertIn("high_rotation.mixed", cfg.skeleton_route_high_rotation)
+        self.assertIn("starter.mixed", cfg.skeleton_route_starter)
+        self.assertIn("high_starter.mixed", cfg.skeleton_route_high_starter)
+
+    def test_route_tables_expose_garbage_tier(self):
+        cfg = DealGeneratorConfig()
+        self.assertTrue(hasattr(cfg, "skeleton_route_garbage"))
+        self.assertIn("garbage.garbage", cfg.skeleton_route_garbage)
 
 
 if __name__ == "__main__":

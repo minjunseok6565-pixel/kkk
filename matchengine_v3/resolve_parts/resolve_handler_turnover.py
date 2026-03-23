@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Dict, Tuple
 
 from ..models import Player
@@ -165,6 +166,9 @@ def handle_turnover(
 
         q_detail = None
         q_score = 0.0
+        q_context = getattr(getattr(defense, "tactics", None), "context", {})
+        if not isinstance(q_context, Mapping):
+            q_context = {}
         try:
             if debug_q:
                 q_detail = quality.compute_quality_score(
@@ -173,6 +177,7 @@ def handle_turnover(
                     outcome=outcome,
                     role_players=role_players,
                     get_stat=engine_get_stat,
+                    context=q_context,
                     return_detail=True,
                 )
                 q_score = float(q_detail.score)
@@ -184,6 +189,7 @@ def handle_turnover(
                         outcome=outcome,
                         role_players=role_players,
                         get_stat=engine_get_stat,
+                        context=q_context,
                     )
                 )
         except Exception as e:

@@ -65,13 +65,15 @@ function computeTacticsInsights() {
       text: `총 출전시간이 ${Math.abs(minutesDelta)}분 ${minutesDelta > 0 ? '부족' : '초과'}했습니다.`
     });
   }
-  const starterDefenseCount = new Map();
-  state.tacticsDraft.starters.forEach((r) => {
-    starterDefenseCount.set(r.defenseRole, (starterDefenseCount.get(r.defenseRole) || 0) + 1);
-  });
-  const starterDupDef = [...starterDefenseCount.entries()].filter(([, c]) => c > 1);
-  if (starterDupDef.length) {
-    warnings.push({ level: 'err', text: `선발 라인업에 수비 역할 중복 ${starterDupDef.length}개가 있습니다. 저장 전 반드시 수정하세요.` });
+  if (String(state.tacticsDraft?.defenseScheme || "") !== "Preset_Defense") {
+    const starterDefenseCount = new Map();
+    state.tacticsDraft.starters.forEach((r) => {
+      starterDefenseCount.set(r.defenseRole, (starterDefenseCount.get(r.defenseRole) || 0) + 1);
+    });
+    const starterDupDef = [...starterDefenseCount.entries()].filter(([, c]) => c > 1);
+    if (starterDupDef.length) {
+      warnings.push({ level: 'err', text: `선발 라인업에 수비 역할 중복 ${starterDupDef.length}개가 있습니다. 저장 전 반드시 수정하세요.` });
+    }
   }
   const lowCreator = state.tacticsDraft.rotation.filter((r) => String(r.offenseRole || '').includes('Engine') || String(r.offenseRole || '').includes('Shot_Creator')).length;
   if (lowCreator === 0) warnings.push({ level: 'warn', text: '벤치 유닛에 볼 핸들러 역할이 부족합니다.' });
@@ -93,7 +95,7 @@ function rowHealthState(row, insights) {
   const minute = Number(row.minutes || 0);
   const dCount = insights.defenseCount.get(row.defenseRole) || 0;
   if (minute < 8 || minute > 40) return { cls: 'warn', text: 'MIN' };
-  if (dCount > 1) return { cls: 'err', text: 'DUP' };
+  if (String(state.tacticsDraft?.defenseScheme || "") !== "Preset_Defense" && dCount > 1) return { cls: 'err', text: 'DUP' };
   return { cls: 'ok', text: 'OK' };
 }
 

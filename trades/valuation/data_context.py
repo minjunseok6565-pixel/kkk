@@ -23,6 +23,8 @@ This module provides simple helpers to build expectations from standings order.
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+from .injury_features import build_injury_payloads_for_players, build_injury_payload_for_player
+
 from .types import (
     PlayerId,
     TeamId,
@@ -218,6 +220,7 @@ class RepoValuationDataContext(ValuationDataProvider):
     contracts_map: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     active_contract_id_by_player: Dict[str, str] = field(default_factory=dict)
     agency_state_by_player: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    injury_payload_by_player: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     # optional pick expectations
     pick_expectations: PickExpectationMap = field(default_factory=dict)
@@ -290,7 +293,7 @@ class RepoValuationDataContext(ValuationDataProvider):
             salary_amount=_safe_float(salary_amount, None),
             attrs=attrs,
             contract=contract,
-            meta=self._merge_player_meta_with_agency(
+            meta=self._merge_player_meta_with_context(
                 (dict(p.get("meta") or {}) if isinstance(p, dict) else {}),
                 pid,
             ),
@@ -416,7 +419,7 @@ class RepoValuationDataContext(ValuationDataProvider):
                         salary_amount=_safe_float(salary_amount, None),
                         attrs=attrs,
                         contract=contract,
-                        meta=self._merge_player_meta_with_agency(
+                        meta=self._merge_player_meta_with_context(
                             (dict(p.get("meta") or {}) if isinstance(p, dict) else {}),
                             pid,
                         ),
@@ -460,7 +463,7 @@ class RepoValuationDataContext(ValuationDataProvider):
                             salary_amount=_safe_float(salary_amount, None),
                             attrs=attrs,
                             contract=contract,
-                            meta=self._merge_player_meta_with_agency(
+                            meta=self._merge_player_meta_with_context(
                                 (dict(p.get("meta") or {}) if isinstance(p, dict) else {}),
                                 pid,
                             ),
@@ -468,11 +471,23 @@ class RepoValuationDataContext(ValuationDataProvider):
                     except Exception:
                         continue
 
-    def _merge_player_meta_with_agency(self, base_meta: Dict[str, Any], player_id: str) -> Dict[str, Any]:
+    def _merge_player_meta_with_context(self, base_meta: Dict[str, Any], player_id: str) -> Dict[str, Any]:
         out = dict(base_meta or {})
-        agency_state = self.agency_state_by_player.get(str(player_id))
+        pid = str(player_id)
+
+        agency_state = self.agency_state_by_player.get(pid)
         if isinstance(agency_state, dict) and agency_state:
             out["agency_state"] = dict(agency_state)
+
+        injury = self.injury_payload_by_player.get(pid)
+        if not isinstance(injury, dict):
+            injury = build_injury_payload_for_player(
+                as_of_date_iso=str(self.current_date_iso),
+                current_row=None,
+                history_rows=[],
+            )
+            self.injury_payload_by_player[pid] = dict(injury)
+        out["injury"] = dict(injury)
         return out
 
 
@@ -511,6 +526,115 @@ def _load_agency_state_snapshot(repo_obj: "LeagueRepo") -> Dict[str, Dict[str, A
 
 
 
+def _safe_player_ids_for_injury_payloads(repo_obj: "LeagueRepo") -> List[str]:
+    """Best-effort player id list for bulk injury payload aggregation."""
+    try:
+        rows = repo_obj._conn.execute("SELECT player_id FROM players;").fetchall()
+    except Exception:
+        return []
+
+    out: List[str] = []
+    for r in rows:
+        if isinstance(r, Mapping):
+            pid = str(r.get("player_id") or "")
+        else:
+            try:
+                pid = str(r[0] or "")
+            except Exception:
+                pid = ""
+        if pid:
+            out.append(pid)
+    return out
+
+
+def _build_default_injury_payload_map(player_ids: Iterable[str], *, as_of_date_iso: str) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for pid in player_ids:
+        spid = str(pid or "")
+        if not spid:
+            continue
+        try:
+            out[spid] = build_injury_payload_for_player(
+                as_of_date_iso=str(as_of_date_iso),
+                current_row=None,
+                history_rows=[],
+            )
+        except Exception:
+            out[spid] = {
+                "version": 1,
+                "as_of_date": str(as_of_date_iso)[:10],
+                "source": {"current": "none", "history": "none"},
+                "current": {
+                    "status": "UNKNOWN",
+                    "is_out": False,
+                    "is_returning": False,
+                    "days_to_return": 0,
+                    "body_part": None,
+                    "severity": None,
+                    "out_until_date": None,
+                    "returning_until_date": None,
+                },
+                "history": {
+                    "window_days": 365,
+                    "recent_count_30d": 0,
+                    "recent_count_180d": 0,
+                    "recent_count_365d": 0,
+                    "critical_count_365d": 0,
+                    "same_part_repeat_365d_max": 0,
+                    "same_part_counts_365d": {},
+                    "avg_severity_365d": 0.0,
+                    "weighted_severity_365d": 0.0,
+                    "last_injury_date": None,
+                    "days_since_last_injury": None,
+                },
+                "health_credit_inputs": {
+                    "availability_rate_365d": 1.0,
+                    "healthy_days_365d": 365,
+                    "out_days_365d": 0,
+                    "returning_days_365d": 0,
+                },
+                "flags": {
+                    "current_missing": True,
+                    "history_missing": True,
+                    "fallback_used": True,
+                },
+            }
+    return out
+
+
+def _load_injury_payload_snapshot(
+    repo_obj: "LeagueRepo",
+    *,
+    as_of_date_iso: str,
+    player_ids: Optional[Sequence[str]] = None,
+    lookback_days: int = 365,
+    critical_body_parts: Optional[Sequence[str]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Best-effort injury payload snapshot for valuation.
+
+    - Primary: bulk aggregate from injury SSOT tables.
+    - Fallback: default payloads (flags missing=true) per player.
+    """
+    pids = [str(pid) for pid in (player_ids or []) if str(pid or "")]
+    if not pids:
+        pids = _safe_player_ids_for_injury_payloads(repo_obj)
+    if not pids:
+        return {}
+
+    try:
+        return build_injury_payloads_for_players(
+            conn=repo_obj._conn,
+            player_ids=pids,
+            as_of_date_iso=str(as_of_date_iso),
+            lookback_days=max(int(lookback_days), 1),
+            critical_body_parts=critical_body_parts,
+        )
+    except Exception:
+        # Spec fallback: inject safe defaults with missing flags on failures.
+        return _build_default_injury_payload_map(pids, as_of_date_iso=str(as_of_date_iso))
+
+
+
 # -----------------------------------------------------------------------------
 # Builder
 # -----------------------------------------------------------------------------
@@ -527,6 +651,8 @@ def build_repo_valuation_data_context(
     repo: Optional["LeagueRepo"] = None,
     assets_snapshot: Optional[Dict[str, Any]] = None,
     contract_ledger: Optional[Dict[str, Any]] = None,
+    injury_lookback_days: int = 365,
+    injury_critical_body_parts: Optional[Sequence[str]] = None,
 ) -> RepoValuationDataContext:
     """Build RepoValuationDataContext from sqlite snapshot.
 
@@ -555,6 +681,7 @@ def build_repo_valuation_data_context(
     assets: Optional[Dict[str, Any]] = dict(assets_snapshot) if assets_snapshot is not None else None
     ledger: Optional[Dict[str, Any]] = dict(contract_ledger) if contract_ledger is not None else None
     agency_state_by_player: Dict[str, Dict[str, Any]] = {}
+    injury_payload_by_player: Dict[str, Dict[str, Any]] = {}
 
     if repo is not None:
         # Use shared repo without opening/closing.
@@ -563,15 +690,27 @@ def build_repo_valuation_data_context(
         if ledger is None:
             ledger = repo.get_contract_ledger_snapshot() or {}
         agency_state_by_player = _load_agency_state_snapshot(repo)
+        injury_payload_by_player = _load_injury_payload_snapshot(
+            repo,
+            as_of_date_iso=str(current_date_iso),
+            lookback_days=max(int(injury_lookback_days), 1),
+            critical_body_parts=injury_critical_body_parts,
+        )
     else:
-        # Avoid opening the DB twice: open once if either snapshot is missing.
-        if assets is None or ledger is None:
-            with LeagueRepo(db_path) as repo_obj:
-                if assets is None:
-                    assets = repo_obj.get_trade_assets_snapshot() or {}
-                if ledger is None:
-                    ledger = repo_obj.get_contract_ledger_snapshot() or {}
-                agency_state_by_player = _load_agency_state_snapshot(repo_obj)
+        # Repo is not shared by caller. We still need one DB open to load
+        # agency/injury snapshots even when assets/ledger are already injected.
+        with LeagueRepo(db_path) as repo_obj:
+            if assets is None:
+                assets = repo_obj.get_trade_assets_snapshot() or {}
+            if ledger is None:
+                ledger = repo_obj.get_contract_ledger_snapshot() or {}
+            agency_state_by_player = _load_agency_state_snapshot(repo_obj)
+            injury_payload_by_player = _load_injury_payload_snapshot(
+                repo_obj,
+                as_of_date_iso=str(current_date_iso),
+                lookback_days=max(int(injury_lookback_days), 1),
+                critical_body_parts=injury_critical_body_parts,
+            )
 
     if assets is None:  # pragma: no cover
         assets = {}
@@ -625,5 +764,6 @@ def build_repo_valuation_data_context(
         contracts_map=contracts_map,
         active_contract_id_by_player=active_contract_id_by_player,
         agency_state_by_player=agency_state_by_player,
+        injury_payload_by_player=injury_payload_by_player,
         pick_expectations=pe,
     )

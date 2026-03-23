@@ -43,6 +43,7 @@ _CANON_DEFENSE_SCHEMES = {
     "Blitz_TrapPnR",
     "Zone",
     "AtTheLevel",
+    "Preset_Defense",
 }
 
 # Map a normalized alias string -> canonical defense scheme key.
@@ -103,6 +104,11 @@ _DEFENSE_SCHEME_ALIAS_NORM = {
     "atlevel": "AtTheLevel",
     "highshow": "AtTheLevel",
     "앳더레벨": "AtTheLevel",
+
+
+    # Preset defense
+    "presetdefense": "Preset_Defense",
+    "프리셋수비": "Preset_Defense",
 
 }
 

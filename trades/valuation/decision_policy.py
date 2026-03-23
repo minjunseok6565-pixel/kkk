@@ -95,6 +95,44 @@ def _extract_package_delta_total(e: TeamDealEvaluation) -> float:
     return 0.0
 
 
+def _deal_scale_components(e: TeamDealEvaluation, *, eps: float) -> Tuple[float, float, float, float]:
+    """Return multi-axis scale and its component axes.
+
+    scale axes:
+    - outgoing_total
+    - incoming_total
+    - mass_scale=max(in_abs_mass, out_abs_mass)
+      * in_abs_mass = abs(in_now) + abs(in_future)
+      * out_abs_mass = abs(out_now) + abs(out_future)
+
+    final scale = max(outgoing, incoming, mass_scale, eps)
+    """
+    outgoing = _safe_float(getattr(e, "outgoing_total", 0.0), 0.0)
+    incoming = _safe_float(getattr(e, "incoming_total", 0.0), 0.0)
+
+    in_now = 0.0
+    in_future = 0.0
+    out_now = 0.0
+    out_future = 0.0
+    try:
+        in_val = e.side.incoming_totals.value
+        out_val = e.side.outgoing_totals.value
+        in_now = _safe_float(getattr(in_val, "now", 0.0), 0.0)
+        in_future = _safe_float(getattr(in_val, "future", 0.0), 0.0)
+        out_now = _safe_float(getattr(out_val, "now", 0.0), 0.0)
+        out_future = _safe_float(getattr(out_val, "future", 0.0), 0.0)
+    except Exception:
+        # Keep this layer robust against partially populated test doubles.
+        pass
+
+    in_abs_mass = abs(in_now) + abs(in_future)
+    out_abs_mass = abs(out_now) + abs(out_future)
+    mass_scale = max(in_abs_mass, out_abs_mass)
+
+    scale = max(outgoing, incoming, mass_scale, _safe_float(eps, 1e-9))
+    return float(scale), float(outgoing), float(incoming), float(mass_scale)
+
+
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
@@ -102,27 +140,19 @@ def _extract_package_delta_total(e: TeamDealEvaluation) -> float:
 class DecisionPolicyConfig:
     eps: float = 1e-9
 
-    # If outgoing_total is ~0 (e.g., receive something for free), use this as scale
-    min_outgoing_scale: float = 6.0
-
     # How wide is the "counter corridor" around the acceptance boundary
-    # corridor = required_surplus ± corridor_ratio*outgoing_total
-    counter_corridor_ratio: float = 0.06
+    # corridor = required_surplus ± corridor_ratio*deal_scale
+    counter_corridor_ratio: float = 0.10
 
     # If net is negative but within this fraction of overpay_allowed,
     # we may still COUNTER rather than hard REJECT (if counter_rate favors it).
-    counter_overpay_fraction: float = 0.65
+    counter_overpay_fraction: float = 1.20
 
     # Confidence mapping: larger => sharper transitions
     confidence_slope: float = 3.5
 
     # Surface reasons: how many items to show
     max_reasons: int = 6
-
-    # Whether to use stochastic counter behavior (optional).
-    # If false, counter_rate is interpreted deterministically.
-    stochastic_counter: bool = False
-
 
 # -----------------------------------------------------------------------------
 # Policy engine
@@ -152,11 +182,14 @@ class DecisionPolicy:
         incoming = _safe_float(evaluation.incoming_total, 0.0)
         net = _safe_float(evaluation.net_surplus, incoming - outgoing)
 
-        # scale baseline (avoid weirdness when outgoing ~ 0)
-        scale = max(outgoing, cfg.min_outgoing_scale)
+        # deal scale (multi-axis): outgoing/incoming/abs-mass
+        scale, scale_outgoing, scale_incoming, scale_mass = _deal_scale_components(
+            evaluation,
+            eps=cfg.eps,
+        )
 
-        # Required surplus and overpay allowance are both proportional to outgoing scale
-        min_surplus_ratio = max(0.0, _safe_float(getattr(knobs, "min_surplus_required", 0.0), 0.0))
+        # Required surplus and overpay allowance are both proportional to deal scale
+        min_surplus_ratio = _safe_float(getattr(knobs, "min_surplus_required", 0.0), 0.0)
         overpay_ratio = max(0.0, _safe_float(getattr(knobs, "overpay_budget", 0.0), 0.0))
         counter_rate = _clamp(_safe_float(getattr(knobs, "counter_rate", 0.0), 0.0), 0.0, 1.0)
 
@@ -173,6 +206,7 @@ class DecisionPolicy:
         # ---- Decide verdict (no hard rule checks)
         verdict: DealVerdict
         reasons: List[DecisionReason] = []
+        counter_score: Optional[float] = None
 
         # baseline reasons: net vs thresholds
         reasons.append(
@@ -191,7 +225,10 @@ class DecisionPolicy:
                 meta={
                     "min_surplus_required_ratio": min_surplus_ratio,
                     "overpay_budget_ratio": overpay_ratio,
-                    "scale_outgoing": scale,
+                    "scale": scale,
+                    "scale_outgoing": scale_outgoing,
+                    "scale_incoming": scale_incoming,
+                    "scale_mass": scale_mass,
                 },
             )
         )
@@ -238,39 +275,24 @@ class DecisionPolicy:
             in_corridor = (accept_threshold - corridor) <= net < accept_threshold
             within_overpay = net >= overpay_floor
 
-            if allow_counter and (in_corridor or (within_overpay and net < 0 and abs(net) <= cfg.counter_overpay_fraction * overpay_allowed)):
-                # determine counter vs reject/accept in gray zone
-                if self._choose_counter(counter_rate=counter_rate, rng=rng):
-                    verdict = DealVerdict.COUNTER
-                    reasons.append(
-                        DecisionReason(
-                            code="COUNTER_IN_GRAY_ZONE",
-                            message="near threshold / within overpay window -> counter tendency applied",
-                            impact=accept_threshold - net,
-                            meta={"counter_rate": counter_rate, "corridor": corridor},
-                        )
+            if allow_counter and (
+                in_corridor
+                or (within_overpay and net < 0 and abs(net) <= cfg.counter_overpay_fraction * overpay_allowed)
+            ):
+                verdict = DealVerdict.COUNTER
+                counter_score = 1.0
+                reasons.append(
+                    DecisionReason(
+                        code="COUNTER_IN_GRAY_ZONE",
+                        message="near threshold / within overpay window -> always counter in gray zone",
+                        impact=accept_threshold - net,
+                        meta={
+                            "counter_rate": counter_rate,
+                            "counter_score": counter_score,
+                            "corridor": corridor,
+                        },
                     )
-                else:
-                    # If not countering, decide accept (if within overpay) else reject
-                    if within_overpay:
-                        verdict = DealVerdict.ACCEPT
-                        reasons.append(
-                            DecisionReason(
-                                code="ACCEPT_WITHIN_OVERPAY",
-                                message="below required but within overpay budget",
-                                impact=net - accept_threshold,
-                                meta={"overpay_allowed": overpay_allowed},
-                            )
-                        )
-                    else:
-                        verdict = DealVerdict.REJECT
-                        reasons.append(
-                            DecisionReason(
-                                code="INSUFFICIENT_SURPLUS",
-                                message="below required and outside overpay budget",
-                                impact=net - accept_threshold,
-                            )
-                        )
+                )
             else:
                 # 3) Clear fail: accept only if within overpay, else reject
                 if within_overpay:
@@ -317,26 +339,12 @@ class DecisionPolicy:
                 "team_id": evaluation.team_id,
                 "surplus_ratio": float(evaluation.surplus_ratio),
                 "counter_rate": float(counter_rate),
+                "counter_score": None if counter_score is None else float(counter_score),
                 "accept_threshold": float(accept_threshold),
                 "overpay_floor": float(overpay_floor),
                 "corridor": float(corridor),
             },
         )
-
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
-    def _choose_counter(self, *, counter_rate: float, rng: random.Random) -> bool:
-        """Counter decision: deterministic or stochastic."""
-        cfg = self.config
-        r = _clamp(_safe_float(counter_rate, 0.0), 0.0, 1.0)
-        if r <= cfg.eps:
-            return False
-        if cfg.stochastic_counter:
-            return rng.random() < r
-        # deterministic: treat counter_rate as aggressiveness threshold
-        # >0.5 => generally counter in gray zones, <=0.5 => generally do not
-        return r > 0.5
 
     def _compute_confidence(
         self,

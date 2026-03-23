@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from .asset_lock_rule import AssetLockRule
 from .deal_shape_rule import DealShapeRule
 from .deadline_rule import DeadlineRule
 from .duplicate_asset_rule import DuplicateAssetRule
@@ -16,7 +15,6 @@ from .swap_year_round_capacity_rule import SwapYearRoundCapacityRule
 from .team_legs_rule import TeamLegsRule
 
 BUILTIN_RULES = [
-    AssetLockRule(),
     DeadlineRule(),
     DealShapeRule(),
     DuplicateAssetRule(),

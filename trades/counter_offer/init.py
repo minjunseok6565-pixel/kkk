@@ -45,7 +45,6 @@ def build_counter_offer(
     current_date: date,
     db_path: str,
     session: Optional[Mapping[str, Any]] = None,
-    allow_locked_by_deal_id: Optional[str] = None,
     tick_ctx: Optional[TradeGenerationTickContext] = None,
     config: Optional[CounterOfferConfig] = None,
 ) -> Optional[CounterProposal]:
@@ -59,7 +58,6 @@ def build_counter_offer(
         current_date=current_date,
         db_path=db_path,
         session=session,
-        allow_locked_by_deal_id=allow_locked_by_deal_id,
         tick_ctx=tick_ctx,
     )
 

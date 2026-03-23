@@ -3,6 +3,7 @@ from __future__ import annotations
 """Quality-driven possession bias helpers."""
 
 import math
+from collections.abc import Mapping
 from typing import Any, Dict
 
 from .. import quality
@@ -41,6 +42,9 @@ def apply_quality_to_turnover_priors(
 
     scheme = getattr(defense.tactics, "defense_scheme", "")
     role_players = get_or_build_def_role_players(ctx, defense, scheme=scheme)
+    q_context = getattr(getattr(defense, "tactics", None), "context", {})
+    if not isinstance(q_context, Mapping):
+        q_context = {}
 
     debug_q = bool(ctx.get("debug_quality", False))
     q_res = quality.compute_quality_score(
@@ -49,6 +53,7 @@ def apply_quality_to_turnover_priors(
         outcome="TO_HANDLE_LOSS",
         role_players=role_players,
         get_stat=engine_get_stat,
+        context=q_context,
         return_detail=debug_q,
     )
     q_score = float(q_res.score) if (debug_q and hasattr(q_res, "score")) else float(q_res)
@@ -69,4 +74,3 @@ def apply_quality_to_turnover_priors(
         tags["to_weight_after"] = float(pri["TO_HANDLE_LOSS"])
 
     return pri
-
