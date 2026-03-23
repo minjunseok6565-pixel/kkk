@@ -1535,8 +1535,8 @@ function renderMarketTradeInbox() {
             <span>제안일 ${dateText}</span>
           </div>
           <div class="market-trade-inbox-item-actions">
-            <button type="button" class="btn btn-secondary" data-trade-action="open-session" data-session-id="${sessionId}">협상</button>
-            <button type="button" class="btn btn-secondary" data-trade-action="reject-session" data-session-id="${sessionId}">거절</button>
+            <button type="button" class="btn btn-secondary market-trade-inbox-btn market-trade-inbox-btn-open" data-trade-action="open-session" data-session-id="${sessionId}">협상</button>
+            <button type="button" class="btn btn-secondary market-trade-inbox-btn market-trade-inbox-btn-reject" data-trade-action="reject-session" data-session-id="${sessionId}">거절</button>
           </div>
         `;
         const openBtn = li.querySelector('button[data-trade-action="open-session"]');

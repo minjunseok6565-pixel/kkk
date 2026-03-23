@@ -1,11 +1,85 @@
+#market-screen .market-hero {
+  margin-bottom: 14px;
+}
+
+#market-screen .screen-header-row {
+  margin-bottom: 18px;
+  padding: 18px 22px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+  position: relative;
+}
+
+#market-screen .screen-header-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  border-radius: 16px 16px 0 0;
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.9), rgba(225, 29, 72, 0.72));
+}
+
+#market-screen .screen-header-row .subtitle {
+  margin-bottom: 0;
+}
+
+#market-screen #market-back-btn {
+  min-height: 48px;
+  min-width: 116px;
+  border-radius: 14px;
+  font-weight: 700;
+}
+
 .market-subtab-row {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 10px;
   margin-bottom: 16px;
+}
+
+#market-screen .market-subtab-row-primary {
+  margin-bottom: 0;
+}
+
+#market-screen .market-subtab-row-scope {
+  margin-bottom: 14px;
+}
+
+#market-screen .market-subtab-row .btn {
+  min-height: 44px;
+  border-radius: 999px;
+  padding: 10px 18px;
+  border-color: rgba(148, 163, 184, 0.38);
+  color: #334155;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+#market-screen .market-subtab-row .btn:hover {
+  border-color: rgba(59, 130, 246, 0.46);
+  background: linear-gradient(180deg, #f8fbff, #ecf4ff);
+}
+
+#market-screen .market-subtab-row .btn.is-active,
+#market-screen .market-subtab-row .btn[aria-selected="true"] {
+  border-color: rgba(59, 130, 246, 0.52);
+  background: linear-gradient(180deg, #ebf4ff, #e1efff);
+  color: #1d4ed8;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.16);
+}
+
+#market-screen .market-subtab-row .btn:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.4);
+  outline-offset: 2px;
 }
 
 .market-fa-overview {
   margin-bottom: 12px;
+  padding: 0 2px;
 }
 
 .market-panel {
@@ -43,7 +117,7 @@
 
 .market-rule-list {
   margin: 10px 0 14px;
-  color: rgba(232, 238, 251, 0.9);
+  color: #475569;
 }
 
 .market-rule-list li {
@@ -54,6 +128,53 @@
 .market-trade-block-table td:last-child {
   text-align: center;
   white-space: nowrap;
+}
+
+#market-screen .market-fa-table {
+  font-variant-numeric: tabular-nums;
+}
+
+#market-screen .market-fa-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, #f4f8ff, #edf3ff);
+  color: #475569;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.34);
+}
+
+#market-screen .market-fa-table tbody td {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+}
+
+#market-screen .market-fa-table tbody tr:hover {
+  background: linear-gradient(90deg, rgba(191, 219, 254, 0.2), rgba(219, 234, 254, 0.32));
+}
+
+#market-screen .market-fa-table th:nth-child(3),
+#market-screen .market-fa-table th:nth-child(4),
+#market-screen .market-fa-table th:nth-child(7),
+#market-screen .market-fa-table th:nth-child(8),
+#market-screen .market-fa-table th:nth-child(9),
+#market-screen .market-fa-table th:nth-child(10),
+#market-screen .market-fa-table th:nth-child(11),
+#market-screen .market-fa-table td:nth-child(3),
+#market-screen .market-fa-table td:nth-child(4),
+#market-screen .market-fa-table td:nth-child(7),
+#market-screen .market-fa-table td:nth-child(8),
+#market-screen .market-fa-table td:nth-child(9),
+#market-screen .market-fa-table td:nth-child(10),
+#market-screen .market-fa-table td:nth-child(11) {
+  text-align: right;
+}
+
+#market-screen .market-trade-block-table th:nth-child(4),
+#market-screen .market-trade-block-table th:nth-child(5),
+#market-screen .market-trade-block-table th:nth-child(8),
+#market-screen .market-trade-block-table td:nth-child(4),
+#market-screen .market-trade-block-table td:nth-child(5),
+#market-screen .market-trade-block-table td:nth-child(8) {
+  text-align: right;
 }
 
 .market-trade-offer-btn {
@@ -71,6 +192,12 @@
   gap: 10px;
 }
 
+.market-trade-inbox-group h4 {
+  margin: 0;
+  font-size: 1rem;
+  color: #0f172a;
+}
+
 .market-trade-inbox-list {
   list-style: none;
   margin: 0;
@@ -85,11 +212,11 @@
   grid-template-columns: 84px minmax(420px, 1fr) 172px;
   gap: 12px;
   align-items: stretch;
-  border: 1px solid rgba(108, 165, 255, 0.25);
+  border: 1px solid rgba(148, 163, 184, 0.32);
   border-radius: 14px;
-  background: linear-gradient(120deg, rgba(13, 25, 54, 0.92), rgba(11, 18, 38, 0.92));
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
   padding: 12px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.09);
 }
 
 .market-trade-inbox-card-left,
@@ -103,8 +230,8 @@
   width: 58px;
   height: 58px;
   border-radius: 50%;
-  border: 1px solid rgba(168, 199, 255, 0.3);
-  background-color: rgba(12, 27, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  background-color: #f1f5f9;
 }
 
 .market-trade-inbox-card-center {
@@ -117,14 +244,14 @@
   min-height: 86px;
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1px solid rgba(151, 194, 255, 0.22);
-  background: rgba(8, 16, 34, 0.68);
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  background: linear-gradient(180deg, #f8fbff, #f1f5fb);
 }
 
 .market-trade-inbox-card-package h5 {
   margin: 0 0 8px;
   font-size: 13px;
-  color: rgba(232, 238, 251, 0.95);
+  color: #0f172a;
 }
 
 .market-trade-inbox-card-package ul {
@@ -132,7 +259,7 @@
   padding: 0 0 0 16px;
   display: grid;
   gap: 6px;
-  color: rgba(214, 226, 248, 0.9);
+  color: #334155;
   font-size: 12px;
   line-height: 1.4;
 }
@@ -154,10 +281,39 @@
 .market-trade-inbox-item .btn,
 .market-trade-inbox-card .btn {
   min-height: 38px;
+  font-weight: 700;
+}
+
+.market-trade-inbox-btn {
+  min-width: 118px;
+}
+
+.market-trade-inbox-btn-open {
+  background: linear-gradient(180deg, #eaf3ff, #dbeafe) !important;
+  border-color: rgba(59, 130, 246, 0.48) !important;
+  color: #1d4ed8 !important;
+}
+
+.market-trade-inbox-btn-open:hover {
+  background: linear-gradient(180deg, #dbeafe, #bfdbfe) !important;
+  border-color: rgba(37, 99, 235, 0.58) !important;
+}
+
+.market-trade-inbox-btn-reject {
+  background: linear-gradient(180deg, #fff6f6, #feecec) !important;
+  border-color: rgba(239, 68, 68, 0.28) !important;
+  color: #b91c1c !important;
+}
+
+.market-trade-inbox-btn-reject:hover {
+  background: linear-gradient(180deg, #feecec, #fee2e2) !important;
+  border-color: rgba(220, 38, 38, 0.4) !important;
 }
 
 .market-trade-inbox-card .subtitle {
   text-align: right;
+  margin-bottom: 0;
+  color: #64748b;
 }
 
 /* --- Trade Deal Modal: top package + bottom tabs --- */
@@ -167,6 +323,56 @@
   overflow: hidden;
   display: grid;
   grid-template-rows: auto auto 1fr auto;
+  color: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.42);
+  background:
+    radial-gradient(circle at 90% -24%, rgba(191, 219, 254, 0.6), rgba(255, 255, 255, 0) 42%),
+    linear-gradient(180deg, #ffffff, #f5f9ff);
+  box-shadow: 0 28px 72px rgba(15, 23, 42, 0.24);
+}
+
+.market-trade-deal-head {
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.market-trade-deal-head .confirm-modal-title {
+  color: #0f172a;
+}
+
+.market-trade-deal-head .confirm-modal-body {
+  margin-top: 6px;
+  color: #64748b;
+}
+
+.market-trade-deal-panel .confirm-modal-eyebrow {
+  color: #2563eb;
+}
+
+.market-trade-deal-footer {
+  border-top: 1px solid rgba(148, 163, 184, 0.34);
+  padding-top: 10px;
+}
+
+.market-trade-deal-footer .btn {
+  min-width: 96px;
+}
+
+#market-trade-deal-submit {
+  background: linear-gradient(180deg, #2563eb, #1d4ed8);
+  border-color: rgba(37, 99, 235, 0.58);
+}
+
+#market-trade-deal-reject {
+  background: linear-gradient(180deg, #fff6f6, #fee2e2);
+  border-color: rgba(220, 38, 38, 0.32);
+  color: #b91c1c;
+}
+
+#market-trade-deal-reject:hover {
+  border-color: rgba(220, 38, 38, 0.44);
 }
 
 .market-trade-deal-layout {
@@ -177,10 +383,10 @@
 }
 
 .market-trade-deal-top {
-  border: 1px solid rgba(108, 165, 255, 0.3);
+  border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 14px;
   padding: 12px;
-  background: linear-gradient(150deg, rgba(8, 16, 34, 0.85), rgba(9, 24, 48, 0.8));
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
 }
 
 .market-trade-deal-top-head {
@@ -200,7 +406,8 @@
   width: 46px;
   height: 46px;
   border-radius: 50%;
-  border: 1px solid rgba(168, 199, 255, 0.3);
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: #f1f5f9;
 }
 
 .market-trade-deal-package-grid {
@@ -210,10 +417,10 @@
 }
 
 .market-trade-deal-package {
-  border: 1px solid rgba(151, 194, 255, 0.22);
+  border: 1px solid rgba(148, 163, 184, 0.26);
   border-radius: 10px;
   padding: 10px 12px;
-  background: rgba(7, 16, 31, 0.72);
+  background: linear-gradient(180deg, #f8fbff, #f1f5fb);
 }
 
 .market-trade-deal-package h4 {
@@ -227,7 +434,7 @@
   display: grid;
   gap: 6px;
   font-size: 13px;
-  color: rgba(216, 228, 250, 0.94);
+  color: #334155;
 }
 
 .market-trade-deal-bottom {
@@ -238,10 +445,10 @@
 }
 
 .market-trade-deal-team-assets {
-  border: 1px solid rgba(108, 165, 255, 0.25);
+  border: 1px solid rgba(148, 163, 184, 0.3);
   border-radius: 12px;
   padding: 10px;
-  background: rgba(8, 16, 34, 0.75);
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
   display: grid;
   grid-template-rows: auto 1fr;
   min-height: 260px;
@@ -267,17 +474,92 @@
 }
 
 .market-trade-deal-tabs .btn[role="tab"][aria-selected="true"] {
-  border-color: rgba(126, 179, 255, 0.85);
-  background: linear-gradient(120deg, rgba(53, 96, 169, 0.95), rgba(40, 76, 141, 0.95));
+  border-color: rgba(59, 130, 246, 0.55);
+  background: linear-gradient(180deg, #e8f1ff, #dceaff);
+  color: #1d4ed8;
 }
 
 .market-trade-deal-tab-panel {
   min-height: 0;
   overflow: auto;
-  border: 1px solid rgba(133, 178, 246, 0.2);
+  border: 1px solid rgba(148, 163, 184, 0.26);
   border-radius: 10px;
   padding: 10px;
-  background: rgba(9, 16, 31, 0.62);
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+
+.market-trade-deal-tab-panel .subtitle {
+  margin: 0;
+  color: #64748b;
+}
+
+.market-trade-deal-list-inner {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.market-trade-deal-list-inner li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+
+.market-trade-deal-list-inner li > span,
+.market-trade-deal-list-inner li > div > span {
+  color: #1e293b;
+}
+
+.market-trade-deal-list-inner .btn {
+  flex-shrink: 0;
+}
+
+.market-trade-asset-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  font-size: .72rem;
+  color: #334155;
+  background: rgba(241, 245, 249, 0.9);
+}
+
+.market-trade-asset-badge-protected {
+  border-color: rgba(59, 130, 246, 0.42);
+  color: #1d4ed8;
+  background: rgba(219, 234, 254, 0.85);
+}
+
+.market-trade-asset-badge-candidate {
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #b45309;
+  background: rgba(255, 237, 213, 0.85);
+}
+
+.market-trade-asset-contract-violation {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.market-trade-deal-list h5 {
+  margin: 0 0 8px;
+  color: #1e293b;
+}
+
+.market-trade-pick-editor {
+  margin-top: 6px;
+}
+
+.market-trade-pick-editor .ui-input {
+  min-width: min(360px, 100%);
 }
 
 .market-trade-deal-bottom-meta {
@@ -287,20 +569,53 @@
 }
 
 .market-trade-deal-bottom-meta > div {
-  border: 1px solid rgba(108, 165, 255, 0.24);
+  border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 10px;
   padding: 10px;
-  background: rgba(9, 18, 36, 0.66);
+  background: linear-gradient(180deg, #f8fbff, #f0f5fd);
 }
 
 .market-trade-deal-bottom-meta h4 {
   margin: 0 0 8px;
+  color: #0f172a;
+}
+
+#market-screen .roster-table tbody tr {
+  transition: background-color .15s ease;
+}
+
+#market-screen .roster-table tbody tr:hover {
+  background: rgba(148, 163, 184, 0.14);
+}
+
+#market-screen .schedule-empty {
+  text-align: center;
+  color: #64748b;
+  padding: 22px 14px;
+}
+
+#market-screen #market-trade-inbox-loading,
+#market-screen #market-trade-inbox-empty {
+  margin: 8px 0 14px;
+}
+
+#market-screen .market-trade-inbox-card [aria-disabled="true"],
+#market-screen .market-trade-inbox-item [aria-disabled="true"] {
+  opacity: 0.58;
+}
+
+#market-screen #market-trade-inbox-empty {
+  border: 1px dashed rgba(148, 163, 184, 0.38);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  padding: 16px;
+  text-align: center;
 }
 
 .market-trade-inbox-card:focus-within,
 .market-trade-deal-tabs .btn[role="tab"]:focus-visible,
 .market-trade-deal-tab-panel:focus-visible {
-  outline: 2px solid rgba(136, 187, 255, 0.9);
+  outline: 2px solid rgba(37, 99, 235, 0.48);
   outline-offset: 2px;
 }
 
