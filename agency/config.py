@@ -250,11 +250,6 @@ class EventConfig:
     minutes_complaint_softness: float = 0.12  # how "probabilistic" the trigger is
     cooldown_minutes_days: int = 28
 
-    # Help demand ("get help" roster request)
-    help_demand_min_leverage: float = 0.70
-    help_demand_ambition_threshold: float = 0.65
-    help_demand_team_frustration_threshold: float = 0.55
-    help_demand_softness: float = 0.15
     cooldown_help_days: int = 60
 
     help_need_rotation_top_n: int = 8
@@ -501,7 +496,6 @@ class AgencyConfig:
     event_types: Dict[str, str] = field(
         default_factory=lambda: {
             "minutes_complaint": "MINUTES_COMPLAINT",
-            "help_demand": "HELP_DEMAND",
             "trade_request": "TRADE_REQUEST",
             "trade_request_public": "TRADE_REQUEST_PUBLIC",
             "trade_targeted_offer_public": "TRADE_TARGETED_OFFER_PUBLIC",
@@ -522,6 +516,7 @@ class AgencyConfig:
             "health_public": "HEALTH_PUBLIC",
 
             "team_private": "TEAM_PRIVATE",
+            "team_agent": "TEAM_AGENT",
             "team_public": "TEAM_PUBLIC",
 
             "chemistry_private": "CHEMISTRY_PRIVATE",

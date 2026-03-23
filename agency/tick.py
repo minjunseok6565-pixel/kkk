@@ -1254,11 +1254,10 @@ def _candidate_team_issue(
     )
     stage = advance_stage(state.get("escalation_team"), desired=desired)
 
-    # Stage 2 uses the existing HELP_DEMAND event family (keeps prior UI/responses viable).
     if stage == 1:
         et = cfg.event_types.get("team_private", "TEAM_PRIVATE")
     elif stage == 2:
-        et = cfg.event_types.get("help_demand", "HELP_DEMAND")
+        et = cfg.event_types.get("team_agent", "TEAM_AGENT")
     else:
         et = cfg.event_types.get("team_public", "TEAM_PUBLIC")
 
