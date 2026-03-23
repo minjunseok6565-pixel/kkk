@@ -233,20 +233,22 @@
     </section>
 
     <section id="market-screen" class="panel" aria-hidden="true">
-      <div class="screen-header-row">
-        <div>
-          <p class="eyebrow">MARKET</p>
-          <h2 id="market-title">시장</h2>
-          <p class="subtitle">자유계약 선수와 트레이드 블록 정보를 확인하세요.</p>
+      <section class="market-hero" aria-label="시장 헤더">
+        <div class="screen-header-row">
+          <div>
+            <p class="eyebrow">MARKET</p>
+            <h2 id="market-title">시장</h2>
+            <p class="subtitle">자유계약 선수와 트레이드 블록 정보를 확인하세요.</p>
+          </div>
+          <button id="market-back-btn" class="btn btn-secondary" type="button">메인으로</button>
         </div>
-        <button id="market-back-btn" class="btn btn-secondary" type="button">메인으로</button>
-      </div>
 
-      <div class="market-subtab-row" role="tablist" aria-label="시장 하위 탭">
-        <button id="market-subtab-fa" type="button" class="btn btn-secondary is-active" data-market-tab="fa" aria-selected="true">FA</button>
-        <button id="market-subtab-trade-block" type="button" class="btn btn-secondary" data-market-tab="trade-block" aria-selected="false">트레이드 블록</button>
-        <button id="market-subtab-trade-inbox" type="button" class="btn btn-secondary" data-market-tab="trade-inbox" aria-selected="false">제안/협상</button>
-      </div>
+        <div class="market-subtab-row market-subtab-row-primary" role="tablist" aria-label="시장 하위 탭">
+          <button id="market-subtab-fa" type="button" class="btn btn-secondary is-active" data-market-tab="fa" aria-selected="true">FA</button>
+          <button id="market-subtab-trade-block" type="button" class="btn btn-secondary" data-market-tab="trade-block" aria-selected="false">트레이드 블록</button>
+          <button id="market-subtab-trade-inbox" type="button" class="btn btn-secondary" data-market-tab="trade-inbox" aria-selected="false">제안/협상</button>
+        </div>
+      </section>
 
       <section id="market-panel-fa" class="market-panel active" aria-hidden="false">
         <section class="market-fa-overview" aria-label="FA 개요">
@@ -278,7 +280,7 @@
       </section>
 
       <section id="market-panel-trade-block" class="market-panel" aria-hidden="true">
-        <div class="market-subtab-row" role="tablist" aria-label="트레이드 블록 하위 탭">
+        <div class="market-subtab-row market-subtab-row-scope" role="tablist" aria-label="트레이드 블록 하위 탭">
           <button id="market-trade-block-scope-other" type="button" class="btn btn-secondary is-active" aria-selected="true">다른 팀</button>
           <button id="market-trade-block-scope-mine" type="button" class="btn btn-secondary" aria-selected="false">내 팀</button>
         </div>
@@ -371,8 +373,8 @@
                 <div class="market-trade-inbox-card-right" id="market-trade-inbox-card-actions-wrap">
                   <p id="market-trade-inbox-card-date" class="subtitle">--/--</p>
                   <div class="market-trade-inbox-card-actions">
-                    <button type="button" id="market-trade-inbox-card-open" class="btn btn-secondary" data-trade-action="open-session" aria-disabled="false">협상</button>
-                    <button type="button" id="market-trade-inbox-card-reject" class="btn btn-secondary" data-trade-action="reject-session" aria-disabled="false">거절</button>
+                    <button type="button" id="market-trade-inbox-card-open" class="btn btn-secondary market-trade-inbox-btn market-trade-inbox-btn-open" data-trade-action="open-session" aria-disabled="false">협상</button>
+                    <button type="button" id="market-trade-inbox-card-reject" class="btn btn-secondary market-trade-inbox-btn market-trade-inbox-btn-reject" data-trade-action="reject-session" aria-disabled="false">거절</button>
                   </div>
                 </div>
               </article>
@@ -1379,7 +1381,7 @@
         </section>
       </div>
 
-      <div class="confirm-modal-actions">
+      <div class="confirm-modal-actions market-trade-deal-footer">
         <button id="market-trade-deal-cancel" type="button" class="btn btn-secondary">취소</button>
         <button id="market-trade-deal-reject" type="button" class="btn btn-secondary" data-trade-action="reject-from-modal" aria-disabled="false">거절</button>
         <button id="market-trade-deal-submit" type="button" class="btn btn-primary">제출</button>

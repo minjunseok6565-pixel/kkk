@@ -98,6 +98,7 @@
 #standings-screen .btn-secondary,
 #college-screen .btn-secondary,
 #medical-screen .btn-secondary,
+#market-screen .btn-secondary,
 #player-detail-screen .btn-secondary {
   background: linear-gradient(180deg, #ffffff, #eef2f7);
   border: 1px solid rgba(31, 41, 55, 0.2);
@@ -111,7 +112,7 @@
 #standings-screen .btn-secondary:hover,
 #college-screen .btn-secondary:hover,
 #medical-screen .btn-secondary:hover,
+#market-screen .btn-secondary:hover,
 #player-detail-screen .btn-secondary:hover {
   border-color: rgba(31, 41, 55, 0.36);
 }
-

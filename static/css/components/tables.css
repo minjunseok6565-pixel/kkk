@@ -230,6 +230,7 @@
 #standings-screen .standings-card,
 #college-screen .college-card,
 #medical-screen .medical-card,
+#market-screen .roster-table-wrap,
 #player-detail-screen .player-detail-panel,
 #training-screen .training-calendar-panel,
 #training-screen .training-detail-panel {
@@ -243,7 +244,8 @@
 #my-team-screen .roster-table th,
 #standings-screen .standings-table th,
 #college-screen .college-table th,
-#medical-screen .medical-table th {
+#medical-screen .medical-table th,
+#market-screen .roster-table th {
   color: #64748b;
 }
 
@@ -251,7 +253,8 @@
 #my-team-screen .roster-table td,
 #standings-screen .standings-table td,
 #college-screen .college-table td,
-#medical-screen .medical-table td {
+#medical-screen .medical-table td,
+#market-screen .roster-table td {
   color: #1f2937;
   border-bottom: 1px solid rgba(148, 163, 184, 0.24);
 }

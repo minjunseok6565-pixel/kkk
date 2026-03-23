@@ -50,6 +50,7 @@ h1, h2, h3 { margin: 0 0 12px; }
 #standings-screen .eyebrow,
 #college-screen .eyebrow,
 #medical-screen .eyebrow,
+#market-screen .eyebrow,
 #player-detail-screen .eyebrow {
   color: #6b7280;
 }
@@ -61,6 +62,7 @@ h1, h2, h3 { margin: 0 0 12px; }
 #standings-screen h2,
 #college-screen h2,
 #medical-screen h2,
+#market-screen h2,
 #player-detail-screen h2,
 #schedule-screen h3,
 #my-team-screen h3,
@@ -69,6 +71,7 @@ h1, h2, h3 { margin: 0 0 12px; }
 #standings-screen h3,
 #college-screen h3,
 #medical-screen h3,
+#market-screen h3,
 #player-detail-screen h3 {
   color: #0f172a;
 }
@@ -80,6 +83,7 @@ h1, h2, h3 { margin: 0 0 12px; }
 #standings-screen .subtitle,
 #college-screen .subtitle,
 #medical-screen .subtitle,
+#market-screen .subtitle,
 #player-detail-screen .subtitle {
   color: #475569;
 }

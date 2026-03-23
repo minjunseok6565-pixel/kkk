@@ -46,6 +46,7 @@ body:has(#main-screen.active) .app-shell {
 #college-screen,
 #college-bigboard-detail-screen,
 #medical-screen,
+#market-screen,
 #player-detail-screen {
   background: linear-gradient(150deg, rgba(29, 33, 44, 0.58), rgba(12, 14, 19, 0.82));
   border: 1px solid var(--card-border);
@@ -106,6 +107,7 @@ body:has(#training-screen.active) .app-shell,
 body:has(#standings-screen.active) .app-shell,
 body:has(#college-screen.active) .app-shell,
 body:has(#medical-screen.active) .app-shell,
+body:has(#market-screen.active) .app-shell,
 body:has(#player-detail-screen.active) .app-shell {
   width: 100%;
   max-width: none;
@@ -120,6 +122,7 @@ body:has(#player-detail-screen.active) .app-shell {
 #standings-screen,
 #college-screen,
 #medical-screen,
+#market-screen,
 #player-detail-screen {
   position: relative;
   left: 50%;
@@ -144,6 +147,7 @@ body:has(#player-detail-screen.active) .app-shell {
 #standings-screen > *,
 #college-screen > *,
 #medical-screen > *,
+#market-screen > *,
 #player-detail-screen > * {
   width: min(1680px, 96vw);
   margin-inline: auto;
