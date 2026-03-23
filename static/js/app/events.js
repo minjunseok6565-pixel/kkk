@@ -44,6 +44,12 @@ import { showMedicalScreen } from "../features/medical/medicalScreen.js";
 import { showTradeLabScreen } from "../features/tradeLab/tradeLabScreen.js";
 import { renderTrainingDetail } from "../features/training/trainingDetail.js";
 import {
+  activateTrainingTab,
+  onPlayerTrainingDraftChange,
+  savePlayerTrainingPlan,
+  selectPlayerForTraining,
+} from "../features/training/playerTrainingTab.js";
+import {
   advanceOffseasonDevStep,
   enterOffseasonFlow,
   handleCombineBackToOverview,
@@ -339,6 +345,29 @@ function bindEvents() {
   els.collegeScoutReportsModalBackdrop?.addEventListener("click", closeScoutReportsModal);
   els.trainingTypeButtons.querySelectorAll("button[data-training-type]").forEach((btn) => {
     btn.addEventListener("click", () => renderTrainingDetail(btn.dataset.trainingType).catch((e) => alert(e.message)));
+  });
+  els.teamTrainingTabBtn?.addEventListener("click", () => {
+    activateTrainingTab("team").catch((e) => alert(e.message));
+  });
+  els.playerTrainingTabBtn?.addEventListener("click", () => {
+    activateTrainingTab("player").catch((e) => alert(e.message));
+  });
+  els.playerTrainingList?.addEventListener("click", (event) => {
+    const target = event.target instanceof HTMLElement ? event.target.closest("button[data-player-training-select]") : null;
+    if (!target) return;
+    const playerId = String(target.dataset.playerTrainingSelect || "");
+    if (!playerId) return;
+    selectPlayerForTraining(playerId).catch((e) => alert(e.message));
+  });
+  els.playerTrainingDetail?.addEventListener("change", (event) => {
+    const target = event.target instanceof HTMLSelectElement ? event.target : null;
+    if (!target) return;
+    const field = String(target.dataset.playerTrainingField || "");
+    if (!field) return;
+    onPlayerTrainingDraftChange(field, target.value);
+  });
+  els.playerTrainingSaveBtn?.addEventListener("click", () => {
+    savePlayerTrainingPlan().catch((e) => alert(e.message));
   });
   els.backToMainBtn.addEventListener("click", () => showMainScreen());
   els.backToRosterBtn.addEventListener("click", () => {
