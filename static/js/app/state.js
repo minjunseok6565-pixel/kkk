@@ -79,6 +79,7 @@ const state = {
     dealHash: "",
   },
   marketNegotiation: null,
+  myTeamReSignNegotiation: null,
   marketTradeModalPlayerId: null,
   marketTradeModalOtherTeamId: null,
   marketTradeNegotiationSession: null,

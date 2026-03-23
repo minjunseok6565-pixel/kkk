@@ -25,6 +25,7 @@ import { TEAM_FULL_NAMES, applyTeamLogo, getTeamDisplayName } from "../../core/c
 import { reportTradeContractViolation } from "../../core/telemetry.js";
 import { loadPlayerDetail } from "../myteam/playerDetail.js";
 import { fetchTeamDetail, invalidateTeamDetailCache } from "../team/teamDetailCache.js";
+import { getSeasonStartYearFromSummary, buildFlatSalaryOffer } from "../contracts/offerBuilder.js";
 
 const MARKET_TRADE_INBOX_CACHE_TTL_MS = 30 * 1000;
 const MARKET_TRADE_BLOCK_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -2337,27 +2338,19 @@ async function refreshSelectedMarketPlayerDetail() {
 }
 
 function getSeasonYearFromSummary(summaryPayload) {
-  const ws = summaryPayload?.workflow_state || {};
-  const league = ws?.league || {};
-  const activeSeasonId = String(ws?.active_season_id || "");
-  const seasonIdYear = Number((activeSeasonId.match(/^(\d{4})-/) || [])[1] || 0);
-  const direct = Number(league?.season_year || ws?.season_year || seasonIdYear || 0);
-  if (Number.isFinite(direct) && direct > 0) return direct;
-  return new Date().getFullYear();
+  return getSeasonStartYearFromSummary(summaryPayload, 0);
 }
 
 function buildAutoFaOfferFromSession(session, seasonYear) {
   const pos = session?.player_position || {};
-  const years = Math.max(1, Math.min(5, Number(pos.ideal_years || 2)));
-  const aav = Math.max(750000, Math.round(Number(pos.ask_aav || 1000000)));
-  const salary_by_year = {};
-  for (let i = 0; i < years; i += 1) salary_by_year[seasonYear + i] = aav;
-  return {
-    start_season_year: seasonYear,
-    years,
-    salary_by_year,
-    options: [],
-  };
+  return buildFlatSalaryOffer({
+    startSeasonYear: seasonYear,
+    years: Number(pos.ideal_years || 2),
+    aav: Number(pos.ask_aav || 1000000),
+    minAav: 750000,
+    minYears: 1,
+    maxYears: 5,
+  });
 }
 
 async function startFaNegotiation(playerId) {
@@ -2384,6 +2377,9 @@ async function submitFaOfferAuto() {
   if (!current.session_id) throw new Error("먼저 FA 협상을 시작해주세요.");
   const summary = await fetchJson("/api/state/summary");
   const seasonYear = getSeasonYearFromSummary(summary);
+  if (!Number.isFinite(Number(seasonYear)) || Number(seasonYear) <= 0) {
+    throw new Error("현재 시즌 정보를 확인할 수 없어 오퍼를 생성할 수 없습니다.");
+  }
   const offerPayload = buildAutoFaOfferFromSession(current, seasonYear);
 
   const out = await fetchJson("/api/contracts/negotiation/offer", {

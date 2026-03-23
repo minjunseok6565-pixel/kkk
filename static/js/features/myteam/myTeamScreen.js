@@ -13,6 +13,7 @@ let myTeamRequestSeq = 0;
 function applyMyTeamDetail(detail, { resetSelection = true } = {}) {
   state.rosterRows = detail?.roster || [];
   if (resetSelection) state.selectedPlayerId = null;
+  if (resetSelection) state.myTeamReSignNegotiation = null;
 
   const teamName = state.selectedTeamName || TEAM_FULL_NAMES[state.selectedTeamId] || state.selectedTeamId;
   els.myTeamTitle.textContent = `${teamName} 선수단`;
@@ -196,6 +197,14 @@ function renderRosterRows(rows) {
     `;
 
     tr.addEventListener("click", () => {
+      const prevPlayerId = String(state.selectedPlayerId || "");
+      const nextPlayerId = String(row.player_id || "");
+      if (prevPlayerId && nextPlayerId && prevPlayerId !== nextPlayerId) {
+        const currentNegotiationPlayerId = String(state.myTeamReSignNegotiation?.player_id || "");
+        if (currentNegotiationPlayerId && currentNegotiationPlayerId !== nextPlayerId) {
+          state.myTeamReSignNegotiation = null;
+        }
+      }
       state.selectedPlayerId = row.player_id;
       loadPlayerDetail(row.player_id).catch((e) => alert(e.message));
     });

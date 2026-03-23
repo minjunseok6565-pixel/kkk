@@ -27,6 +27,7 @@ import { showTrainingScreen } from "../features/training/trainingScreen.js";
 import { showStandingsScreen } from "../features/standings/standingsScreen.js";
 import { showCollegeScreen, switchCollegeTab, ensureCollegeTabData } from "../features/college/collegeScreen.js";
 import { showMarketScreen, openMarketSubTab, openTradeBlockScope, handleMarketDetailAction } from "../features/market/marketScreen.js";
+import { handleMyTeamContractAction } from "../features/myteam/playerDetail.js";
 import { loadCollegeLeaders } from "../features/college/leaders.js";
 import { closeCollegeBigboardDetailScreen } from "../features/college/bigboard.js";
 import {
@@ -401,6 +402,14 @@ function bindEvents() {
     const action = String(target.dataset.marketAction || "");
     if (!action) return;
     handleMarketDetailAction(action).catch((e) => alert(e.message));
+  });
+
+  els.playerDetailContent?.addEventListener("click", (event) => {
+    const target = event.target instanceof HTMLElement ? event.target.closest("button[data-contract-action]") : null;
+    if (!target) return;
+    const action = String(target.dataset.contractAction || "");
+    if (!action) return;
+    handleMyTeamContractAction(action).catch((e) => alert(e.message));
   });
 
   if (els.myTeamSortControls) {

@@ -1,10 +1,22 @@
 import { state } from "../../app/state.js";
 import { els } from "../../app/dom.js";
 import { activateScreen } from "../../app/router.js";
-import { fetchJson, setLoading } from "../../core/api.js";
+import {
+  fetchJson,
+  setLoading,
+  fetchStateSummary,
+} from "../../core/api.js";
 import { num, clamp } from "../../core/guards.js";
 import { formatHeightIn, formatWeightLb, formatMoney, formatPercent, seasonLabelByYear, getOptionTypeLabel } from "../../core/format.js";
 import { renderSharpnessBadgeV2 } from "./myTeamScreen.js";
+import { getSeasonStartYearFromSummary } from "../contracts/offerBuilder.js";
+import {
+  startReSignNegotiation,
+  submitReSignOffer,
+  acceptReSignCounter,
+  commitReSign,
+  resolveCurrentSeasonStartYear,
+} from "../contracts/reSignNegotiation.js";
 
 function getDissatisfactionSummary(d) {
   if (!d || !d.is_dissatisfied) return { text: "불만: 없음", details: [] };
@@ -86,6 +98,47 @@ function buildContractRows(contractActive, fallbackSalary) {
   return rows.concat(outstandingOptionRows);
 }
 
+function getCurrentSeasonStartYear(detail, summary) {
+  const fromDetail = Number(detail?.contract?.current_season_start_year || 0);
+  if (Number.isFinite(fromDetail) && fromDetail > 0) return fromDetail;
+
+  const fromSummary = getSeasonStartYearFromSummary(summary, 0);
+  if (Number.isFinite(fromSummary) && fromSummary > 0) return fromSummary;
+
+  const fromContract = Number(detail?.contract?.active?.start_season_year || 0);
+  if (Number.isFinite(fromContract) && fromContract > 0) return fromContract;
+  return 0;
+}
+
+function getActiveContractEndStartYear(contractActive) {
+  if (!contractActive || typeof contractActive !== "object") return 0;
+  const salaryByYear = contractActive.salary_by_year || {};
+  const salaryYears = Object.keys(salaryByYear)
+    .map((y) => Number(y))
+    .filter((y) => Number.isFinite(y) && y > 0)
+    .sort((a, b) => a - b);
+  if (salaryYears.length) return salaryYears[salaryYears.length - 1];
+
+  const startYear = Number(contractActive.start_season_year || 0);
+  const years = Number(contractActive.years || 0);
+  if (Number.isFinite(startYear) && Number.isFinite(years) && startYear > 0 && years > 0) {
+    return Math.max(startYear, startYear + years - 1);
+  }
+  return 0;
+}
+
+function canOpenReSignNegotiation(detail, currentSeasonYear) {
+  const active = detail?.contract?.active || null;
+  if (!active) return false;
+  const teamId = String(detail?.roster?.team_id || "").toUpperCase();
+  if (!teamId || teamId === "FA") return false;
+  const now = Number(currentSeasonYear || 0);
+  const endYear = getActiveContractEndStartYear(active);
+  if (!Number.isFinite(now) || now <= 0) return false;
+  if (!Number.isFinite(endYear) || endYear <= 0) return false;
+  return endYear <= now + 1;
+}
+
 function attrCategoryKey(name) {
   const k = String(name || "").toLowerCase();
   if (["shot", "shoot", "free_throw", "layup", "inside", "outside", "close"].some((x) => k.includes(x))) return "Shooting";
@@ -138,6 +191,7 @@ function buildAttrIntelligence(attrs) {
 function renderPlayerDetail(detail, options = {}) {
   const context = String(options?.context || "myteam").toLowerCase();
   const isMarketFa = context === "market-fa";
+  const summaryPayload = options?.summaryPayload || null;
   const p = detail.player || {};
   const contract = detail.contract || {};
   const diss = getDissatisfactionSummary(detail.dissatisfaction);
@@ -148,6 +202,9 @@ function renderPlayerDetail(detail, options = {}) {
   const twoWay = detail.two_way || {};
   const contractActive = contract.active || null;
   const contractRows = buildContractRows(contractActive, detail.roster?.salary_amount);
+  const currentSeasonStartYear = getCurrentSeasonStartYear(detail, summaryPayload);
+  const contractEndStartYear = getActiveContractEndStartYear(contractActive);
+  const canStartReSign = canOpenReSignNegotiation(detail, currentSeasonStartYear);
   const dissatisfactionDescription = (detail.dissatisfaction?.reasons || []).length
     ? detail.dissatisfaction.reasons
     : diss.details;
@@ -198,6 +255,21 @@ function renderPlayerDetail(detail, options = {}) {
   const canCommitFa = marketMode === "SIGN_FA" && isActive && isAccepted;
   const canTwoWayDecision = marketMode === "SIGN_TWO_WAY" && isActive && isNegotiating;
   const canCommitTwoWay = marketMode === "SIGN_TWO_WAY" && isActive && isAccepted;
+  const myTeamNegotiation = (!isMarketFa && state.myTeamReSignNegotiation && state.myTeamReSignNegotiation.player_id === p.player_id)
+    ? state.myTeamReSignNegotiation
+    : null;
+  const myTeamMode = String(myTeamNegotiation?.mode || "").toUpperCase();
+  const myTeamPhase = String(myTeamNegotiation?.phase || "").toUpperCase();
+  const myTeamStatus = String(myTeamNegotiation?.status || "").toUpperCase();
+  const myTeamVerdict = String(myTeamNegotiation?.last_decision?.verdict || "").toUpperCase();
+  const myTeamActive = myTeamStatus === "ACTIVE";
+  const myTeamNegotiating = myTeamPhase === "INIT" || myTeamPhase === "NEGOTIATING";
+  const myTeamAccepted = myTeamPhase === "ACCEPTED";
+  const canSubmitReSignOffer = myTeamMode === "RE_SIGN" && myTeamActive && myTeamNegotiating;
+  const canAcceptReSignCounter = canSubmitReSignOffer && Boolean(myTeamNegotiation?.last_counter);
+  const canCommitReSign = myTeamMode === "RE_SIGN" && myTeamActive && myTeamAccepted;
+  const defaultAskAav = Math.max(750000, Math.round(Number(myTeamNegotiation?.player_position?.ask_aav || 0)));
+  const defaultIdealYears = Math.max(1, Math.min(5, Number(myTeamNegotiation?.player_position?.ideal_years || 1)));
 
   const marketRulesHtml = isMarketFa
     ? `
@@ -261,6 +333,56 @@ function renderPlayerDetail(detail, options = {}) {
     })()
     : "";
 
+  const reSignActionHtml = !isMarketFa
+    ? (() => {
+      if (!myTeamNegotiation) {
+        return `
+          <div class="contract-track-actions">
+            <button
+              type="button"
+              class="btn btn-primary"
+              data-contract-action="start-resign"
+              data-contract-end-year="${contractEndStartYear || ""}"
+              data-current-season-year="${currentSeasonStartYear || ""}"
+              ${canStartReSign ? "" : "disabled aria-disabled=\"true\""}
+            >재계약 제의</button>
+          </div>
+          <p class="section-note contract-track-hint">${canStartReSign ? "재계약 협상을 시작할 수 있습니다." : "계약 만료 1년 전부터 제의 가능"}</p>
+        `;
+      }
+      return `
+        <div class="contract-track-actions">
+          <button type="button" class="btn btn-primary" data-contract-action="offer-resign-auto" ${canSubmitReSignOffer ? "" : "disabled aria-disabled=\"true\""}>그대로 제안</button>
+          <button type="button" class="btn btn-secondary" data-contract-action="accept-resign-counter" ${canAcceptReSignCounter ? "" : "disabled aria-disabled=\"true\""}>카운터 수락</button>
+          <button type="button" class="btn btn-primary" data-contract-action="commit-resign" ${canCommitReSign ? "" : "disabled aria-disabled=\"true\""}>재계약 확정</button>
+        </div>
+        <div class="contract-track-actions">
+          <label class="section-note">AAV
+            <input type="number" data-contract-input="aav" min="750000" step="50000" value="${defaultAskAav}">
+          </label>
+          <label class="section-note">연차
+            <input type="number" data-contract-input="years" min="1" max="5" step="1" value="${defaultIdealYears}">
+          </label>
+          <button type="button" class="btn btn-secondary" data-contract-action="offer-resign-custom" ${canSubmitReSignOffer ? "" : "disabled aria-disabled=\"true\""}>조정 제안</button>
+        </div>
+      `;
+    })()
+    : "";
+
+  const reSignStatusHtml = !isMarketFa
+    ? `
+      <ul class="compact-kv-list">
+        <li><span>재계약 협상</span><strong>${myTeamMode || "-"}</strong></li>
+        <li><span>진행 상태</span><strong>${myTeamPhase || "-"} / ${myTeamStatus || "-"}</strong></li>
+        <li><span>최근 응답</span><strong>${myTeamVerdict || "-"}</strong></li>
+        <li><span>희망 연봉(AAV)</span><strong>${myTeamNegotiation?.player_position?.ask_aav ? formatMoney(myTeamNegotiation.player_position.ask_aav) : "-"}</strong></li>
+        <li><span>희망 계약 기간</span><strong>${myTeamNegotiation?.player_position?.ideal_years ? `${num(myTeamNegotiation.player_position.ideal_years, 0)}년` : "-"}</strong></li>
+      </ul>
+      ${myTeamNegotiation?.info ? `<p class="section-copy status-ok">${myTeamNegotiation.info}</p>` : ""}
+      ${myTeamNegotiation?.error ? `<p class="section-copy status-danger">${myTeamNegotiation.error}</p>` : ""}
+    `
+    : "";
+
   els.playerDetailTitle.textContent = `${playerName} 상세 정보`;
   els.playerDetailContent.innerHTML = `
     <div class="player-layout player-layout-v2">
@@ -286,6 +408,8 @@ function renderPlayerDetail(detail, options = {}) {
           ${contractRows.map((row) => `<li><span>${row.label}</span><strong${row.emphasis ? ' class="text-accent"' : ""}>${row.value}</strong></li>`).join("")}
         </ul>
         ${twoWay.is_two_way ? `<p class="section-note">투웨이 계약 · 남은 경기 ${num(twoWay.games_remaining, 0)} / ${num(twoWay.game_limit, 0)}</p>` : ""}
+        ${reSignStatusHtml}
+        ${reSignActionHtml}
       </section>
 
       <section class="detail-card detail-card-dissatisfaction">
@@ -341,12 +465,101 @@ async function loadPlayerDetail(playerId, options = {}) {
   state.playerDetailBackTarget = backTarget === "market" ? "market" : "myteam";
   setLoading(true, "선수 상세 정보를 불러오는 중...");
   try {
-    const detail = await fetchJson(`/api/player-detail/${encodeURIComponent(playerId)}`);
-    renderPlayerDetail(detail, options);
+    const [detail, summaryPayload] = await Promise.all([
+      fetchJson(`/api/player-detail/${encodeURIComponent(playerId)}`),
+      fetchStateSummary().catch(() => null),
+    ]);
+    renderPlayerDetail(detail, {
+      ...options,
+      summaryPayload,
+    });
     activateScreen(els.playerDetailScreen);
   } finally {
     setLoading(false);
   }
 }
 
-export { getDissatisfactionSummary, renderAttrGrid, buildContractRows, attrCategoryKey, buildAttrIntelligence, renderPlayerDetail, loadPlayerDetail };
+async function handleMyTeamContractAction(action) {
+  const act = String(action || "").trim().toLowerCase();
+  const playerId = String(state.selectedPlayerId || "").trim();
+  if (!playerId) throw new Error("선수를 먼저 선택해주세요.");
+  if (!state.selectedTeamId) throw new Error("팀을 먼저 선택해주세요.");
+
+  const current = state.myTeamReSignNegotiation || {};
+
+  const refresh = async () => {
+    await loadPlayerDetail(playerId, { backTarget: "myteam" });
+  };
+
+  try {
+    setLoading(true, "재계약 협상 진행 중...");
+
+    if (act === "start-resign") {
+      const endYear = Number(els.playerDetailContent?.querySelector('[data-contract-action=\"start-resign\"]')?.dataset?.contractEndYear || 0);
+      const seasonYear = Number(els.playerDetailContent?.querySelector('[data-contract-action=\"start-resign\"]')?.dataset?.currentSeasonYear || 0);
+      state.myTeamReSignNegotiation = await startReSignNegotiation(playerId, {
+        teamId: state.selectedTeamId,
+        contractEndStartYear: endYear,
+        currentSeasonStartYear: seasonYear,
+      });
+    } else if (act === "offer-resign-auto" || act === "offer-resign-custom") {
+      if (!current?.session_id) throw new Error("진행 중인 재계약 협상이 없습니다.");
+      const currentSeasonYear = await resolveCurrentSeasonStartYear();
+      const askAav = Number(current?.player_position?.ask_aav || 0);
+      const idealYears = Number(current?.player_position?.ideal_years || 1);
+
+      const inputAav = Number(els.playerDetailContent?.querySelector('input[data-contract-input=\"aav\"]')?.value || askAav || 0);
+      const inputYears = Number(els.playerDetailContent?.querySelector('input[data-contract-input=\"years\"]')?.value || idealYears || 1);
+      const selectedAav = act === "offer-resign-auto" ? askAav : inputAav;
+      const selectedYears = act === "offer-resign-auto" ? idealYears : inputYears;
+      const result = await submitReSignOffer({
+        session: current,
+        seasonYear: currentSeasonYear,
+        aav: selectedAav,
+        years: selectedYears,
+        playerId,
+      });
+      state.myTeamReSignNegotiation = {
+        ...result.session,
+        info: act === "offer-resign-auto" ? "선수 희망 조건으로 제안했습니다." : "조정된 조건으로 제안했습니다.",
+      };
+    } else if (act === "accept-resign-counter") {
+      if (!current?.session_id) throw new Error("진행 중인 재계약 협상이 없습니다.");
+      state.myTeamReSignNegotiation = await acceptReSignCounter(current.session_id, {
+        playerId,
+      });
+    } else if (act === "commit-resign") {
+      if (!current?.session_id) throw new Error("확정 가능한 재계약 협상이 없습니다.");
+      state.myTeamReSignNegotiation = await commitReSign(current, {
+        teamId: state.selectedTeamId,
+        playerId,
+      });
+    } else {
+      return;
+    }
+  } catch (e) {
+    state.myTeamReSignNegotiation = {
+      ...(state.myTeamReSignNegotiation || {}),
+      error: e?.message || "재계약 협상 처리에 실패했습니다.",
+      info: null,
+    };
+    throw e;
+  } finally {
+    setLoading(false);
+    await refresh();
+  }
+}
+
+export {
+  getDissatisfactionSummary,
+  renderAttrGrid,
+  buildContractRows,
+  getCurrentSeasonStartYear,
+  getActiveContractEndStartYear,
+  canOpenReSignNegotiation,
+  attrCategoryKey,
+  buildAttrIntelligence,
+  renderPlayerDetail,
+  loadPlayerDetail,
+  handleMyTeamContractAction,
+};

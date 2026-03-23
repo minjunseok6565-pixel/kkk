@@ -252,6 +252,92 @@ async function submitCommittedTradeDeal({ dealId, force = true, signal = undefin
   });
 }
 
+async function startContractNegotiation({ teamId, playerId, mode = "SIGN_FA", validDays = undefined, signal = undefined } = {}) {
+  const normalizedTeamId = String(teamId || "").trim().toUpperCase();
+  const normalizedPlayerId = String(playerId || "").trim();
+  const normalizedMode = String(mode || "SIGN_FA").trim().toUpperCase();
+  if (!normalizedTeamId) throw new Error("team_id가 필요합니다.");
+  if (!normalizedPlayerId) throw new Error("player_id가 필요합니다.");
+  if (!normalizedMode) throw new Error("mode가 필요합니다.");
+  const payload = {
+    team_id: normalizedTeamId,
+    player_id: normalizedPlayerId,
+    mode: normalizedMode,
+  };
+  if (Number.isFinite(Number(validDays)) && Number(validDays) > 0) {
+    payload.valid_days = Number(validDays);
+  }
+  return fetchJson("/api/contracts/negotiation/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+async function submitContractNegotiationOffer({ sessionId, offer, signal = undefined } = {}) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) throw new Error("session_id가 필요합니다.");
+  if (!offer || typeof offer !== "object") throw new Error("offer payload가 필요합니다.");
+  return fetchJson("/api/contracts/negotiation/offer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: normalizedSessionId,
+      offer,
+    }),
+    signal,
+  });
+}
+
+async function acceptContractNegotiationCounter({ sessionId, signal = undefined } = {}) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) throw new Error("session_id가 필요합니다.");
+  return fetchJson("/api/contracts/negotiation/accept-counter", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: normalizedSessionId }),
+    signal,
+  });
+}
+
+async function commitReSignOrExtend({ sessionId, teamId, playerId, signedDate = undefined, signal = undefined } = {}) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  const normalizedTeamId = String(teamId || "").trim().toUpperCase();
+  const normalizedPlayerId = String(playerId || "").trim();
+  if (!normalizedSessionId) throw new Error("session_id가 필요합니다.");
+  if (!normalizedTeamId) throw new Error("team_id가 필요합니다.");
+  if (!normalizedPlayerId) throw new Error("player_id가 필요합니다.");
+  const payload = {
+    session_id: normalizedSessionId,
+    team_id: normalizedTeamId,
+    player_id: normalizedPlayerId,
+  };
+  if (String(signedDate || "").trim()) {
+    payload.signed_date = String(signedDate).trim();
+  }
+  return fetchJson("/api/contracts/re-sign-or-extend", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+async function cancelContractNegotiation({ sessionId, reason = "", signal = undefined } = {}) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) throw new Error("session_id가 필요합니다.");
+  return fetchJson("/api/contracts/negotiation/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: normalizedSessionId,
+      reason: String(reason || "").trim() || null,
+    }),
+    signal,
+  });
+}
+
 async function fetchStateSummary({ signal = undefined } = {}) {
   return fetchJson("/api/state/summary", { signal });
 }
@@ -657,6 +743,11 @@ export {
   rejectTradeNegotiationSession,
   commitTradeNegotiationSession,
   submitCommittedTradeDeal,
+  startContractNegotiation,
+  submitContractNegotiationOffer,
+  acceptContractNegotiationCounter,
+  commitReSignOrExtend,
+  cancelContractNegotiation,
   fetchStateSummary,
   fetchHomeAttention,
   fetchTradeLabTeamAssets,

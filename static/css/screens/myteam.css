@@ -402,3 +402,51 @@
   border: 1px solid rgba(148, 163, 184, 0.38);
   box-shadow: 0 16px 34px rgba(15, 23, 42, 0.1);
 }
+
+/* ===== Contract Track: Re-sign negotiation actions ===== */
+#player-detail-screen .contract-track-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+}
+
+#player-detail-screen .contract-track-hint {
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+#player-detail-screen .contract-track-actions .section-note {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+#player-detail-screen .contract-track-actions input[data-contract-input] {
+  width: 126px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: #ffffff;
+  color: #0f172a;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+}
+
+#player-detail-screen .contract-track-actions input[data-contract-input]:focus {
+  outline: 2px solid rgba(59, 130, 246, 0.26);
+  border-color: rgba(59, 130, 246, 0.62);
+}
+
+#player-detail-screen .contract-track-actions .btn[disabled],
+#player-detail-screen .contract-track-actions .btn[aria-disabled="true"] {
+  opacity: 0.56;
+  filter: saturate(0.75);
+  cursor: not-allowed;
+}
