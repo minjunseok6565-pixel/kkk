@@ -1641,7 +1641,15 @@ async function loadMarketTradeInbox({ force = false, reason = "" } = {}) {
         endpoint: String(violation?.endpoint || "/api/trade/negotiation/inbox"),
       }));
     });
-    hydrateMarketTradeInboxPlayerDirectory(rows).catch(() => {});
+    hydrateMarketTradeInboxPlayerDirectory(rows)
+      .then(() => {
+        if (!shouldApplyResponseForScope("tradeInbox", requestCtx.requestId, requestCtx.sessionId, { requireModalOpen: false })) {
+          return;
+        }
+        if (state.marketSubTab !== "trade-inbox") return;
+        renderMarketTradeInbox();
+      })
+      .catch(() => {});
     state.marketTradeInboxRows = rows;
     state.marketTradeInboxGrouped = groupInboxRowsByOtherTeam(rows);
     state.marketTradeInboxLastLoadedAt = Date.now();
