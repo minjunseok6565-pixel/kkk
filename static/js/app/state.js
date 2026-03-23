@@ -26,7 +26,9 @@ const state = {
   marketTradeBlockScope: "other",
   marketTradeBlockMyRows: [],
   marketTradeBlockRosterRows: [],
-  marketTradeBlockSelectedRosterPlayerId: null,
+  // 트레이드 블록 등록 모달 다중 선택 상태.
+  // 모달 오픈 시, 등록 성공 후 빈 배열로 초기화한다.
+  marketTradeBlockSelectedRosterPlayerIds: [],
   marketTradeBlockRosterModalOpen: false,
   marketTradeBlockRosterModalBound: false,
   marketTradeInboxRows: [],

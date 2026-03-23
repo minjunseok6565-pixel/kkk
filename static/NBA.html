@@ -1277,14 +1277,19 @@
 
   <div id="market-trade-block-roster-modal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="market-trade-block-roster-modal-title">
     <div id="market-trade-block-roster-modal-backdrop" class="confirm-modal-backdrop"></div>
-    <article class="confirm-modal-panel">
-      <p class="confirm-modal-eyebrow">TRADE BLOCK REGISTRATION</p>
-      <h3 id="market-trade-block-roster-modal-title" class="confirm-modal-title">선수 등록</h3>
-      <p id="market-trade-block-roster-modal-body" class="confirm-modal-body">등록할 선수를 선택하세요.</p>
-      <div id="market-trade-block-roster-list" class="college-scout-options-list"></div>
-      <div class="confirm-modal-actions">
+    <article class="confirm-modal-panel market-trade-block-roster-panel">
+      <header class="market-trade-block-roster-head">
+        <p class="confirm-modal-eyebrow">TRADE BLOCK REGISTRATION</p>
+        <h3 id="market-trade-block-roster-modal-title" class="confirm-modal-title">선수 등록</h3>
+        <p id="market-trade-block-roster-modal-body" class="confirm-modal-body">등록할 선수를 선택하세요.</p>
+        <p id="market-trade-block-roster-selection-count" class="market-trade-block-roster-selection-count" aria-live="polite">선택된 선수 0명</p>
+      </header>
+      <section class="market-trade-block-roster-list-wrap" aria-label="트레이드 블록 등록 선수 목록">
+        <div id="market-trade-block-roster-list" class="college-scout-options-list" role="listbox" aria-multiselectable="true"></div>
+      </section>
+      <div class="confirm-modal-actions market-trade-block-roster-actions">
         <button id="market-trade-block-roster-modal-cancel" type="button" class="btn btn-secondary">닫기</button>
-        <button id="market-trade-block-roster-modal-confirm" type="button" class="btn btn-primary">등록</button>
+        <button id="market-trade-block-roster-modal-confirm" type="button" class="btn btn-primary">선택 선수 등록</button>
       </div>
     </article>
   </div>
