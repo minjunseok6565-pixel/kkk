@@ -171,6 +171,12 @@
   background: linear-gradient(180deg, #eff6ff, #dbeafe);
 }
 
+#main-screen .next-game-action-btn.is-dev-offseason {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(255, 251, 235, 0.75);
+  color: #92400e;
+}
+
 .home-kpi-strip {
   margin-top: 16px;
   display: grid;

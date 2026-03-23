@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+import json
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
@@ -24,7 +25,9 @@ from app.schemas.draft import (
 from app.schemas.offseason import (
     AgencyEventRespondRequest,
     AgencyUserActionRequest,
+    OffseasonExpiredContractsRequest,
     OffseasonContractsProcessRequest,
+    OffseasonPlayerOptionResultsRequest,
     TeamOptionDecideRequest,
     TeamOptionPendingRequest,
 )
@@ -33,6 +36,18 @@ from app.services.contract_facade import _validate_repo_integrity
 from team_utils import ui_cache_refresh_players, ui_cache_rebuild_all
 
 router = APIRouter()
+
+
+def _safe_json_loads(value: Any, fallback: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if not value:
+        return fallback
+    try:
+        loaded = json.loads(value)
+        return loaded
+    except Exception:
+        return fallback
 
 
 
@@ -237,6 +252,241 @@ async def api_offseason_contracts_process(req: OffseasonContractsProcessRequest)
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/api/offseason/contracts/expired")
+async def api_offseason_contracts_expired(req: OffseasonExpiredContractsRequest):
+    """오프시즌 진입 직전 시즌으로 계약이 끝난 선수 목록 조회.
+
+    Definition:
+    - state.season_year를 from_year라 할 때, end_exclusive_year == from_year + 1 인 계약
+    - 즉 "from_year 시즌까지만" 유효했던 계약(예: 2025-26까지만 계약)
+    """
+    league_ctx = state.get_league_context_snapshot() or {}
+    try:
+        from_year = int(league_ctx.get("season_year") or 0)
+    except Exception:
+        from_year = 0
+    if from_year <= 0:
+        raise HTTPException(status_code=500, detail="Invalid season_year in state.")
+
+    to_year = from_year + 1
+    team_id = normalize_team_id(req.team_id)
+    if not team_id:
+        raise HTTPException(status_code=400, detail="Invalid team_id.")
+
+    try:
+        rows: List[Dict[str, Any]] = []
+        db_path = state.get_db_path()
+        with LeagueRepo(db_path) as repo:
+            repo.init_db()
+            cur = repo._conn.execute(
+                """
+                SELECT
+                    c.contract_id,
+                    c.player_id,
+                    c.team_id,
+                    c.start_season_year,
+                    c.years,
+                    c.status,
+                    c.is_active,
+                    c.salary_by_season_json,
+                    c.options_json,
+                    p.name AS player_name,
+                    p.pos AS player_pos,
+                    p.age AS player_age,
+                    r.team_id AS roster_team_id,
+                    r.status AS roster_status
+                FROM contracts c
+                JOIN players p ON p.player_id = c.player_id
+                LEFT JOIN roster r ON r.player_id = c.player_id
+                WHERE UPPER(COALESCE(c.team_id, '')) = ?
+                ORDER BY p.name ASC, c.contract_id ASC
+                """,
+                (str(team_id),),
+            )
+            for raw in cur.fetchall():
+                row = dict(raw)
+                try:
+                    start_year = int(row.get("start_season_year") or 0)
+                    years = int(row.get("years") or 0)
+                except Exception:
+                    continue
+                if start_year <= 0 or years <= 0:
+                    continue
+
+                end_exclusive_year = start_year + years
+                if end_exclusive_year != to_year:
+                    continue
+
+                salary_by_year = _safe_json_loads(row.get("salary_by_season_json"), {})
+                options = _safe_json_loads(row.get("options_json"), [])
+                roster_team_id = str(row.get("roster_team_id") or "").upper() or None
+
+                rows.append(
+                    {
+                        "contract_id": str(row.get("contract_id") or ""),
+                        "player_id": str(row.get("player_id") or ""),
+                        "player_name": str(row.get("player_name") or ""),
+                        "player_pos": row.get("player_pos"),
+                        "player_age": row.get("player_age"),
+                        "team_id": str(team_id),
+                        "start_season_year": int(start_year),
+                        "end_season_year": int(to_year - 1),
+                        "end_exclusive_year": int(end_exclusive_year),
+                        "contract_status": str(row.get("status") or ""),
+                        "is_active": bool(row.get("is_active")),
+                        "salary_by_year": salary_by_year if isinstance(salary_by_year, dict) else {},
+                        "options": options if isinstance(options, list) else [],
+                        "current_roster_team_id": roster_team_id,
+                        "current_roster_status": row.get("roster_status"),
+                        "is_currently_fa": bool(roster_team_id == "FA"),
+                    }
+                )
+
+        return {
+            "ok": True,
+            "team_id": str(team_id),
+            "from_season_year": int(from_year),
+            "offseason_year": int(to_year),
+            "count": int(len(rows)),
+            "expired_contract_players": rows,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list expired contracts: {e}")
+
+
+@router.post("/api/offseason/options/player/results")
+async def api_offseason_player_option_results(req: OffseasonPlayerOptionResultsRequest):
+    """다음 시즌 PLAYER/ETO 옵션 처리 결과 조회.
+
+    - season_year(to_year) 옵션 중 type in {PLAYER, ETO}를 조회
+    - status in {EXERCISED, DECLINED} 결과를 기본 반환
+    - include_pending=True 면 PENDING도 함께 반환
+    """
+    league_ctx = state.get_league_context_snapshot() or {}
+    try:
+        from_year = int(league_ctx.get("season_year") or 0)
+    except Exception:
+        from_year = 0
+    if from_year <= 0:
+        raise HTTPException(status_code=500, detail="Invalid season_year in state.")
+
+    to_year = from_year + 1
+    team_id = normalize_team_id(req.team_id)
+    if not team_id:
+        raise HTTPException(status_code=400, detail="Invalid team_id.")
+
+    include_pending = bool(req.include_pending)
+
+    try:
+        out_rows: List[Dict[str, Any]] = []
+        db_path = state.get_db_path()
+        with LeagueRepo(db_path) as repo:
+            repo.init_db()
+
+            meta_row = repo._conn.execute(
+                "SELECT value FROM meta WHERE key=?;",
+                (f"contracts_offseason_done_{to_year}",),
+            ).fetchone()
+            contracts_processed = bool(meta_row and str(meta_row[0] or "") not in {"", "0", "false", "False"})
+
+            cur = repo._conn.execute(
+                """
+                SELECT
+                    c.contract_id,
+                    c.player_id,
+                    c.team_id,
+                    c.salary_by_season_json,
+                    c.options_json,
+                    p.name AS player_name,
+                    p.pos AS player_pos,
+                    p.age AS player_age,
+                    r.team_id AS roster_team_id,
+                    r.status AS roster_status
+                FROM contracts c
+                JOIN players p ON p.player_id = c.player_id
+                LEFT JOIN roster r ON r.player_id = c.player_id
+                WHERE UPPER(COALESCE(c.team_id, '')) = ?
+                ORDER BY p.name ASC, c.contract_id ASC
+                """,
+                (str(team_id),),
+            )
+
+            for raw in cur.fetchall():
+                row = dict(raw)
+                options = _safe_json_loads(row.get("options_json"), [])
+                if not isinstance(options, list) or not options:
+                    continue
+
+                salary_by_year = _safe_json_loads(row.get("salary_by_season_json"), {})
+                roster_team_id = str(row.get("roster_team_id") or "").upper() or None
+
+                for opt in options:
+                    if not isinstance(opt, dict):
+                        continue
+                    try:
+                        opt_year = int(opt.get("season_year") or 0)
+                    except Exception:
+                        continue
+                    if opt_year != to_year:
+                        continue
+
+                    opt_type = str(opt.get("type") or "").upper()
+                    if opt_type not in {"PLAYER", "ETO"}:
+                        continue
+
+                    opt_status = str(opt.get("status") or "").upper() or "PENDING"
+                    if not include_pending and opt_status == "PENDING":
+                        continue
+
+                    if opt_status == "EXERCISED":
+                        expected_effect = "REMAIN_ON_TEAM"
+                    elif opt_status == "DECLINED":
+                        expected_effect = "BECOME_FA"
+                    else:
+                        expected_effect = "UNDECIDED"
+
+                    out_rows.append(
+                        {
+                            "contract_id": str(row.get("contract_id") or ""),
+                            "player_id": str(row.get("player_id") or ""),
+                            "player_name": str(row.get("player_name") or ""),
+                            "player_pos": row.get("player_pos"),
+                            "player_age": row.get("player_age"),
+                            "team_id": str(team_id),
+                            "season_year": int(to_year),
+                            "option_type": opt_type,
+                            "option_status": opt_status,
+                            "option_decision_date": opt.get("decision_date"),
+                            "option_salary": (
+                                salary_by_year.get(str(to_year))
+                                if isinstance(salary_by_year, dict)
+                                else None
+                            ),
+                            "expected_effect": expected_effect,
+                            "current_roster_team_id": roster_team_id,
+                            "current_roster_status": row.get("roster_status"),
+                            "is_currently_fa": bool(roster_team_id == "FA"),
+                        }
+                    )
+
+        return {
+            "ok": True,
+            "team_id": str(team_id),
+            "from_season_year": int(from_year),
+            "option_season_year": int(to_year),
+            "contracts_offseason_processed": bool(contracts_processed),
+            "include_pending": include_pending,
+            "count": int(len(out_rows)),
+            "player_option_results": out_rows,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list PLAYER option results: {e}")
 
 
 @router.post("/api/offseason/retirement/preview")
