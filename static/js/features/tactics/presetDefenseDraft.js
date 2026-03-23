@@ -114,6 +114,35 @@ function sanitizePresetDefenseDraft(raw) {
   return d;
 }
 
+function summarizePresetDefenseDraft(raw) {
+  const d = sanitizePresetDefenseDraft(raw);
+  let tunedActionCount = 0;
+  let strongActionCount = 0;
+  let topBudgetAction = PRESET_DEFENSE_ACTION_KEYS[0] || "";
+  let topBudgetValue = -1;
+
+  PRESET_DEFENSE_ACTION_KEYS.forEach((action) => {
+    const side = String(d.actionPolicies?.[action]?.side || PRESET_DEFENSE_POLICY_SIDE.NEUTRAL);
+    const level = String(d.actionPolicies?.[action]?.level || PRESET_DEFENSE_POLICY_LEVEL.NORMAL);
+    const budget = Number(d.actionBudget?.[action]) || 0;
+
+    if (side !== PRESET_DEFENSE_POLICY_SIDE.NEUTRAL) tunedActionCount += 1;
+    if (side !== PRESET_DEFENSE_POLICY_SIDE.NEUTRAL && level === PRESET_DEFENSE_POLICY_LEVEL.STRONG) strongActionCount += 1;
+    if (budget > topBudgetValue) {
+      topBudgetValue = budget;
+      topBudgetAction = action;
+    }
+  });
+
+  return {
+    tunedActionCount,
+    strongActionCount,
+    topBudgetAction,
+    topBudgetValue: Math.max(0, topBudgetValue),
+    pressureLevel: Number(d.pressureLevel) || 0,
+  };
+}
+
 export {
   PRESET_DEFENSE_ACTION_KEYS,
   PRESET_DEFENSE_POLICY_SIDE,
@@ -121,4 +150,5 @@ export {
   createDefaultPresetDefenseDraft,
   clonePresetDefenseDraft,
   sanitizePresetDefenseDraft,
+  summarizePresetDefenseDraft,
 };

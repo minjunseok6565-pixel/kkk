@@ -23,6 +23,7 @@ import {
 import {
   createDefaultPresetDefenseDraft,
   sanitizePresetDefenseDraft,
+  summarizePresetDefenseDraft,
 } from "./presetDefenseDraft.js";
 import {
   compilePresetDefenseDraft,
@@ -52,6 +53,9 @@ function updatePresetDefenseButtonVisibility() {
   if (!els.presetDefenseOpenBtn || !state.tacticsDraft) return;
   const isPreset = String(state.tacticsDraft.defenseScheme) === "Preset_Defense";
   els.presetDefenseOpenBtn.classList.toggle("hidden", !isPreset);
+  if (!isPreset && els.presetDefenseErrors) {
+    els.presetDefenseErrors.textContent = "";
+  }
 }
 
 function openPresetOffenseModal() {
@@ -71,8 +75,9 @@ function openPresetDefenseModal() {
   openPresetDefenseModalUi(state.presetDefenseDraft, (nextDraft, validation) => {
     state.presetDefenseDraft = sanitizePresetDefenseDraft(nextDraft);
     if (els.presetDefenseErrors) {
+      const summary = summarizePresetDefenseDraft(state.presetDefenseDraft);
       const warn = validation?.warnings?.length ? ` (자동 조정 ${validation.warnings.length}건)` : "";
-      els.presetDefenseErrors.textContent = `프리셋 수비 설정이 적용되었습니다. 전술 저장을 눌러 반영하세요.${warn}`;
+      els.presetDefenseErrors.textContent = `프리셋 수비 설정 적용: 세부 설정 ${summary.tunedActionCount}개, 강억제 ${summary.strongActionCount}개, 최대 버짓 ${summary.topBudgetAction} ${summary.topBudgetValue}. 전술 저장을 눌러 반영하세요.${warn}`;
     }
     markTacticsDirty();
   });

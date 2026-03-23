@@ -11,6 +11,7 @@ import { PRESET_DEFENSE_ACTION_TABLE } from "./presetDefenseCompiler.js";
 let currentDraft = createDefaultPresetDefenseDraft();
 let onApplyHandler = null;
 let isBound = false;
+let expandedActions = new Set();
 
 const PRESET_DEFENSE_GROUP_NAMES = {
   Cut: { A: "직접 마무리", B: "컷 파생" },
@@ -106,8 +107,8 @@ function _groupLabel(action, groupKey) {
 
 function _renderBudgetRow(action, value) {
   return `
-    <label class="preset-defense-budget-row">
-      <span>${_actionLabel(action)}</span>
+    <label class="preset-defense-budget-control">
+      <span>액션 버짓</span>
       <input type="range" min="0" max="100" value="${Number(value) || 0}" data-defense-budget="${action}" />
       <strong>${Number(value) || 0}</strong>
     </label>
@@ -119,8 +120,8 @@ function _renderPolicyRow(action, policy) {
   const level = String(policy?.level || PRESET_DEFENSE_POLICY_LEVEL.NORMAL);
   const showLevel = side !== PRESET_DEFENSE_POLICY_SIDE.NEUTRAL;
   return `
-    <div class="preset-defense-policy-row" role="group" aria-label="${_actionLabel(action)} 정책">
-      <h4>${_actionLabel(action)}</h4>
+    <div class="preset-defense-policy-block" role="group" aria-label="${_actionLabel(action)} 세부 설정">
+      <h4 class="preset-defense-policy-title">${_actionLabel(action)} 세부 묶음 선택</h4>
       <div class="preset-defense-policy-choices">
         <button type="button" data-defense-side="${action}:A" class="${side === "A" ? "is-active" : ""}">
           ${_groupLabel(action, "A")} 억제 + ${_groupLabel(action, "B")} 허용
@@ -144,15 +145,46 @@ function _renderPolicyRow(action, policy) {
 
 function _renderPressure(level) {
   return `
-    <label class="preset-defense-pressure-row">
-      <span>전역 압박 강도 (${Number(level) || 0})</span>
-      <input type="range" min="-2" max="2" step="1" value="${Number(level) || 0}" data-defense-pressure="1" />
-      <small>-2(약) / 0(중립) / +2(강)</small>
-    </label>
+    <section class="preset-defense-pressure-section">
+      <h3 class="preset-defense-pressure-title">전역 압박</h3>
+      <label class="preset-defense-pressure-row">
+        <span>전역 압박 강도 (${Number(level) || 0})</span>
+        <input type="range" min="-2" max="2" step="1" value="${Number(level) || 0}" data-defense-pressure="1" />
+        <small>-2(약) / 0(중립) / +2(강)</small>
+      </label>
+    </section>
   `;
 }
 
-function renderPresetDefenseModal(draft, validation = null) {
+function _renderActionItem(action, draft, isExpanded) {
+  const actionId = String(action || "").replaceAll(/[^a-zA-Z0-9_-]/g, "-");
+  return `
+    <article class="preset-defense-action-item ${isExpanded ? "is-expanded" : ""}" data-defense-action-item="${action}" aria-expanded="${isExpanded ? "true" : "false"}">
+      <div class="preset-defense-action-head">
+        <button type="button" class="preset-defense-action-toggle" data-defense-toggle="${action}" aria-expanded="${isExpanded ? "true" : "false"}" aria-controls="preset-defense-detail-${actionId}">
+          <h4 class="preset-defense-action-title">${_actionLabel(action)}</h4>
+          <span class="preset-defense-action-meta">${isExpanded ? "세부 설정 닫기" : "세부 설정 열기"}</span>
+        </button>
+        ${_renderBudgetRow(action, draft.actionBudget?.[action])}
+      </div>
+      <div id="preset-defense-detail-${actionId}" class="preset-defense-action-detail" aria-hidden="${isExpanded ? "false" : "true"}">
+        ${_renderPolicyRow(action, draft.actionPolicies?.[action])}
+      </div>
+    </article>
+  `;
+}
+
+function _focusSelectorFor(option = null) {
+  if (!option?.type) return null;
+  if (option.type === "toggle") return `button[data-defense-toggle="${option.action}"]`;
+  if (option.type === "budget") return `input[data-defense-budget="${option.action}"]`;
+  if (option.type === "side") return `button[data-defense-side="${option.action}:${option.value}"]`;
+  if (option.type === "level") return `button[data-defense-level="${option.action}:${option.value}"]`;
+  if (option.type === "pressure") return `input[data-defense-pressure="1"]`;
+  return null;
+}
+
+function renderPresetDefenseModal(draft, validation = null, focusOption = null) {
   const refs = _getRefs();
   if (!refs.form) return;
 
@@ -160,22 +192,10 @@ function renderPresetDefenseModal(draft, validation = null) {
   const d = currentDraft;
 
   refs.form.innerHTML = `
-    <section class="preset-defense-section">
-      <h3>액션 버짓</h3>
-      <div class="preset-defense-budget-grid">
-        ${PRESET_DEFENSE_ACTION_KEYS.map((action) => _renderBudgetRow(action, d.actionBudget?.[action])).join("")}
-      </div>
+    <section class="preset-defense-action-list" aria-label="액션 버짓 및 세부 설정">
+      ${PRESET_DEFENSE_ACTION_KEYS.map((action) => _renderActionItem(action, d, expandedActions.has(action))).join("")}
     </section>
-    <section class="preset-defense-section">
-      <h3>액션별 묶음 선택</h3>
-      <div class="preset-defense-policy-grid">
-        ${PRESET_DEFENSE_ACTION_KEYS.map((action) => _renderPolicyRow(action, d.actionPolicies?.[action])).join("")}
-      </div>
-    </section>
-    <section class="preset-defense-section">
-      <h3>전역 압박</h3>
-      ${_renderPressure(d.pressureLevel)}
-    </section>
+    ${_renderPressure(d.pressureLevel)}
   `;
 
   if (refs.errors) {
@@ -188,43 +208,72 @@ function renderPresetDefenseModal(draft, validation = null) {
     }
   }
 
-  refs.form.querySelectorAll("input[data-defense-budget]").forEach((input) => {
-    input.addEventListener("input", () => {
-      _setDeepValue(currentDraft, `actionBudget.${input.dataset.defenseBudget}`, Number(input.value || 0));
-      const v = _validateDraft(currentDraft);
-      currentDraft = v.draft;
-      renderPresetDefenseModal(currentDraft, v);
-    });
-  });
+  const selector = _focusSelectorFor(focusOption);
+  if (selector) {
+    const focusTarget = refs.form.querySelector(selector);
+    if (focusTarget) focusTarget.focus();
+  }
+}
 
-  refs.form.querySelectorAll("button[data-defense-side]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const [action, side] = String(btn.dataset.defenseSide || "").split(":");
-      _setDeepValue(currentDraft, `actionPolicies.${action}.side`, side || "neutral");
-      const v = _validateDraft(currentDraft);
-      currentDraft = v.draft;
-      renderPresetDefenseModal(currentDraft, v);
-    });
-  });
+function _onFormInput(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
 
-  refs.form.querySelectorAll("button[data-defense-level]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const [action, level] = String(btn.dataset.defenseLevel || "").split(":");
-      _setDeepValue(currentDraft, `actionPolicies.${action}.level`, level || "normal");
-      const v = _validateDraft(currentDraft);
-      currentDraft = v.draft;
-      renderPresetDefenseModal(currentDraft, v);
-    });
-  });
+  if (target.matches("input[data-defense-budget]")) {
+    const action = String(target.dataset.defenseBudget || "");
+    _setDeepValue(currentDraft, `actionBudget.${action}`, Number(target.value || 0));
+    const v = _validateDraft(currentDraft);
+    currentDraft = v.draft;
+    renderPresetDefenseModal(currentDraft, v, { type: "budget", action });
+    return;
+  }
 
-  refs.form.querySelectorAll("input[data-defense-pressure]").forEach((input) => {
-    input.addEventListener("input", () => {
-      _setDeepValue(currentDraft, "pressureLevel", Number(input.value || 0));
-      const v = _validateDraft(currentDraft);
-      currentDraft = v.draft;
-      renderPresetDefenseModal(currentDraft, v);
-    });
-  });
+  if (target.matches("input[data-defense-pressure]")) {
+    _setDeepValue(currentDraft, "pressureLevel", Number(target.value || 0));
+    const v = _validateDraft(currentDraft);
+    currentDraft = v.draft;
+    renderPresetDefenseModal(currentDraft, v, { type: "pressure" });
+  }
+}
+
+function _onFormClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+
+  const toggle = target.closest("button[data-defense-toggle]");
+  if (toggle) {
+    const action = String(toggle.dataset.defenseToggle || "");
+    if (expandedActions.has(action)) {
+      expandedActions.delete(action);
+    } else {
+      expandedActions.add(action);
+    }
+    const v = _validateDraft(currentDraft);
+    currentDraft = v.draft;
+    renderPresetDefenseModal(currentDraft, v, { type: "toggle", action });
+    return;
+  }
+
+  const sideBtn = target.closest("button[data-defense-side]");
+  if (sideBtn) {
+    const [action, side] = String(sideBtn.dataset.defenseSide || "").split(":");
+    _setDeepValue(currentDraft, `actionPolicies.${action}.side`, side || "neutral");
+    expandedActions.add(action);
+    const v = _validateDraft(currentDraft);
+    currentDraft = v.draft;
+    renderPresetDefenseModal(currentDraft, v, { type: "side", action, value: side || "neutral" });
+    return;
+  }
+
+  const levelBtn = target.closest("button[data-defense-level]");
+  if (levelBtn) {
+    const [action, level] = String(levelBtn.dataset.defenseLevel || "").split(":");
+    _setDeepValue(currentDraft, `actionPolicies.${action}.level`, level || "normal");
+    expandedActions.add(action);
+    const v = _validateDraft(currentDraft);
+    currentDraft = v.draft;
+    renderPresetDefenseModal(currentDraft, v, { type: "level", action, value: level || "normal" });
+  }
 }
 
 function openPresetDefenseModal(draft, onApply) {
@@ -233,6 +282,7 @@ function openPresetDefenseModal(draft, onApply) {
   onApplyHandler = typeof onApply === "function" ? onApply : null;
   const v = _validateDraft(draft || createDefaultPresetDefenseDraft());
   currentDraft = v.draft;
+  expandedActions = new Set();
   renderPresetDefenseModal(currentDraft, v);
   refs.modal.classList.remove("hidden");
   refs.modal.setAttribute("aria-hidden", "false");
@@ -279,6 +329,7 @@ function bindPresetDefenseModalEvents() {
   refs.resetBtn?.addEventListener("click", () => {
     const v = _validateDraft(createDefaultPresetDefenseDraft());
     currentDraft = v.draft;
+    expandedActions = new Set();
     renderPresetDefenseModal(currentDraft, v);
     const nextRefs = _getRefs();
     if (nextRefs.errors) nextRefs.errors.textContent = "초기값으로 되돌렸습니다. 적용을 눌러 반영하세요.";
@@ -296,6 +347,8 @@ function bindPresetDefenseModalEvents() {
   });
 
   document.addEventListener("keydown", _onModalKeydown);
+  refs.form?.addEventListener("click", _onFormClick);
+  refs.form?.addEventListener("input", _onFormInput);
 }
 
 export {

@@ -789,61 +789,63 @@
         </section>
       </section>
 
-      <div
-        id="preset-offense-modal"
-        class="modal hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="preset-offense-modal-title"
-        aria-describedby="preset-offense-modal-desc"
-        aria-hidden="true"
-      >
-        <div id="preset-offense-modal-backdrop" class="modal-backdrop" data-close="preset-offense-modal"></div>
-        <div class="modal-card" role="document" tabindex="-1">
-          <span tabindex="0" aria-hidden="true" data-focus-sentinel="start"></span>
-          <div class="modal-header">
-            <h3 id="preset-offense-modal-title">Preset Offense 상세 설정</h3>
-            <button type="button" id="preset-offense-close-btn" class="btn btn-secondary" aria-label="모달 닫기">닫기</button>
+      <div class="tactics-modal-layer" aria-live="polite">
+        <div
+          id="preset-offense-modal"
+          class="modal hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="preset-offense-modal-title"
+          aria-describedby="preset-offense-modal-desc"
+          aria-hidden="true"
+        >
+          <div id="preset-offense-modal-backdrop" class="modal-backdrop" data-close="preset-offense-modal"></div>
+          <div class="modal-card" role="document" tabindex="-1">
+            <span tabindex="0" aria-hidden="true" data-focus-sentinel="start"></span>
+            <div class="modal-header">
+              <h3 id="preset-offense-modal-title">Preset Offense 상세 설정</h3>
+              <button type="button" id="preset-offense-close-btn" class="btn btn-secondary" aria-label="모달 닫기">닫기</button>
+            </div>
+            <p id="preset-offense-modal-desc" class="subtitle">상세 슬라이더/토글로 프리셋 공격 전술을 조정합니다.</p>
+            <div id="preset-offense-errors" class="empty-copy" role="status" aria-live="polite"></div>
+            <form id="preset-offense-form" class="modal-body" novalidate>
+              <p class="empty-copy">프리셋 공격 상세 설정 UI가 여기에 렌더됩니다.</p>
+            </form>
+            <div class="modal-actions">
+              <button type="button" id="preset-offense-reset-btn" class="btn btn-secondary">초기화</button>
+              <button type="button" id="preset-offense-apply-btn" class="btn btn-primary">적용</button>
+            </div>
+            <span tabindex="0" aria-hidden="true" data-focus-sentinel="end"></span>
           </div>
-          <p id="preset-offense-modal-desc" class="subtitle">상세 슬라이더/토글로 프리셋 공격 전술을 조정합니다.</p>
-          <div id="preset-offense-errors" class="empty-copy" role="status" aria-live="polite"></div>
-          <form id="preset-offense-form" class="modal-body" novalidate>
-            <p class="empty-copy">프리셋 공격 상세 설정 UI가 여기에 렌더됩니다.</p>
-          </form>
-          <div class="modal-actions">
-            <button type="button" id="preset-offense-reset-btn" class="btn btn-secondary">초기화</button>
-            <button type="button" id="preset-offense-apply-btn" class="btn btn-primary">적용</button>
-          </div>
-          <span tabindex="0" aria-hidden="true" data-focus-sentinel="end"></span>
         </div>
-      </div>
 
-      <div
-        id="preset-defense-modal"
-        class="modal hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="preset-defense-modal-title"
-        aria-describedby="preset-defense-modal-desc"
-        aria-hidden="true"
-      >
-        <div id="preset-defense-modal-backdrop" class="modal-backdrop" data-close="preset-defense-modal"></div>
-        <div class="modal-card" role="document" tabindex="-1">
-          <span tabindex="0" aria-hidden="true" data-focus-sentinel="start"></span>
-          <div class="modal-header">
-            <h3 id="preset-defense-modal-title">Preset Defense 상세 설정</h3>
-            <button type="button" id="preset-defense-close-btn" class="btn btn-secondary" aria-label="모달 닫기">닫기</button>
+        <div
+          id="preset-defense-modal"
+          class="modal hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="preset-defense-modal-title"
+          aria-describedby="preset-defense-modal-desc"
+          aria-hidden="true"
+        >
+          <div id="preset-defense-modal-backdrop" class="modal-backdrop" data-close="preset-defense-modal"></div>
+          <div class="modal-card" role="document" tabindex="-1">
+            <span tabindex="0" aria-hidden="true" data-focus-sentinel="start"></span>
+            <div class="modal-header">
+              <h3 id="preset-defense-modal-title">Preset Defense 상세 설정</h3>
+              <button type="button" id="preset-defense-close-btn" class="btn btn-secondary" aria-label="모달 닫기">닫기</button>
+            </div>
+            <p id="preset-defense-modal-desc" class="subtitle">액션 버짓을 조정하고 각 액션을 펼쳐 세부 묶음 선택과 전역 압박 강도를 설정합니다.</p>
+            <div id="preset-defense-errors" class="empty-copy" role="status" aria-live="polite"></div>
+            <form id="preset-defense-form" class="modal-body" novalidate>
+              <p class="empty-copy">프리셋 수비 상세 설정 UI가 여기에 렌더됩니다.</p>
+            </form>
+            <div class="modal-actions">
+              <button type="button" id="preset-defense-reset-btn" class="btn btn-secondary">초기화</button>
+              <button type="button" id="preset-defense-apply-btn" class="btn btn-primary">적용</button>
+            </div>
+            <span tabindex="0" aria-hidden="true" data-focus-sentinel="end"></span>
           </div>
-          <p id="preset-defense-modal-desc" class="subtitle">액션 버짓과 억제 정책, 전역 압박 강도를 설정합니다.</p>
-          <div id="preset-defense-errors" class="empty-copy" role="status" aria-live="polite"></div>
-          <form id="preset-defense-form" class="modal-body" novalidate>
-            <p class="empty-copy">프리셋 수비 상세 설정 UI가 여기에 렌더됩니다.</p>
-          </form>
-          <div class="modal-actions">
-            <button type="button" id="preset-defense-reset-btn" class="btn btn-secondary">초기화</button>
-            <button type="button" id="preset-defense-apply-btn" class="btn btn-primary">적용</button>
-          </div>
-          <span tabindex="0" aria-hidden="true" data-focus-sentinel="end"></span>
         </div>
       </div>
     </section>
