@@ -10,6 +10,8 @@ The engine is deterministic and explainable:
 from dataclasses import asdict, replace
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from contracts.policy.salary_limits import contract_aav_max_abs_for_exp
+
 from .config import ContractNegotiationConfig, DEFAULT_CONTRACT_NEGOTIATION_CONFIG
 from .types import ContractOffer, NegotiationDecision, PlayerPosition, Reason
 from .utils import clamp, clamp01, mental_norm, safe_float, safe_int, sigmoid, stable_u01
@@ -105,6 +107,7 @@ def build_player_position(
     """Compute market/ask/floor + years preferences + style parameters."""
     ovr = safe_int(player_snapshot.get("ovr"), 0)
     age = safe_int(player_snapshot.get("age"), 27)
+    exp = safe_int(player_snapshot.get("exp"), 0)
     mental = player_snapshot.get("mental") if isinstance(player_snapshot.get("mental"), Mapping) else {}
     leverage = clamp01(player_snapshot.get("leverage", 0.5))
 
@@ -179,11 +182,16 @@ def build_player_position(
     ask_aav = round_salary(float(market_aav) * float(ask_mult), cfg=cfg)
     floor_aav = round_salary(float(market_aav) * float(floor_mult), cfg=cfg)
 
-    # Absolute ask cap (global): e.g. 30% of salary cap for all players.
+    # League-wide hard AAV cap by experience bucket.
     cap = safe_float(getattr(cfg, "salary_cap", None), 0.0)
-    ask_cap_pct = safe_float(getattr(cfg, "ask_aav_cap_pct_of_salary_cap", None), 0.0)
-    if cap > 1e-9 and ask_cap_pct > 0.0:
-        ask_cap_abs = round_salary(float(cap) * float(ask_cap_pct), cfg=cfg)
+    pct_by_exp = getattr(cfg, "contract_aav_max_pct_by_exp", None)
+    ask_cap_abs = contract_aav_max_abs_for_exp(
+        exp=int(exp),
+        salary_cap=float(cap),
+        pct_by_exp=pct_by_exp if isinstance(pct_by_exp, Mapping) else None,
+    )
+    if cap > 1e-9 and ask_cap_abs > 0.0:
+        ask_cap_abs = round_salary(float(ask_cap_abs), cfg=cfg)
         ask_aav = min(float(ask_aav), float(ask_cap_abs))
         # Keep invariant floor <= ask after capping.
         floor_aav = min(float(floor_aav), float(ask_aav))

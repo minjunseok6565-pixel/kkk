@@ -20,10 +20,13 @@ from league_repo import LeagueRepo
 from league_service import LeagueService, CapViolationError
 from schema import normalize_player_id, normalize_team_id
 
+from contracts.policy.salary_limits import build_exp_aav_limit
+
 from .config import ContractNegotiationConfig, DEFAULT_CONTRACT_NEGOTIATION_CONFIG
 from .engine import build_player_position, evaluate_offer
 from .errors import (
     ContractNegotiationError,
+    MSG_NEGOTIATION_OFFER_EXCEEDS_EXP_AAV_HARD_CAP,
     NEGOTIATION_BAD_PAYLOAD,
     NEGOTIATION_CLOSED,
     NEGOTIATION_COMMIT_FAILED,
@@ -31,6 +34,7 @@ from .errors import (
     NEGOTIATION_EXPIRED,
     NEGOTIATION_INVALID_MODE,
     NEGOTIATION_INVALID_OFFER,
+    NEGOTIATION_OFFER_EXCEEDS_EXP_AAV_HARD_CAP,
 )
 from .store import (
     append_message,
@@ -78,6 +82,32 @@ def _extract_salary_cap_from_state() -> Optional[float]:
         return None
 
 
+def _extract_contract_aav_pct_by_exp_from_state() -> Optional[dict[str, float]]:
+    """Best-effort league rule extraction for exp-based contract AAV caps.
+
+    SSOT: state.get_league_context_snapshot().trade_rules.contract_aav_max_pct_by_exp
+    """
+    try:
+        import state
+
+        ctx = state.get_league_context_snapshot() or {}
+        if not isinstance(ctx, Mapping):
+            return None
+        trade_rules = ctx.get("trade_rules") if isinstance(ctx, Mapping) else None
+        if not isinstance(trade_rules, Mapping):
+            return None
+        raw = trade_rules.get("contract_aav_max_pct_by_exp")
+        if not isinstance(raw, Mapping):
+            return None
+        return {
+            "le_6": float(safe_float(raw.get("le_6"), 0.25)),
+            "7_9": float(safe_float(raw.get("7_9"), 0.30)),
+            "ge_10": float(safe_float(raw.get("ge_10"), 0.35)),
+        }
+    except Exception:
+        return None
+
+
 def _with_salary_cap(cfg: ContractNegotiationConfig) -> ContractNegotiationConfig:
     """Return a cfg where salary_cap is populated (if possible).
 
@@ -85,18 +115,23 @@ def _with_salary_cap(cfg: ContractNegotiationConfig) -> ContractNegotiationConfi
     - Otherwise we read salary_cap from SSOT (state.trade_rules).
     """
     try:
-        existing = float(safe_float(getattr(cfg, "salary_cap", None), 0.0))
-        if existing > 0.0:
-            return cfg
+        existing_cap = float(safe_float(getattr(cfg, "salary_cap", None), 0.0))
     except Exception:
-        pass
+        existing_cap = 0.0
+    cap = float(existing_cap) if existing_cap > 0.0 else (_extract_salary_cap_from_state() or 0.0)
 
-    cap = _extract_salary_cap_from_state()
-    if cap is None:
-        return cfg
+    existing_pct_by_exp = getattr(cfg, "contract_aav_max_pct_by_exp", None)
+    pct_by_exp = existing_pct_by_exp if isinstance(existing_pct_by_exp, Mapping) else _extract_contract_aav_pct_by_exp_from_state()
 
     try:
-        return replace(cfg, salary_cap=float(cap))
+        kwargs: dict[str, Any] = {}
+        if cap > 0.0:
+            kwargs["salary_cap"] = float(cap)
+        if pct_by_exp is not None:
+            kwargs["contract_aav_max_pct_by_exp"] = dict(pct_by_exp)
+        if kwargs:
+            return replace(cfg, **kwargs)
+        return cfg
     except Exception:
         return cfg
 
@@ -359,6 +394,7 @@ def start_contract_negotiation(
             "name": player.get("name"),
             "pos": player.get("pos"),
             "age": safe_int(player.get("age"), 27),
+            "exp": safe_int(player.get("exp"), 0),
             "ovr": safe_int(player.get("ovr"), 0),
             "salary_amount": float(candidate_salary),
             "mental": mental,
@@ -424,6 +460,48 @@ def _is_expired(session: Mapping[str, Any], now_iso: str) -> bool:
         return False
 
 
+def _validate_offer_exp_aav_hard_cap(
+    *,
+    session: Mapping[str, Any],
+    offer: ContractOffer,
+    cfg: ContractNegotiationConfig,
+) -> None:
+    """Hard validation: reject offers above exp-bucket contract AAV cap."""
+    cap = float(safe_float(getattr(cfg, "salary_cap", None), 0.0))
+    if cap <= 0.0:
+        return
+
+    pct_by_exp = getattr(cfg, "contract_aav_max_pct_by_exp", None)
+    player_snapshot = session.get("player_snapshot") if isinstance(session.get("player_snapshot"), Mapping) else {}
+    exp_i = int(safe_int(player_snapshot.get("exp"), 0))
+
+    limit = build_exp_aav_limit(
+        exp=int(exp_i),
+        salary_cap=float(cap),
+        pct_by_exp=pct_by_exp if isinstance(pct_by_exp, Mapping) else None,
+    )
+    max_aav = float(limit.max_aav_abs)
+    if max_aav <= 0.0:
+        return
+
+    offer_aav = float(offer.aav())
+    if offer_aav <= float(max_aav):
+        return
+
+    raise ContractNegotiationError(
+        NEGOTIATION_OFFER_EXCEEDS_EXP_AAV_HARD_CAP,
+        MSG_NEGOTIATION_OFFER_EXCEEDS_EXP_AAV_HARD_CAP,
+        {
+            "violation_code": NEGOTIATION_OFFER_EXCEEDS_EXP_AAV_HARD_CAP,
+            "offer_aav": float(offer_aav),
+            "max_aav_abs": float(max_aav),
+            "exp_limit": limit.to_payload(),
+            "player_id": str(session.get("player_id") or ""),
+            "session_id": str(session.get("session_id") or ""),
+        },
+    )
+
+
 def submit_contract_offer(
     db_path: str,
     session_id: str,
@@ -463,6 +541,7 @@ def submit_contract_offer(
 
     # Evaluate
     cfg_eff = _with_salary_cap(cfg)
+    _validate_offer_exp_aav_hard_cap(session=session, offer=offer, cfg=cfg_eff)
     decision: NegotiationDecision = evaluate_offer(session, offer, cfg=cfg_eff)
 
     # Persist session tracking
@@ -518,6 +597,7 @@ def accept_last_counter(
     session_id: str,
     *,
     now_iso: Optional[str] = None,
+    cfg: ContractNegotiationConfig = DEFAULT_CONTRACT_NEGOTIATION_CONFIG,
 ) -> Dict[str, Any]:
     """Accept the player's last counter offer (no new offer required)."""
     now = str(now_iso or _now_iso())
@@ -555,6 +635,9 @@ def accept_last_counter(
             "Stored counter offer is invalid",
             {"error": str(exc)},
         ) from exc
+
+    cfg_eff = _with_salary_cap(cfg)
+    _validate_offer_exp_aav_hard_cap(session=session, offer=offer, cfg=cfg_eff)
 
     set_agreed_offer(session_id, offer.to_payload())
     set_phase(session_id, "ACCEPTED")
