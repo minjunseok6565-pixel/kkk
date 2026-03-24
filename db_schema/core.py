@@ -35,6 +35,7 @@ def ddl(*, now: str, schema_version: str) -> str:
                     name TEXT,
                     pos TEXT,
                     age INTEGER,
+                    exp INTEGER,
                     height_in INTEGER,
                     weight_lb INTEGER,
                     ovr INTEGER,

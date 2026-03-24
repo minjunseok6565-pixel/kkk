@@ -296,6 +296,7 @@ class PlayerRow:
     name: Optional[str]
     pos: Optional[str]
     age: Optional[int]
+    exp: Optional[int]
     height_in: Optional[int]
     weight_lb: Optional[int]
     ovr: Optional[int]
@@ -1447,6 +1448,7 @@ class LeagueRepo:
             "Name", "name",
             "POS", "pos",
             "Age", "age",
+            "Exp", "exp",
             "HT", "height", "height_in",
             "WT", "weight", "weight_lb",
             "Salary", "salary", "salary_amount",
@@ -1481,6 +1483,26 @@ class LeagueRepo:
             except (TypeError, ValueError):
                 _warn_limited("IMPORT_AGE_COERCE_FAILED", f"player_id={raw_pid!r} age={age!r}", limit=3)
                 age_i = None
+
+            # exp
+            exp = row.get("exp", None)
+            if exp is None:
+                exp = row.get("Exp", None)
+            exp_i: Optional[int]
+            exp_raw = "" if exp is None else str(exp).strip()
+            if exp_raw == "":
+                exp_i = 0
+            else:
+                try:
+                    exp_val = int(exp)
+                    if exp_val < 0:
+                        _warn_limited("IMPORT_EXP_NEGATIVE", f"player_id={raw_pid!r} exp={exp!r}", limit=3)
+                        exp_i = None
+                    else:
+                        exp_i = exp_val
+                except (TypeError, ValueError):
+                    _warn_limited("IMPORT_EXP_COERCE_FAILED", f"player_id={raw_pid!r} exp={exp!r}", limit=3)
+                    exp_i = None
 
             # height / weight
             ht = row.get("height_in", None)
@@ -1563,6 +1585,7 @@ class LeagueRepo:
                     name=str(name) if name is not None else None,
                     pos=str(pos) if pos is not None else None,
                     age=age_i,
+                    exp=exp_i,
                     height_in=height_in,
                     weight_lb=weight_lb,
                     ovr=ovr_i,
@@ -1588,19 +1611,20 @@ class LeagueRepo:
             # Upsert players
             cur.executemany(
                 """
-                INSERT INTO players(player_id, name, pos, age, height_in, weight_lb, ovr, attrs_json, created_at, updated_at)
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO players(player_id, name, pos, age, exp, height_in, weight_lb, ovr, attrs_json, created_at, updated_at)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(player_id) DO UPDATE SET
                     name=excluded.name,
                     pos=excluded.pos,
                     age=excluded.age,
+                    exp=excluded.exp,
                     height_in=excluded.height_in,
                     weight_lb=excluded.weight_lb,
                     ovr=excluded.ovr,
                     attrs_json=excluded.attrs_json,
                     updated_at=excluded.updated_at;
                 """,
-                [(p.player_id, p.name, p.pos, p.age, p.height_in, p.weight_lb, p.ovr, p.attrs_json, now, now) for p in players],
+                [(p.player_id, p.name, p.pos, p.age, p.exp, p.height_in, p.weight_lb, p.ovr, p.attrs_json, now, now) for p in players],
             )
 
             # Upsert roster
@@ -1630,7 +1654,7 @@ class LeagueRepo:
 
         rows = self._conn.execute(
             """
-            SELECT r.team_id, p.player_id, p.name, p.pos, p.age, p.height_in, p.weight_lb, r.salary_amount, p.ovr, p.attrs_json
+            SELECT r.team_id, p.player_id, p.name, p.pos, p.age, p.exp, p.height_in, p.weight_lb, r.salary_amount, p.ovr, p.attrs_json
             FROM roster r
             JOIN players p ON p.player_id = r.player_id
             WHERE r.status='active'
@@ -1647,6 +1671,7 @@ class LeagueRepo:
                 "name": r["name"],
                 "pos": r["pos"],
                 "age": r["age"],
+                "Exp": r["exp"],
                 "height_in": r["height_in"],
                 "weight_lb": r["weight_lb"],
                 "salary_amount": r["salary_amount"],
@@ -1676,7 +1701,7 @@ class LeagueRepo:
         tid = normalize_team_id(team_id, strict=True)
         rows = self._conn.execute(
             """
-            SELECT p.player_id, p.name, p.pos, p.age, p.height_in, p.weight_lb, p.ovr, r.salary_amount, p.attrs_json
+            SELECT p.player_id, p.name, p.pos, p.age, p.exp, p.height_in, p.weight_lb, p.ovr, r.salary_amount, p.attrs_json
             FROM roster r
             JOIN players p ON p.player_id = r.player_id
             WHERE r.team_id=? AND r.status='active'

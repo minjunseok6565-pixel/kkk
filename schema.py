@@ -161,6 +161,7 @@ ROSTER_COL_TEAM_ID = "team_id"       # REQUIRED long-term
 ROSTER_COL_NAME = "name"
 ROSTER_COL_POS = "pos"
 ROSTER_COL_AGE = "age"
+ROSTER_COL_EXP = "exp"
 ROSTER_COL_HEIGHT_IN = "height_in"
 ROSTER_COL_WEIGHT_LB = "weight_lb"
 ROSTER_COL_SALARY_AMOUNT = "salary_amount"
