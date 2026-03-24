@@ -126,9 +126,17 @@ def _commit_accepted_contract_negotiation(
                     salary_by_year=offer.salary_by_year,
                     options=[dict(x) for x in (offer.options or [])],
                 )
+            elif mode == "EXTEND":
+                event = svc.extend_contract(
+                    team_id=team_norm,
+                    player_id=pid_norm,
+                    signed_date=signed_date_iso,
+                    years=int(offer.years),
+                    salary_by_year=offer.salary_by_year,
+                    options=[dict(x) for x in (offer.options or [])],
+                )
             else:
-                # RE_SIGN and EXTEND both map to the same SSOT operation.
-                event = svc.re_sign_or_extend(
+                event = svc.re_sign(
                     team_id=team_norm,
                     player_id=pid_norm,
                     signed_date=signed_date_iso,

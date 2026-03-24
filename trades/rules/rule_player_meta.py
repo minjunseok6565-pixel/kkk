@@ -66,7 +66,7 @@ def build_rule_players_meta(
     # (We keep legacy spellings in the allow-list as a safety net during dev.)
     CONTRACT_TYPES = {
         "SIGN_FREE_AGENT",
-        "RE_SIGN_OR_EXTEND",
+        "RE_SIGN",
         "SIGN_TWO_WAY",
         "RELEASE_TO_FA",
         # legacy spellings (dev)
@@ -115,17 +115,6 @@ def build_rule_players_meta(
         s = str(v).strip()
         return s if s else None
 
-    def _normalize_contract_action_type(raw: str) -> str:
-        # Normalize legacy spellings to the standardized rule-facing types.
-        r = str(raw or "")
-        if r == "signing":
-            return "SIGN_FREE_AGENT"
-        if r == "re_sign_or_extend":
-            return "RE_SIGN_OR_EXTEND"
-        if r == "release_to_free_agency":
-            return "RELEASE_TO_FA"
-        return r
-
     # last contract action: first (most recent) contract tx for each pid (txs_all is sorted desc by date/created_at)
     last_contract_by_pid: Dict[str, Tuple[str, str]] = {}  # pid -> (action_type, action_date_iso)
 
@@ -157,7 +146,7 @@ def build_rule_players_meta(
             if pid not in pid_set:
                 continue
             if pid not in last_contract_by_pid:
-                action_type = _normalize_contract_action_type(tx.get("action_type") or ttype)
+                action_type = str(tx.get("action_type") or ttype)
                 last_contract_by_pid[pid] = (action_type, tdate)
             continue
 

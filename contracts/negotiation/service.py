@@ -618,8 +618,17 @@ def commit_contract_negotiation(
                 salary_by_year={int(k): float(v) for k, v in offer.salary_by_year.items()},
                 options=[dict(x) for x in (offer.options or [])],
             )
-        elif mode_u in {"RE_SIGN", "EXTEND"}:
-            ev = svc.re_sign_or_extend(
+        elif mode_u == "RE_SIGN":
+            ev = svc.re_sign(
+                tid,
+                pid,
+                signed_date=signed_date,
+                years=int(offer.years),
+                salary_by_year={int(k): float(v) for k, v in offer.salary_by_year.items()},
+                options=[dict(x) for x in (offer.options or [])],
+            )
+        elif mode_u == "EXTEND":
+            ev = svc.extend_contract(
                 tid,
                 pid,
                 signed_date=signed_date,

@@ -1924,7 +1924,7 @@ class LeagueService:
             },
         )
 
-    def re_sign_or_extend(
+    def re_sign(
         self,
         team_id: str,
         player_id: str,
@@ -1936,7 +1936,7 @@ class LeagueService:
         team_option_years: Optional[Sequence[int]] = None,
         options: Optional[Sequence[Mapping[str, Any]]] = None,
     ) -> ServiceEvent:
-        """Re-sign / extend a player (DB): contracts + active contract + salary."""
+        """Re-sign a player (DB): contracts + active contract + salary."""
         team_norm = self._norm_team_id(team_id, strict=True)
         pid = self._norm_player_id(player_id)
         signed_date_iso = _coerce_iso(signed_date)
@@ -1983,7 +1983,7 @@ class LeagueService:
                 raise ValueError(f"player_id={player_id} is currently FA; use sign_free_agent")
             if current_team != team_norm:
                 raise ValueError(
-                    f"player_id={player_id} is on team_id={current_team}; cannot re-sign/extend for {team_norm}"
+                    f"player_id={player_id} is on team_id={current_team}; cannot re-sign for {team_norm}"
                 )
 
             salary_norm = self._normalize_salary_by_year(salary_by_year)
@@ -2005,7 +2005,7 @@ class LeagueService:
                 options=options,
                 team_option_years=team_option_years_list,
                 team_option_last_year=team_option_last_year_b,
-                context="re_sign_or_extend",
+                context="re_sign",
             )
 
             contract_id = str(new_contract_id())
@@ -2038,15 +2038,15 @@ class LeagueService:
             if season_salary is not None:
                 self._set_roster_salary_in_cur(cur, pid, int(float(season_salary)))
 
-            # Optional: log re-sign/extend transaction
+            # Optional: log re-sign transaction
             self._insert_transactions_in_cur(
                 cur,
                 [
                     {
-                        "type": "RE_SIGN_OR_EXTEND",
+                        "type": "RE_SIGN",
                         "date": signed_date_iso,
                         "action_date": signed_date_iso,
-                        "action_type": "RE_SIGN_OR_EXTEND",
+                        "action_type": "RE_SIGN",
                         "season_year": int(season_year_i),
                         "source": "contracts",
                         "teams": [team_norm],
@@ -2062,7 +2062,7 @@ class LeagueService:
             )
 
         return ServiceEvent(
-            type="re_sign_or_extend",
+            type="re_sign",
             payload={
                 # Standardized, rule/endpoint-friendly summary.
                 "date": signed_date_iso,
@@ -2077,6 +2077,179 @@ class LeagueService:
                 "start_season_year": int(start_season_year),
                 "years": years_i,
                 "guaranteed_years": int(guaranteed_years),
+                "team_option_years": [int(y) for y in option_years_sorted] if option_years_sorted else [],
+            },
+        )
+
+    def extend_contract(
+        self,
+        team_id: str,
+        player_id: str,
+        *,
+        signed_date: date | str | None = None,
+        years: int = 1,
+        salary_by_year: Optional[Mapping[int, int]] = None,
+        team_option_last_year: bool = False,
+        team_option_years: Optional[Sequence[int]] = None,
+        options: Optional[Sequence[Mapping[str, Any]]] = None,
+    ) -> ServiceEvent:
+        """Extend a player's active contract from the next season (DB).
+
+        Unlike re-sign, extension does NOT overwrite current-season salary.
+        New extension salaries start from the first season after the active
+        contract's current end.
+        """
+        team_norm = self._norm_team_id(team_id, strict=True)
+        pid = self._norm_player_id(player_id)
+        signed_date_iso = _coerce_iso(signed_date)
+        season_year_i = _current_season_year_ssot()
+        years_i = int(years)
+        if years_i <= 0:
+            raise ValueError("years must be >= 1")
+
+        team_option_last_year_b = bool(team_option_last_year)
+        team_option_years_list = list(team_option_years) if team_option_years is not None else []
+        if team_option_years_list and years_i < 2:
+            raise ValueError("team_option_years requires years >= 2")
+        if team_option_last_year_b and years_i < 2:
+            raise ValueError("team_option_last_year requires years >= 2")
+
+        with self._atomic() as cur:
+            roster = cur.execute(
+                """
+                SELECT team_id, salary_amount
+                FROM roster
+                WHERE player_id=? AND status='active';
+                """,
+                (pid,),
+            ).fetchone()
+            if not roster:
+                raise KeyError(f"active roster entry not found for player_id={player_id}")
+
+            current_team = str(roster["team_id"]).upper()
+            if current_team == "FA":
+                raise ValueError(f"player_id={player_id} is currently FA; cannot extend")
+            if current_team != team_norm:
+                raise ValueError(
+                    f"player_id={player_id} is on team_id={current_team}; cannot extend for {team_norm}"
+                )
+
+            active_row = cur.execute(
+                "SELECT contract_id FROM active_contracts WHERE player_id=? LIMIT 1;",
+                (pid,),
+            ).fetchone()
+            if not active_row:
+                raise KeyError(f"active contract not found for player_id={player_id}")
+            active_contract_id = str(active_row["contract_id"] if hasattr(active_row, "keys") else active_row[0])
+            contract = self._load_contract_row_in_cur(cur, active_contract_id)
+
+            contract_team = str(contract.get("team_id") or "").upper()
+            if contract_team != team_norm:
+                raise ValueError(
+                    f"active contract team mismatch for player_id={player_id}: expected={team_norm} actual={contract_team}"
+                )
+
+            try:
+                start_year_existing = int(contract.get("start_season_year") or 0)
+                years_existing = int(contract.get("years") or 0)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("active contract has invalid start_season_year/years") from exc
+            if start_year_existing <= 0 or years_existing <= 0:
+                raise ValueError("active contract has invalid term")
+
+            extend_start_year = int(start_year_existing + years_existing)
+            salary_existing = self._normalize_salary_by_year(contract.get("salary_by_year") or {})
+            if not salary_existing:
+                raise ValueError("active contract salary_by_year is empty")
+
+            salary_norm = self._normalize_salary_by_year(salary_by_year)
+            if salary_norm:
+                min_input_year = min(int(k) for k in salary_norm.keys())
+                if min_input_year != int(extend_start_year):
+                    raise ValueError(
+                        f"extension salary must start at next season {extend_start_year}, got {min_input_year}"
+                    )
+            else:
+                last_existing_salary = salary_existing.get(str(int(extend_start_year - 1)))
+                if last_existing_salary is None:
+                    last_existing_salary = roster["salary_amount"]
+                base_salary = float(last_existing_salary or 0)
+                salary_norm = {
+                    str(y): float(base_salary)
+                    for y in range(int(extend_start_year), int(extend_start_year) + years_i)
+                }
+
+            for y in salary_norm.keys():
+                if int(y) < int(extend_start_year):
+                    raise ValueError(
+                        f"extension salary_by_year cannot overlap existing contract years: year={y} extend_start={extend_start_year}"
+                    )
+
+            # Normalize new-extension options against the extension term only.
+            normalized_new_options, _, option_years_sorted = _normalize_contract_options(
+                start_season_year=int(extend_start_year),
+                years=int(years_i),
+                salary_by_year=salary_norm,
+                options=options,
+                team_option_years=team_option_years_list,
+                team_option_last_year=team_option_last_year_b,
+                context="extend_contract",
+            )
+
+            merged_salary = dict(salary_existing)
+            merged_salary.update({str(k): float(v) for k, v in salary_norm.items()})
+            contract["salary_by_year"] = merged_salary
+            contract["years"] = int(years_existing + years_i)
+
+            existing_opts = contract.get("options") or []
+            if not isinstance(existing_opts, list):
+                existing_opts = []
+            contract["options"] = [dict(o) for o in existing_opts if isinstance(o, Mapping)] + [
+                dict(o) for o in normalized_new_options
+            ]
+            if not contract.get("status"):
+                contract["status"] = "ACTIVE"
+
+            # Keep this contract active; extension starts in future seasons.
+            self._upsert_contract_records_in_cur(cur, {active_contract_id: contract})
+            self._move_player_team_in_cur(cur, pid, team_norm)
+
+            self._insert_transactions_in_cur(
+                cur,
+                [
+                    {
+                        "type": "EXTEND",
+                        "date": signed_date_iso,
+                        "action_date": signed_date_iso,
+                        "action_type": "EXTEND",
+                        "season_year": int(season_year_i),
+                        "source": "contracts",
+                        "teams": [team_norm],
+                        "team_id": team_norm,
+                        "player_id": pid,
+                        "from_team": team_norm,
+                        "to_team": team_norm,
+                        "contract_id": active_contract_id,
+                        "start_season_year": int(extend_start_year),
+                        "years": years_i,
+                    }
+                ],
+            )
+
+        return ServiceEvent(
+            type="extend_contract",
+            payload={
+                "date": signed_date_iso,
+                "season_year": int(season_year_i),
+                "player_id": pid,
+                "affected_player_ids": [pid],
+                "from_team": team_norm,
+                "to_team": team_norm,
+                "team_id": team_norm,
+                "contract_id": active_contract_id,
+                "signed_date": signed_date_iso,
+                "start_season_year": int(extend_start_year),
+                "years": years_i,
                 "team_option_years": [int(y) for y in option_years_sorted] if option_years_sorted else [],
             },
         )

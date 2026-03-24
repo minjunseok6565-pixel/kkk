@@ -22,7 +22,19 @@ class SignFreeAgentRequest(BaseModel):
     team_option_last_year: bool = False  # If True, last year is a TEAM option (PENDING)
 
 
-class ReSignOrExtendRequest(BaseModel):
+class ReSignRequest(BaseModel):
+    session_id: str  # must reference an ACCEPTED contract negotiation session
+    team_id: str
+    player_id: str
+    signed_date: Optional[str] = None  # YYYY-MM-DD (default: in-game date)
+    years: int = 1
+    salary_by_year: Optional[Dict[int, int]] = None  # {season_year: salary}
+    team_option_years: Optional[List[int]] = None  # Absolute season_years; must be tail-consecutive and include final year
+    # Deprecated shorthand; prefer team_option_years.
+    team_option_last_year: bool = False  # If True, last year is a TEAM option (PENDING)
+
+
+class ExtendRequest(BaseModel):
     session_id: str  # must reference an ACCEPTED contract negotiation session
     team_id: str
     player_id: str
