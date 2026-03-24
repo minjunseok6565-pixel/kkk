@@ -1205,6 +1205,319 @@ class LeagueRepo:
             return [str(r["player_id"]) for r in rows]
         raise ValueError(f"Unknown source for list_free_agents: {source}")
 
+    # ------------------------
+    # Bird Rights / Cap Holds
+    # ------------------------
+
+    def upsert_team_bird_rights(self, rows: Sequence[Mapping[str, Any]]) -> None:
+        if not rows:
+            return
+        now = _utc_now_iso()
+        payload: list[tuple[int, str, str, str, int, int, str, str]] = []
+        for raw in rows:
+            if not isinstance(raw, Mapping):
+                continue
+            season_year = int(raw.get("season_year") or 0)
+            if season_year <= 0:
+                continue
+            team_id = str(normalize_team_id(raw.get("team_id"), strict=False)).upper()
+            player_id = str(normalize_player_id(raw.get("player_id"), strict=False, allow_legacy_numeric=True))
+            if not team_id or not player_id:
+                continue
+            bird_type = str(raw.get("bird_type") or "").strip().upper()
+            if not bird_type:
+                continue
+            tenure = int(raw.get("tenure_years_same_team") or 0)
+            if tenure < 0:
+                tenure = 0
+            is_renounced = 1 if int(raw.get("is_renounced") or 0) == 1 else 0
+            payload.append(
+                (
+                    int(season_year),
+                    str(team_id),
+                    str(player_id),
+                    str(bird_type),
+                    int(tenure),
+                    int(is_renounced),
+                    str(now),
+                    str(now),
+                )
+            )
+        if not payload:
+            return
+        with self.transaction() as cur:
+            cur.executemany(
+                """
+                INSERT INTO team_bird_rights(
+                    season_year, team_id, player_id, bird_type,
+                    tenure_years_same_team, is_renounced, created_at, updated_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(season_year, team_id, player_id) DO UPDATE SET
+                    bird_type=excluded.bird_type,
+                    tenure_years_same_team=excluded.tenure_years_same_team,
+                    is_renounced=excluded.is_renounced,
+                    updated_at=excluded.updated_at;
+                """,
+                payload,
+            )
+
+    def list_team_bird_rights(self, team_id: str, season_year: int) -> list[dict[str, Any]]:
+        tid = str(normalize_team_id(team_id, strict=False)).upper()
+        sy = int(season_year)
+        rows = self._conn.execute(
+            """
+            SELECT season_year, team_id, player_id, bird_type, tenure_years_same_team, is_renounced, created_at, updated_at
+            FROM team_bird_rights
+            WHERE UPPER(team_id)=UPPER(?) AND season_year=?
+            ORDER BY player_id ASC;
+            """,
+            (str(tid), int(sy)),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            out.append(
+                {
+                    "season_year": int(r["season_year"]),
+                    "team_id": str(r["team_id"]).upper(),
+                    "player_id": str(r["player_id"]),
+                    "bird_type": str(r["bird_type"]).upper(),
+                    "tenure_years_same_team": int(r["tenure_years_same_team"] or 0),
+                    "is_renounced": int(r["is_renounced"] or 0),
+                    "created_at": str(r["created_at"] or ""),
+                    "updated_at": str(r["updated_at"] or ""),
+                }
+            )
+        return out
+
+    def get_bird_right(self, player_id: str, team_id: str, season_year: int) -> Optional[dict[str, Any]]:
+        pid = str(normalize_player_id(player_id, strict=False, allow_legacy_numeric=True))
+        tid = str(normalize_team_id(team_id, strict=False)).upper()
+        sy = int(season_year)
+        row = self._conn.execute(
+            """
+            SELECT season_year, team_id, player_id, bird_type, tenure_years_same_team, is_renounced, created_at, updated_at
+            FROM team_bird_rights
+            WHERE player_id=? AND UPPER(team_id)=UPPER(?) AND season_year=?
+            LIMIT 1;
+            """,
+            (str(pid), str(tid), int(sy)),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "season_year": int(row["season_year"]),
+            "team_id": str(row["team_id"]).upper(),
+            "player_id": str(row["player_id"]),
+            "bird_type": str(row["bird_type"]).upper(),
+            "tenure_years_same_team": int(row["tenure_years_same_team"] or 0),
+            "is_renounced": int(row["is_renounced"] or 0),
+            "created_at": str(row["created_at"] or ""),
+            "updated_at": str(row["updated_at"] or ""),
+        }
+
+    def renounce_bird_right(self, player_id: str, team_id: str, season_year: int, now_iso: str) -> bool:
+        pid = str(normalize_player_id(player_id, strict=False, allow_legacy_numeric=True))
+        tid = str(normalize_team_id(team_id, strict=False)).upper()
+        sy = int(season_year)
+        now = str(now_iso or _utc_now_iso())
+        with self.transaction() as cur:
+            cur.execute(
+                """
+                UPDATE team_bird_rights
+                SET is_renounced=1, updated_at=?
+                WHERE player_id=? AND UPPER(team_id)=UPPER(?) AND season_year=?;
+                """,
+                (str(now), str(pid), str(tid), int(sy)),
+            )
+            return bool(int(cur.rowcount or 0) > 0)
+
+    def upsert_team_cap_holds(self, rows: Sequence[Mapping[str, Any]]) -> None:
+        if not rows:
+            return
+        now = _utc_now_iso()
+        payload: list[tuple[int, str, str, str, str, int, int, Optional[str], str, str]] = []
+        for raw in rows:
+            if not isinstance(raw, Mapping):
+                continue
+            season_year = int(raw.get("season_year") or 0)
+            if season_year <= 0:
+                continue
+            team_id = str(normalize_team_id(raw.get("team_id"), strict=False)).upper()
+            player_id = str(normalize_player_id(raw.get("player_id"), strict=False, allow_legacy_numeric=True))
+            source_type = str(raw.get("source_type") or "").strip().upper()
+            bird_type = str(raw.get("bird_type") or "").strip().upper()
+            if not team_id or not player_id or not source_type or not bird_type:
+                continue
+            try:
+                hold_amount = int(raw.get("hold_amount") or 0)
+            except Exception:
+                hold_amount = 0
+            if hold_amount < 0:
+                hold_amount = 0
+            is_released = 1 if int(raw.get("is_released") or 0) == 1 else 0
+            released_reason_raw = raw.get("released_reason")
+            released_reason = str(released_reason_raw).strip().upper() if released_reason_raw is not None else None
+            if released_reason == "":
+                released_reason = None
+            payload.append(
+                (
+                    int(season_year),
+                    str(team_id),
+                    str(player_id),
+                    str(source_type),
+                    str(bird_type),
+                    int(hold_amount),
+                    int(is_released),
+                    released_reason,
+                    str(now),
+                    str(now),
+                )
+            )
+        if not payload:
+            return
+        with self.transaction() as cur:
+            cur.executemany(
+                """
+                INSERT INTO team_cap_holds(
+                    season_year, team_id, player_id, source_type, bird_type,
+                    hold_amount, is_released, released_reason, created_at, updated_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(season_year, team_id, player_id, source_type) DO UPDATE SET
+                    bird_type=excluded.bird_type,
+                    hold_amount=excluded.hold_amount,
+                    is_released=excluded.is_released,
+                    released_reason=excluded.released_reason,
+                    updated_at=excluded.updated_at;
+                """,
+                payload,
+            )
+
+    def list_team_cap_holds(
+        self,
+        team_id: str,
+        season_year: int,
+        *,
+        active_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        tid = str(normalize_team_id(team_id, strict=False)).upper()
+        sy = int(season_year)
+        where_active = "AND is_released=0" if bool(active_only) else ""
+        rows = self._conn.execute(
+            f"""
+            SELECT season_year, team_id, player_id, source_type, bird_type, hold_amount,
+                   is_released, released_reason, created_at, updated_at
+            FROM team_cap_holds
+            WHERE UPPER(team_id)=UPPER(?) AND season_year=?
+              {where_active}
+            ORDER BY player_id ASC, source_type ASC;
+            """,
+            (str(tid), int(sy)),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            out.append(
+                {
+                    "season_year": int(r["season_year"]),
+                    "team_id": str(r["team_id"]).upper(),
+                    "player_id": str(r["player_id"]),
+                    "source_type": str(r["source_type"]).upper(),
+                    "bird_type": str(r["bird_type"]).upper(),
+                    "hold_amount": int(r["hold_amount"] or 0),
+                    "is_released": int(r["is_released"] or 0),
+                    "released_reason": (None if r["released_reason"] is None else str(r["released_reason"])),
+                    "created_at": str(r["created_at"] or ""),
+                    "updated_at": str(r["updated_at"] or ""),
+                }
+            )
+        return out
+
+    def release_cap_hold(
+        self,
+        player_id: str,
+        team_id: str,
+        season_year: int,
+        reason: str,
+        now_iso: str,
+    ) -> bool:
+        pid = str(normalize_player_id(player_id, strict=False, allow_legacy_numeric=True))
+        tid = str(normalize_team_id(team_id, strict=False)).upper()
+        sy = int(season_year)
+        now = str(now_iso or _utc_now_iso())
+        why = str(reason or "OTHER").strip().upper()
+        with self.transaction() as cur:
+            cur.execute(
+                """
+                UPDATE team_cap_holds
+                SET is_released=1, released_reason=?, updated_at=?
+                WHERE player_id=? AND UPPER(team_id)=UPPER(?) AND season_year=? AND is_released=0;
+                """,
+                (str(why), str(now), str(pid), str(tid), int(sy)),
+            )
+            return bool(int(cur.rowcount or 0) > 0)
+
+    def sum_active_cap_holds(self, team_id: str, season_year: int) -> int:
+        tid = str(normalize_team_id(team_id, strict=False)).upper()
+        sy = int(season_year)
+        row = self._conn.execute(
+            """
+            SELECT SUM(COALESCE(hold_amount, 0)) AS hold_sum
+            FROM team_cap_holds
+            WHERE UPPER(team_id)=UPPER(?) AND season_year=? AND is_released=0;
+            """,
+            (str(tid), int(sy)),
+        ).fetchone()
+        if not row:
+            return 0
+        try:
+            return int(row["hold_sum"] or 0)
+        except Exception:
+            return 0
+
+    def get_league_average_salary(self, season_year: int) -> int:
+        """Return league average salary for a season.
+
+        Priority per active roster player:
+          1) active contract salary_by_season_json[season_year]
+          2) roster.salary_amount fallback
+        """
+        sy = int(season_year)
+        rows = self._conn.execute(
+            """
+            SELECT r.player_id, r.salary_amount, c.salary_by_season_json
+            FROM roster r
+            LEFT JOIN active_contracts ac
+              ON ac.player_id = r.player_id
+            LEFT JOIN contracts c
+              ON c.contract_id = ac.contract_id
+            WHERE LOWER(COALESCE(r.status, 'active')) = 'active'
+              AND UPPER(COALESCE(r.team_id, '')) <> 'FA';
+            """
+        ).fetchall()
+        salaries: list[int] = []
+        key = str(sy)
+        for r in rows:
+            salary_val: Optional[int] = None
+            by_json = r["salary_by_season_json"]
+            if by_json:
+                parsed = _json_loads(by_json, {})
+                if isinstance(parsed, Mapping) and key in parsed:
+                    try:
+                        salary_val = int(float(parsed.get(key)))
+                    except Exception:
+                        salary_val = None
+            if salary_val is None:
+                try:
+                    salary_val = int(r["salary_amount"] or 0)
+                except Exception:
+                    salary_val = 0
+            if salary_val > 0:
+                salaries.append(int(salary_val))
+        if not salaries:
+            return 0
+        return int(round(sum(salaries) / float(len(salaries))))
+
     def get_contract_ledger_snapshot(self) -> Dict[str, Any]:
         with self.transaction() as cur:
             # Use public methods for shape; reads happen under the same BEGIN snapshot.

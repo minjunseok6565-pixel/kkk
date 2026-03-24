@@ -22,6 +22,17 @@ ContractNegotiationStatus = Literal["ACTIVE", "CLOSED", "EXPIRED"]
 NegotiationSpeaker = Literal["TEAM", "PLAYER", "SYSTEM"]
 NegotiationVerdict = Literal["ACCEPT", "COUNTER", "REJECT", "WALK"]
 
+ALLOWED_CONTRACT_CHANNELS: set[str] = {
+    "STANDARD_FA",
+    "NT_MLE",
+    "TP_MLE",
+    "ROOM_MLE",
+    "BIRD_FULL",
+    "BIRD_EARLY",
+    "BIRD_NON",
+    "MINIMUM",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class Reason:
@@ -114,6 +125,10 @@ class ContractOffer:
             raise ValueError("offer.years must be >= 1")
 
         contract_channel = str(payload.get("contract_channel") or "STANDARD_FA").strip().upper() or "STANDARD_FA"
+        if contract_channel not in ALLOWED_CONTRACT_CHANNELS:
+            raise ValueError(
+                f"offer.contract_channel must be one of {sorted(ALLOWED_CONTRACT_CHANNELS)}, got={contract_channel!r}"
+            )
 
         # Canonicalize salary_by_year: contiguous years, length == years
         if not salary_by_year:

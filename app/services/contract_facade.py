@@ -11,6 +11,37 @@ from schema import normalize_team_id, normalize_player_id
 from app.services.cache_facade import _try_ui_cache_refresh_players
 
 
+def _friendly_re_sign_error_from_cap_violation(exc: CapViolationError) -> HTTPException:
+    code = str(getattr(exc, "code", "CAP_VIOLATION") or "CAP_VIOLATION").upper()
+    details = getattr(exc, "details", None)
+    if code == "BIRD_CHANNEL_REQUIRED":
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "RE_SIGN_BIRD_CHANNEL_REQUIRED",
+                "message": "RE_SIGN은 Bird 계약 채널(BIRD_FULL/BIRD_EARLY/BIRD_NON)만 허용합니다.",
+                "details": details,
+            },
+        )
+    if code == "BIRD_RIGHT_NOT_AVAILABLE":
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "RE_SIGN_BIRD_RIGHT_REQUIRED",
+                "message": "RE_SIGN을 진행하려면 해당 시즌 팀 Bird 권한(미포기)이 필요합니다.",
+                "details": details,
+            },
+        )
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": code,
+            "message": getattr(exc, "message", str(exc)),
+            "details": details,
+        },
+    )
+
+
 def _validate_repo_integrity(db_path: str) -> None:
     with LeagueRepo(db_path) as repo:
         # DB schema is guaranteed during server startup (state.startup_init_state()).
@@ -142,6 +173,7 @@ def _commit_accepted_contract_negotiation(
                 event = svc.re_sign(
                     team_id=team_norm,
                     player_id=pid_norm,
+                    contract_channel=str(getattr(offer, "contract_channel", "STANDARD_FA") or "STANDARD_FA").upper(),
                     signed_date=signed_date_iso,
                     years=int(offer.years),
                     salary_by_year=offer.salary_by_year,
@@ -149,6 +181,8 @@ def _commit_accepted_contract_negotiation(
                 )
         except CapViolationError as exc:
             # Rule-based rejection: return 409 instead of 500.
+            if mode == "RE_SIGN":
+                raise _friendly_re_sign_error_from_cap_violation(exc)
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -157,6 +191,22 @@ def _commit_accepted_contract_negotiation(
                     "details": getattr(exc, "details", None),
                 },
             )
+        except ValueError as exc:
+            if mode == "RE_SIGN":
+                msg = str(exc)
+                if "must be FA for re-sign" in msg:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "RE_SIGN_PLAYER_MUST_BE_FA",
+                            "message": "RE_SIGN 대상 선수는 FA 상태여야 합니다.",
+                            "details": {
+                                "team_id": team_norm,
+                                "player_id": pid_norm,
+                            },
+                        },
+                    )
+            raise HTTPException(status_code=400, detail={"code": "NEGOTIATION_COMMIT_INVALID", "message": str(exc)})
 
     # Close the session (idempotent-ish; no side effects on DB).
     try:
