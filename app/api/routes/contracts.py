@@ -18,7 +18,8 @@ from app.schemas.contracts import (
     ContractNegotiationCommitRequest,
     ContractNegotiationOfferRequest,
     ContractNegotiationStartRequest,
-    ReSignOrExtendRequest,
+    ExtendRequest,
+    ReSignRequest,
     ReleaseToFARequest,
     SignFreeAgentRequest,
     TwoWayNegotiationCommitRequest,
@@ -300,9 +301,9 @@ async def api_contracts_sign_free_agent(req: SignFreeAgentRequest):
         raise HTTPException(status_code=500, detail=f"Sign-free-agent failed: {e}")
 
 
-@router.post("/api/contracts/re-sign-or-extend")
-async def api_contracts_re_sign_or_extend(req: ReSignOrExtendRequest):
-    """Re-sign / extend a player (DB write).
+@router.post("/api/contracts/re-sign")
+async def api_contracts_re_sign(req: ReSignRequest):
+    """Re-sign a player (DB write).
 
     Commercial enforcement:
     - This endpoint cannot bypass negotiation.
@@ -319,14 +320,43 @@ async def api_contracts_re_sign_or_extend(req: ReSignOrExtendRequest):
             expected_team_id=req.team_id,
             expected_player_id=req.player_id,
             signed_date_iso=str(signed_date_iso),
-            allowed_modes={"RE_SIGN", "EXTEND"},
+            allowed_modes={"RE_SIGN"},
         )
         _validate_repo_integrity(str(db_path))
         return out
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Re-sign/extend failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Re-sign failed: {e}")
+
+
+@router.post("/api/contracts/extend")
+async def api_contracts_extend(req: ExtendRequest):
+    """Extend a player contract (DB write).
+
+    Commercial enforcement:
+    - This endpoint cannot bypass negotiation.
+    - It requires a contract negotiation session_id in ACCEPTED phase.
+    - The signed terms are taken from the session's agreed_offer (not from request payload).
+    """
+    try:
+        db_path = state.get_db_path()
+        signed_date_iso = req.signed_date or state.get_current_date_as_date().isoformat()
+
+        out = _commit_accepted_contract_negotiation(
+            db_path=str(db_path),
+            session_id=str(req.session_id),
+            expected_team_id=req.team_id,
+            expected_player_id=req.player_id,
+            signed_date_iso=str(signed_date_iso),
+            allowed_modes={"EXTEND"},
+        )
+        _validate_repo_integrity(str(db_path))
+        return out
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Extend failed: {e}")
 
 
 @router.post("/api/contracts/two-way/negotiation/start")

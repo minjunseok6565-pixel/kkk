@@ -14,7 +14,7 @@ def compute_recent_signing_banned_until(
     """Compute banned-until date for a "recent signing / re-sign" restriction.
 
     Policy (mirrors PlayerEligibilityRule Phase2):
-    - Applies if last_contract_action_type in {SIGN_FREE_AGENT, RE_SIGN_OR_EXTEND, SIGN_TWO_WAY}
+    - Applies if last_contract_action_type in {SIGN_FREE_AGENT, RE_SIGN, SIGN_TWO_WAY}
       OR signed_via_free_agency is True.
     - signed_date source: prefer last_contract_action_date, else signed_date.
     - SIGN_TWO_WAY: banned_until = signed_date + two_way_sign_ban_days (default 30)
@@ -38,7 +38,7 @@ def compute_recent_signing_banned_until(
             raise RuntimeError(f"{ctx}: signed_via_free_agency must be bool, got {type(signed_via_fa).__name__}")
         signed_via_fa = False
 
-    is_recent_signing = contract_action_type in {"SIGN_FREE_AGENT", "RE_SIGN_OR_EXTEND", "SIGN_TWO_WAY"}
+    is_recent_signing = contract_action_type in {"SIGN_FREE_AGENT", "RE_SIGN", "SIGN_TWO_WAY"}
     applies = bool(is_recent_signing or signed_via_fa)
 
     dec15 = _dec15(season_year, strict=strict, context=ctx)

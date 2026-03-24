@@ -160,10 +160,6 @@ def build_player_position(
     loyalty_trust = loy * trust
     team_discount = float(cfg.w_loyalty_trust_discount_ask) * (loyalty_trust - 0.25)
 
-    # Extra discount for re-sign/extend when relationship is good.
-    if str(mode).upper() in {"RE_SIGN", "EXTEND"}:
-        team_discount *= 1.25
-
     ask_mult = 1.0 + float(ask_premium) - float(team_discount)
     ask_mult = clamp(ask_mult, float(cfg.ask_mult_min), float(cfg.ask_mult_max))
 
