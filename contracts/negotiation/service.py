@@ -401,10 +401,16 @@ def start_contract_negotiation(
                     "Player is not a free agent",
                     {"player_id": pid, "team_id": current_team},
                 )
-            if mode_u in {"RE_SIGN", "EXTEND"} and current_team != tid:
+            if mode_u == "RE_SIGN" and current_team != "FA":
                 raise ContractNegotiationError(
                     NEGOTIATION_INVALID_MODE,
-                    "Player is not on this team for re-sign/extend",
+                    "Player must be a free agent for re-sign",
+                    {"player_id": pid, "team_id": current_team, "negotiating_team": tid},
+                )
+            if mode_u == "EXTEND" and current_team != tid:
+                raise ContractNegotiationError(
+                    NEGOTIATION_INVALID_MODE,
+                    "Player is not on this team for extend",
                     {"player_id": pid, "team_id": current_team, "negotiating_team": tid},
                 )
             roster = r.get_team_roster(tid)
@@ -422,6 +428,37 @@ def start_contract_negotiation(
                     available_contract_channels = ["STANDARD_FA"] + [str(ch) for ch in chs if str(ch) != "STANDARD_FA"]
                 except Exception:
                     available_contract_channels = ["STANDARD_FA"]
+            elif mode_u == "RE_SIGN":
+                # Re-sign channels depend on per-season bird rights state.
+                right = r.get_bird_right(pid, tid, int(negotiation_season_year))
+                if not isinstance(right, Mapping) or int(safe_int(right.get("is_renounced"), 0)) == 1:
+                    raise ContractNegotiationError(
+                        NEGOTIATION_INVALID_MODE,
+                        "Bird right is not available for this player/team/season.",
+                        {
+                            "player_id": pid,
+                            "team_id": tid,
+                            "season_year": int(negotiation_season_year),
+                        },
+                    )
+                bt = str(right.get("bird_type") or "").upper()
+                ch = {
+                    "FULL_BIRD": "BIRD_FULL",
+                    "EARLY_BIRD": "BIRD_EARLY",
+                    "NON_BIRD": "BIRD_NON",
+                }.get(bt)
+                if not ch:
+                    raise ContractNegotiationError(
+                        NEGOTIATION_INVALID_MODE,
+                        "Unsupported Bird rights type for re-sign.",
+                        {
+                            "player_id": pid,
+                            "team_id": tid,
+                            "season_year": int(negotiation_season_year),
+                            "bird_type": bt,
+                        },
+                    )
+                available_contract_channels = [str(ch)]
 
             if preferred_channel_u:
                 if preferred_channel_u in set(available_contract_channels):
@@ -577,8 +614,6 @@ def _validate_offer_channel_policy(
 ) -> None:
     """Validate contract channel eligibility and MLE offer limits."""
     mode_u = str(session.get("mode") or "SIGN_FA").upper()
-    if mode_u != "SIGN_FA":
-        return
 
     channel = str(getattr(offer, "contract_channel", "STANDARD_FA") or "STANDARD_FA").upper()
     constraints = session.get("constraints") if isinstance(session.get("constraints"), Mapping) else {}
@@ -595,7 +630,67 @@ def _validate_offer_channel_policy(
                 },
             )
 
-    if channel == "STANDARD_FA":
+    if mode_u == "RE_SIGN":
+        if channel not in {"BIRD_FULL", "BIRD_EARLY", "BIRD_NON"}:
+            raise ContractNegotiationError(
+                NEGOTIATION_INVALID_OFFER,
+                "RE_SIGN only supports Bird contract channels.",
+                {
+                    "contract_channel": str(channel),
+                    "allowed_contract_channels": ["BIRD_EARLY", "BIRD_FULL", "BIRD_NON"],
+                },
+            )
+
+        team_id = str(session.get("team_id") or "").upper()
+        player_id = str(session.get("player_id") or "")
+        target_season_year = int(safe_int(constraints.get("negotiation_season_year"), 0)) if isinstance(constraints, Mapping) else 0
+        if target_season_year <= 0:
+            target_season_year = int(offer.start_season_year)
+
+        try:
+            with LeagueRepo(db_path) as repo:
+                right = repo.get_bird_right(player_id, team_id, int(target_season_year))
+        except Exception as exc:
+            raise ContractNegotiationError(
+                NEGOTIATION_INVALID_OFFER,
+                "Failed to validate Bird rights policy.",
+                {"contract_channel": str(channel), "error": str(exc)},
+            ) from exc
+
+        if not isinstance(right, Mapping) or int(safe_int(right.get("is_renounced"), 0)) == 1:
+            raise ContractNegotiationError(
+                NEGOTIATION_INVALID_OFFER,
+                "Bird right is not available for this player/team/season.",
+                {
+                    "contract_channel": str(channel),
+                    "team_id": str(team_id),
+                    "player_id": str(player_id),
+                    "season_year": int(target_season_year),
+                },
+            )
+
+        expected_type = {
+            "BIRD_FULL": "FULL_BIRD",
+            "BIRD_EARLY": "EARLY_BIRD",
+            "BIRD_NON": "NON_BIRD",
+        }.get(str(channel))
+        actual_type = str(right.get("bird_type") or "").upper()
+        if expected_type != actual_type:
+            raise ContractNegotiationError(
+                NEGOTIATION_INVALID_OFFER,
+                "Selected Bird contract_channel does not match available Bird rights type.",
+                {
+                    "contract_channel": str(channel),
+                    "expected_bird_type": str(expected_type),
+                    "actual_bird_type": str(actual_type),
+                },
+            )
+        return
+
+    if mode_u != "SIGN_FA":
+        return
+
+    if channel in {"STANDARD_FA", "MINIMUM"}:
         return
 
     if channel not in {"NT_MLE", "TP_MLE", "ROOM_MLE"}:
@@ -882,6 +977,7 @@ def commit_contract_negotiation(
             ev = svc.re_sign(
                 tid,
                 pid,
+                contract_channel=str(getattr(offer, "contract_channel", "STANDARD_FA") or "STANDARD_FA").upper(),
                 signed_date=signed_date,
                 years=int(offer.years),
                 salary_by_year={int(k): float(v) for k, v in offer.salary_by_year.items()},

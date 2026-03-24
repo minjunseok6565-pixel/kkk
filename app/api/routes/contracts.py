@@ -13,6 +13,7 @@ from league_repo import LeagueRepo
 from league_service import LeagueService
 from schema import normalize_team_id, normalize_player_id
 from app.schemas.contracts import (
+    BirdRightsRenounceRequest,
     ContractNegotiationAcceptCounterRequest,
     ContractNegotiationCancelRequest,
     ContractNegotiationCommitRequest,
@@ -144,6 +145,88 @@ async def api_contracts_release_to_fa(req: ReleaseToFARequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Release-to-FA failed: {e}")
+
+
+@router.post("/api/contracts/bird-rights/renounce")
+async def api_contracts_bird_rights_renounce(req: BirdRightsRenounceRequest):
+    """Renounce Bird rights and release corresponding cap hold for a player."""
+    try:
+        db_path = state.get_db_path()
+        tid = str(normalize_team_id(req.team_id)).upper()
+        pid = str(normalize_player_id(req.player_id, strict=False, allow_legacy_numeric=True))
+        sy = int(req.season_year)
+        now_iso = game_time.now_utc_like_iso()
+
+        with LeagueRepo(db_path) as repo:
+            repo.init_db()
+            rights_changed = bool(repo.renounce_bird_right(pid, tid, sy, now_iso))
+            holds_changed = bool(repo.release_cap_hold(pid, tid, sy, "RENOUNCE", now_iso))
+            right_after = repo.get_bird_right(pid, tid, sy)
+            holds_after = repo.list_team_cap_holds(tid, sy, active_only=False)
+
+        return {
+            "ok": True,
+            "team_id": tid,
+            "player_id": pid,
+            "season_year": int(sy),
+            "rights_changed": bool(rights_changed),
+            "cap_hold_released": bool(holds_changed),
+            "bird_right": right_after,
+            "cap_holds": holds_after,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"bird-rights renounce failed: {e}")
+
+
+@router.get("/api/contracts/bird-rights")
+async def api_contracts_bird_rights(team_id: str, season_year: int):
+    """List Bird rights for a team and season."""
+    try:
+        db_path = state.get_db_path()
+        tid = str(normalize_team_id(team_id)).upper()
+        sy = int(season_year)
+        with LeagueRepo(db_path) as repo:
+            repo.init_db()
+            rows = repo.list_team_bird_rights(tid, sy)
+        return {
+            "ok": True,
+            "team_id": tid,
+            "season_year": int(sy),
+            "count": len(rows),
+            "items": rows,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"bird-rights list failed: {e}")
+
+
+@router.get("/api/contracts/cap-holds")
+async def api_contracts_cap_holds(team_id: str, season_year: int, active_only: bool = True):
+    """List cap holds for a team and season."""
+    try:
+        db_path = state.get_db_path()
+        tid = str(normalize_team_id(team_id)).upper()
+        sy = int(season_year)
+        with LeagueRepo(db_path) as repo:
+            repo.init_db()
+            rows = repo.list_team_cap_holds(tid, sy, active_only=bool(active_only))
+            hold_sum = int(repo.sum_active_cap_holds(tid, sy))
+        return {
+            "ok": True,
+            "team_id": tid,
+            "season_year": int(sy),
+            "active_only": bool(active_only),
+            "active_hold_sum": int(hold_sum),
+            "count": len(rows),
+            "items": rows,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"cap-holds list failed: {e}")
 
 
 # -------------------------------------------------------------------------
@@ -304,7 +387,7 @@ async def api_contracts_sign_free_agent(req: SignFreeAgentRequest):
 
 @router.post("/api/contracts/re-sign")
 async def api_contracts_re_sign(req: ReSignRequest):
-    """Re-sign a player (DB write).
+    """Re-sign an own FA player with Bird rights (DB write).
 
     Commercial enforcement:
     - This endpoint cannot bypass negotiation.

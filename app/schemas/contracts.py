@@ -49,9 +49,9 @@ class ExtendRequest(BaseModel):
 class ContractNegotiationStartRequest(BaseModel):
     team_id: str
     player_id: str
-    mode: str = "SIGN_FA"  # SIGN_FA | RE_SIGN | EXTEND
+    mode: str = "SIGN_FA"  # SIGN_FA(일반 FA) | RE_SIGN(FA + 팀 Bird 권한 보유자 전용) | EXTEND(현재 팀 소속 연장)
     valid_days: Optional[int] = 7  # in-game days the offer window stays open (best-effort)
-    preferred_channel: Optional[str] = None  # STANDARD_FA | NT_MLE | TP_MLE | ROOM_MLE
+    preferred_channel: Optional[str] = None  # RE_SIGN: BIRD_FULL|BIRD_EARLY|BIRD_NON, SIGN_FA: STANDARD_FA|MINIMUM|NT_MLE|TP_MLE|ROOM_MLE (mode별 검증)
 
 
 class ContractOfferPayload(BaseModel):
@@ -60,7 +60,7 @@ class ContractOfferPayload(BaseModel):
     salary_by_year: Optional[Dict[int, float]] = None
     aav: Optional[float] = None
     salary: Optional[float] = None
-    contract_channel: Optional[str] = "STANDARD_FA"
+    contract_channel: Optional[str] = "STANDARD_FA"  # RE_SIGN는 Bird-only(BIRD_FULL|BIRD_EARLY|BIRD_NON), SIGN_FA는 STANDARD_FA|MINIMUM|MLE 계열
     options: Optional[List[Dict[str, Any]]] = None
     non_monetary: Optional[Dict[str, Any]] = None
 
@@ -82,6 +82,12 @@ class ContractNegotiationCommitRequest(BaseModel):
 class ContractNegotiationCancelRequest(BaseModel):
     session_id: str
     reason: Optional[str] = None
+
+
+class BirdRightsRenounceRequest(BaseModel):
+    team_id: str
+    player_id: str
+    season_year: int
 
 
 class TwoWayNegotiationStartRequest(BaseModel):
