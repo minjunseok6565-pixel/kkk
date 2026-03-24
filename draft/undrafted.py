@@ -409,12 +409,13 @@ def resolve_undrafted_to_pro(
                     # Insert/Upsert players
                     cur.execute(
                         """
-                        INSERT INTO players(player_id, name, pos, age, height_in, weight_lb, ovr, attrs_json, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO players(player_id, name, pos, age, exp, height_in, weight_lb, ovr, attrs_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(player_id) DO UPDATE SET
                             name=excluded.name,
                             pos=excluded.pos,
                             age=excluded.age,
+                            exp=excluded.exp,
                             height_in=excluded.height_in,
                             weight_lb=excluded.weight_lb,
                             ovr=excluded.ovr,
@@ -426,6 +427,7 @@ def resolve_undrafted_to_pro(
                             str(r.get("name") or "Unknown"),
                             str(r.get("pos") or "G"),
                             int(r.get("age") or 19),
+                            0,
                             int(r.get("height_in") or 78),
                             int(r.get("weight_lb") or 210),
                             int(r.get("ovr") or 60),

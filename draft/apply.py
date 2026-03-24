@@ -401,12 +401,13 @@ def apply_pick_to_db(
         with repo.transaction() as cur:
             cur.execute(
                 """
-                INSERT INTO players(player_id, name, pos, age, height_in, weight_lb, ovr, attrs_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO players(player_id, name, pos, age, exp, height_in, weight_lb, ovr, attrs_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(player_id) DO UPDATE SET
                     name=excluded.name,
                     pos=excluded.pos,
                     age=excluded.age,
+                    exp=excluded.exp,
                     height_in=excluded.height_in,
                     weight_lb=excluded.weight_lb,
                     ovr=excluded.ovr,
@@ -418,6 +419,7 @@ def apply_pick_to_db(
                     str(prospect.name),
                     str(prospect.pos),
                     int(prospect.age),
+                    0,
                     int(prospect.height_in),
                     int(prospect.weight_lb),
                     int(prospect.ovr),

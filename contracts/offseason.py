@@ -123,6 +123,23 @@ def process_offseason(
 
         svc.repo.validate_integrity()
 
+        # Apply offseason EXP progression once per offseason window.
+        # Policy: increment only ACTIVE roster players.
+        with svc.repo.transaction() as cur:
+            cur.execute(
+                """
+                UPDATE players
+                   SET exp = COALESCE(exp, 0) + 1,
+                       updated_at = ?
+                 WHERE player_id IN (
+                    SELECT r.player_id
+                      FROM roster r
+                     WHERE LOWER(COALESCE(r.status, 'active')) = 'active'
+                 );
+                """,
+                (decision_date_iso,),
+            )
+
         # Mark idempotency after successful processing.
         with svc.repo.transaction() as cur:
             cur.execute(
