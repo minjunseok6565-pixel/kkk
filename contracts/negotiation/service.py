@@ -136,6 +136,36 @@ def _with_salary_cap(cfg: ContractNegotiationConfig) -> ContractNegotiationConfi
         return cfg
 
 
+def _extract_trade_rules_from_state() -> dict[str, Any]:
+    """Best-effort trade_rules snapshot extraction for policy checks."""
+    try:
+        import state
+
+        ctx = state.get_league_context_snapshot() or {}
+        if not isinstance(ctx, Mapping):
+            return {}
+        tr = ctx.get("trade_rules")
+        if not isinstance(tr, Mapping):
+            return {}
+        return dict(tr)
+    except Exception:
+        return {}
+
+
+def _extract_season_year_from_state() -> Optional[int]:
+    """Best-effort season_year extraction from league context snapshot."""
+    try:
+        import state
+
+        ctx = state.get_league_context_snapshot() or {}
+        if not isinstance(ctx, Mapping):
+            return None
+        y = int(safe_int(ctx.get("season_year"), 0))
+        return int(y) if y > 0 else None
+    except Exception:
+        return None
+
+
 def _now_iso() -> str:
     return game_time.now_utc_like_iso()
 
@@ -330,6 +360,7 @@ def start_contract_negotiation(
     mode: str = "SIGN_FA",
     now_iso: Optional[str] = None,
     valid_days: Optional[int] = None,
+    preferred_channel: Optional[str] = None,
     team_win_pct: Optional[float] = None,
     cfg: ContractNegotiationConfig = DEFAULT_CONTRACT_NEGOTIATION_CONFIG,
     repo: LeagueRepo | None = None,
@@ -352,6 +383,13 @@ def start_contract_negotiation(
     managed = repo is None
     r = repo or LeagueRepo(db_path)
     try:
+        trade_rules_snapshot = _extract_trade_rules_from_state()
+        negotiation_season_year = int(_extract_season_year_from_state() or 0)
+        if negotiation_season_year <= 0:
+            negotiation_season_year = int(safe_int((trade_rules_snapshot or {}).get("cap_base_season_year"), 2025))
+        available_contract_channels: list[str] = ["STANDARD_FA"]
+        preferred_channel_u = str(preferred_channel or "").strip().upper()
+
         # Read context
         with r.transaction() as cur:
             player = r.get_player(pid)
@@ -370,6 +408,26 @@ def start_contract_negotiation(
                     {"player_id": pid, "team_id": current_team, "negotiating_team": tid},
                 )
             roster = r.get_team_roster(tid)
+
+            if mode_u == "SIGN_FA":
+                try:
+                    from contracts.mle_policy import eligible_channels_for_team
+
+                    chs = eligible_channels_for_team(
+                        team_id=str(tid),
+                        season_year=int(negotiation_season_year),
+                        cur=cur,
+                        trade_rules=trade_rules_snapshot,
+                    )
+                    available_contract_channels = ["STANDARD_FA"] + [str(ch) for ch in chs if str(ch) != "STANDARD_FA"]
+                except Exception:
+                    available_contract_channels = ["STANDARD_FA"]
+
+            if preferred_channel_u:
+                if preferred_channel_u in set(available_contract_channels):
+                    available_contract_channels = [preferred_channel_u] + [
+                        x for x in available_contract_channels if str(x).upper() != preferred_channel_u
+                    ]
 
             # Current salary from SSOT roster table (players table does not store salary).
             salary_amount = r.get_salary_amount(pid)
@@ -429,8 +487,17 @@ def start_contract_negotiation(
             team_snapshot=team_snapshot,
             agency_snapshot=agency_snapshot,
             player_position=pos.to_payload(),
-            constraints={},
+            constraints={
+                "available_contract_channels": list(available_contract_channels),
+                "trade_rules_snapshot": dict(trade_rules_snapshot or {}),
+                "negotiation_season_year": int(negotiation_season_year),
+            },
         )
+        session["available_contract_channels"] = list(available_contract_channels)
+        session["trade_rules_snapshot"] = dict(trade_rules_snapshot or {})
+        session["negotiation_season_year"] = int(negotiation_season_year)
+        if preferred_channel_u:
+            session["preferred_channel"] = str(preferred_channel_u)
 
         append_message(
             session["session_id"],
@@ -502,6 +569,113 @@ def _validate_offer_exp_aav_hard_cap(
     )
 
 
+def _validate_offer_channel_policy(
+    *,
+    db_path: str,
+    session: Mapping[str, Any],
+    offer: ContractOffer,
+) -> None:
+    """Validate contract channel eligibility and MLE offer limits."""
+    mode_u = str(session.get("mode") or "SIGN_FA").upper()
+    if mode_u != "SIGN_FA":
+        return
+
+    channel = str(getattr(offer, "contract_channel", "STANDARD_FA") or "STANDARD_FA").upper()
+    constraints = session.get("constraints") if isinstance(session.get("constraints"), Mapping) else {}
+    available = constraints.get("available_contract_channels") if isinstance(constraints, Mapping) else None
+    if isinstance(available, list) and available:
+        allowed = {str(x).upper() for x in available}
+        if channel not in allowed:
+            raise ContractNegotiationError(
+                NEGOTIATION_INVALID_OFFER,
+                "Selected contract_channel is not available for this session.",
+                {
+                    "contract_channel": str(channel),
+                    "available_contract_channels": sorted(allowed),
+                },
+            )
+
+    if channel == "STANDARD_FA":
+        return
+
+    if channel not in {"NT_MLE", "TP_MLE", "ROOM_MLE"}:
+        raise ContractNegotiationError(
+            NEGOTIATION_INVALID_OFFER,
+            "Unsupported contract_channel for SIGN_FA.",
+            {"contract_channel": str(channel)},
+        )
+
+    trade_rules_snapshot = constraints.get("trade_rules_snapshot") if isinstance(constraints, Mapping) else None
+    if not isinstance(trade_rules_snapshot, Mapping):
+        trade_rules_snapshot = _extract_trade_rules_from_state()
+    target_season_year = int(safe_int(constraints.get("negotiation_season_year"), 0)) if isinstance(constraints, Mapping) else 0
+    if target_season_year <= 0:
+        target_season_year = int(_extract_season_year_from_state() or 0)
+    if target_season_year <= 0:
+        target_season_year = int(offer.start_season_year)
+
+    if int(offer.start_season_year) != int(target_season_year):
+        raise ContractNegotiationError(
+            NEGOTIATION_INVALID_OFFER,
+            "offer.start_season_year does not match negotiation target season.",
+            {
+                "offer_start_season_year": int(offer.start_season_year),
+                "negotiation_season_year": int(target_season_year),
+                "contract_channel": str(channel),
+            },
+        )
+
+    tid = str(session.get("team_id") or "").upper()
+    if not tid:
+        raise ContractNegotiationError(
+            NEGOTIATION_BAD_PAYLOAD,
+            "session.team_id is missing",
+            {"session_id": str(session.get("session_id") or "")},
+        )
+
+    try:
+        from contracts.mle_policy import eligible_channels_for_team, validate_mle_offer
+
+        with LeagueRepo(str(db_path)).transaction() as cur:
+            eligible = eligible_channels_for_team(
+                team_id=str(tid),
+                season_year=int(target_season_year),
+                cur=cur,
+                trade_rules=trade_rules_snapshot,
+            )
+        if str(channel) not in {str(x).upper() for x in (eligible or [])}:
+            raise ContractNegotiationError(
+                NEGOTIATION_INVALID_OFFER,
+                "Team is not currently eligible for this MLE channel.",
+                {
+                    "team_id": str(tid),
+                    "contract_channel": str(channel),
+                    "eligible_channels": [str(x).upper() for x in (eligible or [])],
+                },
+            )
+
+        check = validate_mle_offer(
+            channel=str(channel),
+            offer=offer.to_payload(),
+            season_year=int(target_season_year),
+            trade_rules=trade_rules_snapshot,
+        )
+        if not bool(check.ok):
+            raise ContractNegotiationError(
+                NEGOTIATION_INVALID_OFFER,
+                "Offer violates MLE channel rules.",
+                {"contract_channel": str(channel), "mle_validation": check.to_payload()},
+            )
+    except ContractNegotiationError:
+        raise
+    except Exception as exc:
+        raise ContractNegotiationError(
+            NEGOTIATION_INVALID_OFFER,
+            "Failed to validate contract channel policy.",
+            {"contract_channel": str(channel), "error": str(exc)},
+        ) from exc
+
+
 def submit_contract_offer(
     db_path: str,
     session_id: str,
@@ -541,6 +715,7 @@ def submit_contract_offer(
 
     # Evaluate
     cfg_eff = _with_salary_cap(cfg)
+    _validate_offer_channel_policy(db_path=db_path, session=session, offer=offer)
     _validate_offer_exp_aav_hard_cap(session=session, offer=offer, cfg=cfg_eff)
     decision: NegotiationDecision = evaluate_offer(session, offer, cfg=cfg_eff)
 
@@ -637,6 +812,7 @@ def accept_last_counter(
         ) from exc
 
     cfg_eff = _with_salary_cap(cfg)
+    _validate_offer_channel_policy(db_path=db_path, session=session, offer=offer)
     _validate_offer_exp_aav_hard_cap(session=session, offer=offer, cfg=cfg_eff)
 
     set_agreed_offer(session_id, offer.to_payload())
@@ -693,9 +869,10 @@ def commit_contract_negotiation(
     try:
         svc = LeagueService(r)
         if mode_u == "SIGN_FA":
-            ev = svc.sign_free_agent(
+            ev = svc.sign_free_agent_with_channel(
                 tid,
                 pid,
+                contract_channel=str(getattr(offer, "contract_channel", "STANDARD_FA") or "STANDARD_FA").upper(),
                 signed_date=signed_date,
                 years=int(offer.years),
                 salary_by_year={int(k): float(v) for k, v in offer.salary_by_year.items()},

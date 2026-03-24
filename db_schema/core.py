@@ -108,7 +108,30 @@ def ddl(*, now: str, schema_version: str) -> str:
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(player_id) REFERENCES players(player_id) ON DELETE CASCADE
                 );
-"""
+
+                -- Team-level contract exception (MLE etc.) first-year budget usage per season/channel
+                CREATE TABLE IF NOT EXISTS team_contract_exception_budget_usage (
+                    season_year INTEGER NOT NULL,
+                    team_id TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    first_year_spent_total INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL DEFAULT '{now}',
+                    PRIMARY KEY (season_year, team_id, channel)
+                );
+                CREATE INDEX IF NOT EXISTS idx_exception_budget_usage_team_season
+                    ON team_contract_exception_budget_usage(team_id, season_year);
+
+                -- Team-level room MLE eligibility flags per season
+                CREATE TABLE IF NOT EXISTS team_room_mle_flags (
+                    season_year INTEGER NOT NULL,
+                    team_id TEXT NOT NULL,
+                    became_below_cap_once INTEGER NOT NULL DEFAULT 0,
+                    updated_at TEXT NOT NULL DEFAULT '{now}',
+                    PRIMARY KEY (season_year, team_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_room_mle_flags_team_season
+                    ON team_room_mle_flags(team_id, season_year);
+	"""
 
 
 def migrate(cur: sqlite3.Cursor, *, ensure_columns: EnsureColumnsFn) -> None:

@@ -118,9 +118,12 @@ def _commit_accepted_contract_negotiation(
         svc = LeagueService(repo)
         try:
             if mode == "SIGN_FA":
-                event = svc.sign_free_agent(
+                contract_channel = str(getattr(offer, "contract_channel", "STANDARD_FA") or "STANDARD_FA").upper()
+                event = svc.sign_free_agent_with_channel(
+                    # Channel-aware entrypoint (STANDARD_FA preserves old behavior).
                     team_id=team_norm,
                     player_id=pid_norm,
+                    contract_channel=contract_channel,
                     signed_date=signed_date_iso,
                     years=int(offer.years),
                     salary_by_year=offer.salary_by_year,

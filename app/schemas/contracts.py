@@ -51,11 +51,23 @@ class ContractNegotiationStartRequest(BaseModel):
     player_id: str
     mode: str = "SIGN_FA"  # SIGN_FA | RE_SIGN | EXTEND
     valid_days: Optional[int] = 7  # in-game days the offer window stays open (best-effort)
+    preferred_channel: Optional[str] = None  # STANDARD_FA | NT_MLE | TP_MLE | ROOM_MLE
+
+
+class ContractOfferPayload(BaseModel):
+    start_season_year: Optional[int] = None
+    years: Optional[int] = None
+    salary_by_year: Optional[Dict[int, float]] = None
+    aav: Optional[float] = None
+    salary: Optional[float] = None
+    contract_channel: Optional[str] = "STANDARD_FA"
+    options: Optional[List[Dict[str, Any]]] = None
+    non_monetary: Optional[Dict[str, Any]] = None
 
 
 class ContractNegotiationOfferRequest(BaseModel):
     session_id: str
-    offer: Dict[str, Any]  # see contracts.negotiation.types.ContractOffer.from_payload
+    offer: ContractOfferPayload  # see contracts.negotiation.types.ContractOffer.from_payload
 
 
 class ContractNegotiationAcceptCounterRequest(BaseModel):

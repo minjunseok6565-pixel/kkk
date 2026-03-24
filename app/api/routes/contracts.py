@@ -168,6 +168,7 @@ async def api_contracts_negotiation_start(req: ContractNegotiationStartRequest):
             player_id=req.player_id,
             mode=req.mode,
             valid_days=req.valid_days,
+            preferred_channel=req.preferred_channel,
             now_iso=str(now_iso),
         )
         return out
@@ -193,7 +194,7 @@ async def api_contracts_negotiation_offer(req: ContractNegotiationOfferRequest):
         out = submit_contract_offer(
             db_path=str(db_path),
             session_id=req.session_id,
-            offer_payload=req.offer,
+            offer_payload=req.offer.model_dump(exclude_none=True),
             now_iso=str(now_iso),
         )
         return out

@@ -11,10 +11,25 @@ from dataclasses import asdict, replace
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from contracts.policy.salary_limits import contract_aav_max_abs_for_exp
+from contracts.policy.raise_limits import max_raise_pct_for_contract_channel, validate_salary_raise_curve
 
 from .config import ContractNegotiationConfig, DEFAULT_CONTRACT_NEGOTIATION_CONFIG
 from .types import ContractOffer, NegotiationDecision, PlayerPosition, Reason
 from .utils import clamp, clamp01, mental_norm, safe_float, safe_int, sigmoid, stable_u01
+
+
+def _channel_years_cap(offer: ContractOffer, session: Mapping[str, Any], cfg: ContractNegotiationConfig) -> int:
+    cap = int(cfg.max_years_allowed)
+    try:
+        from contracts.mle_policy import max_years_for_channel
+
+        trade_rules = session.get("trade_rules_snapshot") if isinstance(session.get("trade_rules_snapshot"), Mapping) else None
+        ch_cap = int(max_years_for_channel(offer.contract_channel, trade_rules))
+        if ch_cap > 0:
+            cap = min(int(cap), int(ch_cap))
+    except Exception:
+        pass
+    return int(cap)
 
 
 # -----------------------------------------------------------------------------
@@ -406,6 +421,12 @@ def build_counter_offer(
         else:
             counter_years = int(offer_years)
 
+    session_cap = int(_channel_years_cap(offer, session, cfg))
+    if counter_years > int(session_cap):
+        counter_years = int(session_cap)
+    if counter_years < int(cfg.min_years_allowed):
+        counter_years = int(cfg.min_years_allowed)
+
     start_year = int(offer.start_season_year)
     salary_by_year = {int(start_year + i): round_salary(float(counter_aav), cfg=cfg) for i in range(int(counter_years))}
 
@@ -428,6 +449,7 @@ def build_counter_offer(
         start_season_year=int(start_year),
         years=int(counter_years),
         salary_by_year=salary_by_year,
+        contract_channel=str(offer.contract_channel or "STANDARD_FA").upper(),
         options=counter_options,
         non_monetary=non_monetary,
     )
@@ -452,15 +474,50 @@ def evaluate_offer(
             meta={"error": str(exc)},
         )
 
-    # Hard bounds (guardrails)
-    if offer.years < int(cfg.min_years_allowed) or offer.years > int(cfg.max_years_allowed):
+    # Hard bounds (guardrails): apply channel cap first, then global bounds.
+    channel_years_cap = int(_channel_years_cap(offer, session, cfg))
+    if offer.years < int(cfg.min_years_allowed) or offer.years > int(channel_years_cap):
         return NegotiationDecision(
             verdict="REJECT",
             reasons=[
                 Reason(
                     "OFFER_YEARS_OUT_OF_RANGE",
                     "Contract length is outside allowed bounds.",
-                    {"years": int(offer.years), "min": int(cfg.min_years_allowed), "max": int(cfg.max_years_allowed)},
+                    {
+                        "years": int(offer.years),
+                        "min": int(cfg.min_years_allowed),
+                        "max": int(channel_years_cap),
+                        "contract_channel": str(offer.contract_channel or "STANDARD_FA").upper(),
+                    },
+                )
+            ],
+            effects={"trust_delta": -0.01},
+            tone="FIRM",
+            meta={"offer": offer.to_payload()},
+        )
+
+    # Shared raise-limit validator (channel-aware SSOT).
+    trade_rules = session.get("trade_rules_snapshot") if isinstance(session.get("trade_rules_snapshot"), Mapping) else None
+    max_raise_pct = float(
+        max_raise_pct_for_contract_channel(
+            str(offer.contract_channel or "STANDARD_FA").upper(),
+            trade_rules=trade_rules,
+            season_year=int(offer.start_season_year),
+        )
+    )
+    raise_chk = validate_salary_raise_curve(offer.salary_by_year, max_raise_pct)
+    if not bool(raise_chk.ok):
+        return NegotiationDecision(
+            verdict="REJECT",
+            reasons=[
+                Reason(
+                    "OFFER_RAISE_EXCEEDS_CHANNEL_LIMIT",
+                    "Year-to-year raise exceeds the channel limit.",
+                    {
+                        "contract_channel": str(offer.contract_channel or "STANDARD_FA").upper(),
+                        "max_raise_pct": float(max_raise_pct),
+                        "violations": list(raise_chk.violations or []),
+                    },
                 )
             ],
             effects={"trust_delta": -0.01},

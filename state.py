@@ -5,6 +5,7 @@ from copy import deepcopy
 from datetime import date
 import os
 import logging
+import sqlite3
 from threading import RLock
 from typing import Any, Callable, Optional, TypeVar
 
@@ -216,6 +217,39 @@ def _ensure_second_apron_frozen_picks_once(
     )
 
 
+def _reset_mle_season_state(*, db_path: str, season_year: int) -> None:
+    """Reset per-season MLE runtime tables for the target season (idempotent)."""
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
+    cur = conn.cursor()
+    try:
+        cur.execute("BEGIN;")
+        cur.execute(
+            "DELETE FROM team_contract_exception_budget_usage WHERE season_year=?;",
+            (int(season_year),),
+        )
+        cur.execute(
+            "DELETE FROM team_room_mle_flags WHERE season_year=?;",
+            (int(season_year),),
+        )
+        conn.commit()
+    except sqlite3.OperationalError as exc:
+        # Tables may not exist in older DB snapshots before schema migration.
+        conn.rollback()
+        msg = str(exc).lower()
+        if "no such table" in msg:
+            logger.warning(
+                "[MLE_SEASON_RESET_SKIPPED_TABLE_MISSING] season_year=%s db_path=%s",
+                int(season_year),
+                str(db_path),
+            )
+            return
+        raise
+    finally:
+        conn.close()
+
+
 def ensure_schedule_for_active_season(*, force: bool = False) -> None:
     """현재 active_season_id에 맞는 master_schedule을 보장한다(시즌 전환은 하지 않음)."""
     def _impl(state: dict) -> None:
@@ -369,6 +403,12 @@ def start_new_season(
         if not isinstance(trade_rules, dict):
             trade_rules = {}
             league["trade_rules"] = trade_rules
+
+        # Reset target-season MLE usage/flags so season transition remains idempotent.
+        _reset_mle_season_state(
+            db_path=str(league["db_path"]),
+            season_year=int(target_year),
+        )
 
         season_start = date(int(target_year), SEASON_START_MONTH, SEASON_START_DAY)
         _ensure_second_apron_frozen_picks_once(
