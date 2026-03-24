@@ -34,6 +34,15 @@ DEFAULT_TRADE_RULES: Dict[str, Any] = {
     "new_fa_sign_ban_days": 90,
     "two_way_sign_ban_days": 30,
     "aggregation_ban_days": 60,
+    # League-wide player contract AAV hard cap by experience bucket (share of salary cap).
+    # - exp <= 6  : 25%
+    # - exp 7~9   : 30%
+    # - exp >= 10 : 35%
+    "contract_aav_max_pct_by_exp": {
+        "le_6": 0.25,
+        "7_9": 0.30,
+        "ge_10": 0.35,
+    },
     "roster_limit_rule_enabled": False,
     "max_pick_years_ahead": 7,
     "stepien_lookahead": 7,

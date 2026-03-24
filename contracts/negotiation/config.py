@@ -12,7 +12,7 @@ Design goals
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from config import CAP_BASE_SALARY_CAP
 
@@ -71,8 +71,9 @@ class ContractNegotiationConfig:
     # ---------------------------------------------------------------------
     ask_mult_min: float = 0.85
     ask_mult_max: float = 1.45
-    # Absolute ask cap as share of salary cap (applies to all players when salary_cap is known).
-    ask_aav_cap_pct_of_salary_cap: float = 0.30
+    # League-wide hard AAV cap by experience bucket (share of salary cap).
+    # Default mirrors state_modules.state_constants.DEFAULT_TRADE_RULES["contract_aav_max_pct_by_exp"].
+    contract_aav_max_pct_by_exp: Optional[Mapping[str, Any]] = None
 
     floor_mult_min: float = 0.78
     floor_mult_max: float = 1.35
