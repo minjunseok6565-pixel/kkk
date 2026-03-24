@@ -561,11 +561,12 @@ class LeagueService:
         return int(total)
 
     def _compute_team_cap_salary_with_holds_in_cur(self, cur, team_id: str, season_year: int) -> int:
-        """Team cap salary = roster payroll + active cap holds for season."""
+        """Team cap salary = roster payroll + active cap holds + active dead caps."""
         tid = self._norm_team_id(team_id, strict=False)
         sy = int(season_year)
         payroll = int(self._compute_team_payroll_for_season_in_cur(cur, tid, sy))
         hold_sum = 0
+        dead_sum = 0
         try:
             row = cur.execute(
                 """
@@ -589,7 +590,36 @@ class LeagueService:
                 limit=3,
             )
             hold_sum = 0
-        return int(payroll + max(0, int(hold_sum)))
+        dead_sum = int(self._sum_team_dead_caps_in_cur(cur, tid, sy))
+        return int(payroll + max(0, int(hold_sum)) + max(0, int(dead_sum)))
+
+    def _sum_team_dead_caps_in_cur(self, cur, team_id: str, season_year: int) -> int:
+        tid = self._norm_team_id(team_id, strict=False)
+        sy = int(season_year)
+        try:
+            row = cur.execute(
+                """
+                SELECT SUM(COALESCE(amount, 0)) AS dead_sum
+                FROM team_dead_caps
+                WHERE UPPER(team_id)=UPPER(?) AND applied_season_year=? AND is_voided=0;
+                """,
+                (str(tid), int(sy)),
+            ).fetchone()
+            if not row:
+                return 0
+            try:
+                return int(row["dead_sum"] or 0)
+            except Exception:
+                return int(row[0] or 0)
+        except sqlite3.OperationalError:
+            return 0
+        except Exception as e:
+            _warn_limited(
+                "DEAD_CAP_SUM_QUERY_FAILED",
+                f"team_id={tid!r} season_year={sy!r} exc_type={type(e).__name__}",
+                limit=3,
+            )
+            return 0
 
     def _tx_exists_by_deal_id(self, cur, deal_id: str) -> bool:
         if not deal_id:
@@ -1131,7 +1161,91 @@ class LeagueService:
         with self._atomic() as cur:
             self._set_roster_salary_in_cur(cur, player_id, int(salary_amount))
 
-    def release_player_to_free_agency(self, player_id: str, released_date: date | str | None = None) -> ServiceEvent:
+    def _get_active_contract_for_player_in_cur(self, cur, player_id: str) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        pid = self._norm_player_id(player_id)
+        row = cur.execute(
+            "SELECT contract_id FROM active_contracts WHERE player_id=? LIMIT 1;",
+            (pid,),
+        ).fetchone()
+        if not row:
+            return None, None
+        try:
+            cid = str(row["contract_id"])
+        except Exception:
+            cid = str(row[0])
+        if not cid:
+            return None, None
+        contract = self._load_contract_row_in_cur(cur, cid)
+        return cid, contract
+
+    def _remaining_salary_schedule(self, contract: Mapping[str, Any], current_season_year: int) -> Dict[int, int]:
+        out: Dict[int, int] = {}
+        by_year = contract.get("salary_by_year") or {}
+        if not isinstance(by_year, Mapping):
+            return out
+        for k, v in by_year.items():
+            try:
+                y = int(k)
+                amt = int(float(v))
+            except Exception:
+                continue
+            if y < int(current_season_year):
+                continue
+            if amt <= 0:
+                continue
+            out[int(y)] = int(amt)
+        return dict(sorted(out.items(), key=lambda kv: int(kv[0])))
+
+    def _build_waive_dead_cap_rows(
+        self,
+        *,
+        team_id: str,
+        player_id: str,
+        origin_contract_id: Optional[str],
+        remaining_salary_by_year: Mapping[int, int],
+        now_iso: str,
+    ) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for season_year, amount in sorted(remaining_salary_by_year.items(), key=lambda kv: int(kv[0])):
+            rows.append(
+                {
+                    "team_id": str(team_id).upper(),
+                    "player_id": str(player_id),
+                    "origin_contract_id": (str(origin_contract_id) if origin_contract_id else None),
+                    "source_type": "WAIVE",
+                    "applied_season_year": int(season_year),
+                    "amount": int(max(0, int(amount))),
+                    "is_voided": 0,
+                    "voided_reason": None,
+                    "meta_json": {
+                        "policy": "waive",
+                        "created_at": str(now_iso),
+                    },
+                }
+            )
+        return rows
+
+    def _build_stretch_dead_cap_rows(self, total: int, start_year: int, stretch_years: int) -> Dict[int, int]:
+        total_i = max(0, int(total))
+        years_i = max(1, int(stretch_years))
+        start_i = int(start_year)
+        base = total_i // years_i
+        rem = total_i % years_i
+        out: Dict[int, int] = {}
+        for i in range(years_i):
+            y = int(start_i + i)
+            add = 1 if i < rem else 0
+            out[y] = int(base + add)
+        return out
+
+    def release_player_to_free_agency(
+        self,
+        player_id: str,
+        released_date: date | str | None = None,
+        *,
+        mode: str | None = None,
+        release_reason: str | None = None,
+    ) -> ServiceEvent:
         """Release player to FA by moving roster.team_id to 'FA'.
 
         free_agents is derived from roster.team_id == 'FA' by default (SSOT),
@@ -1153,6 +1267,16 @@ class LeagueService:
             if from_team == "FA":
                 raise ValueError(f"player_id={player_id} is already a free agent")
 
+            mode_norm = str(mode or "").strip().upper()
+            if mode_norm == "EXPIRATION_ONLY":
+                _, active_contract = self._get_active_contract_for_player_in_cur(cur, pid)
+                if isinstance(active_contract, Mapping):
+                    remaining = self._remaining_salary_schedule(active_contract, int(season_year_i))
+                    if remaining:
+                        raise ValueError(
+                            f"player_id={player_id} has remaining contract salary and cannot be released in EXPIRATION_ONLY mode"
+                        )
+
             self._move_player_team_in_cur(cur, pid, "FA")
 
             # Log (SSOT): standardized contract-related transaction
@@ -1171,6 +1295,8 @@ class LeagueService:
                         "player_id": pid,
                         "from_team": from_team,
                         "to_team": "FA",
+                        "release_reason": str(release_reason or "GENERAL").strip().upper(),
+                        "release_mode": mode_norm or "GENERAL",
                     }
                 ],
             )
@@ -1186,9 +1312,202 @@ class LeagueService:
                 "affected_player_ids": [pid],
                 "from_team": from_team,
                 "to_team": "FA",
+                "release_mode": mode_norm or "GENERAL",
+                "release_reason": str(release_reason or "GENERAL").strip().upper(),
             },
         )
         return event
+
+    def waive_player(
+        self,
+        *,
+        team_id: str,
+        player_id: str,
+        waived_date: date | str | None = None,
+    ) -> ServiceEvent:
+        waived_date_iso = _coerce_iso(waived_date)
+        season_year_i = _current_season_year_ssot()
+        with self._atomic() as cur:
+            pid = self._norm_player_id(player_id)
+            tid = self._norm_team_id(team_id, strict=False)
+            row = cur.execute(
+                "SELECT team_id FROM roster WHERE player_id=? AND status='active' LIMIT 1;",
+                (pid,),
+            ).fetchone()
+            if not row:
+                raise KeyError(f"active roster entry not found for player_id={player_id}")
+            current_team = str(row["team_id"]).upper()
+            if current_team != tid:
+                raise ValueError(f"player_id={player_id} is not on team_id={tid} (current={current_team})")
+
+            contract_id, contract = self._get_active_contract_for_player_in_cur(cur, pid)
+            if not contract_id or not isinstance(contract, Mapping):
+                raise ValueError(f"active contract not found for player_id={player_id}")
+            remaining = self._remaining_salary_schedule(contract, int(season_year_i))
+            if not remaining:
+                raise ValueError(f"no remaining salary to waive for player_id={player_id}")
+
+            self._move_player_team_in_cur(cur, pid, "FA")
+            now_iso = _utc_now_iso()
+            dead_rows = self._build_waive_dead_cap_rows(
+                team_id=tid,
+                player_id=pid,
+                origin_contract_id=contract_id,
+                remaining_salary_by_year=remaining,
+                now_iso=now_iso,
+            )
+            self.repo.upsert_team_dead_caps(dead_rows)
+
+            self._insert_transactions_in_cur(
+                cur,
+                [
+                    {
+                        "type": "WAIVE_TO_FA",
+                        "action_type": "WAIVE_TO_FA",
+                        "action_date": waived_date_iso,
+                        "date": waived_date_iso,
+                        "season_year": int(season_year_i),
+                        "source": "contracts",
+                        "teams": [tid],
+                        "team_id": tid,
+                        "player_id": pid,
+                        "from_team": tid,
+                        "to_team": "FA",
+                        "source_type": "WAIVE",
+                        "origin_contract_id": contract_id,
+                        "remaining_salary_by_year": {int(k): int(v) for k, v in remaining.items()},
+                        "dead_cap_schedule": {int(k): int(v) for k, v in remaining.items()},
+                    }
+                ],
+            )
+
+        return ServiceEvent(
+            type="waive_player",
+            payload={
+                "date": waived_date_iso,
+                "season_year": int(season_year_i),
+                "team_id": tid,
+                "player_id": pid,
+                "from_team": tid,
+                "to_team": "FA",
+                "source_type": "WAIVE",
+                "origin_contract_id": contract_id,
+                "remaining_salary_by_year": {int(k): int(v) for k, v in remaining.items()},
+                "dead_cap_schedule": {int(k): int(v) for k, v in remaining.items()},
+                "affected_player_ids": [pid],
+            },
+        )
+
+    def stretch_player(
+        self,
+        *,
+        team_id: str,
+        player_id: str,
+        stretch_years: int,
+        stretched_date: date | str | None = None,
+    ) -> ServiceEvent:
+        stretched_date_iso = _coerce_iso(stretched_date)
+        season_year_i = _current_season_year_ssot()
+        with self._atomic() as cur:
+            pid = self._norm_player_id(player_id)
+            tid = self._norm_team_id(team_id, strict=False)
+            row = cur.execute(
+                "SELECT team_id FROM roster WHERE player_id=? AND status='active' LIMIT 1;",
+                (pid,),
+            ).fetchone()
+            if not row:
+                raise KeyError(f"active roster entry not found for player_id={player_id}")
+            current_team = str(row["team_id"]).upper()
+            if current_team != tid:
+                raise ValueError(f"player_id={player_id} is not on team_id={tid} (current={current_team})")
+
+            contract_id, contract = self._get_active_contract_for_player_in_cur(cur, pid)
+            if not contract_id or not isinstance(contract, Mapping):
+                raise ValueError(f"active contract not found for player_id={player_id}")
+            remaining = self._remaining_salary_schedule(contract, int(season_year_i))
+            remaining_years = len(remaining)
+            if remaining_years <= 0:
+                raise ValueError(f"no remaining salary to stretch for player_id={player_id}")
+            max_stretch_years = int((remaining_years * 2) + 1)
+            stretch_years_i = int(stretch_years)
+            if stretch_years_i < 1 or stretch_years_i > max_stretch_years:
+                raise ValueError(
+                    f"stretch_years must be between 1 and {max_stretch_years} (remaining_years={remaining_years})"
+                )
+
+            total_remaining = int(sum(int(v) for v in remaining.values()))
+            schedule = self._build_stretch_dead_cap_rows(
+                int(total_remaining),
+                int(season_year_i),
+                int(stretch_years_i),
+            )
+
+            self._move_player_team_in_cur(cur, pid, "FA")
+            now_iso = _utc_now_iso()
+            dead_rows: List[Dict[str, Any]] = []
+            for y, amt in sorted(schedule.items(), key=lambda kv: int(kv[0])):
+                dead_rows.append(
+                    {
+                        "team_id": tid,
+                        "player_id": pid,
+                        "origin_contract_id": contract_id,
+                        "source_type": "STRETCH",
+                        "applied_season_year": int(y),
+                        "amount": int(max(0, int(amt))),
+                        "is_voided": 0,
+                        "voided_reason": None,
+                        "meta_json": {
+                            "policy": "stretch",
+                            "created_at": str(now_iso),
+                            "stretch_years": int(stretch_years_i),
+                            "remaining_salary_by_year": {int(k): int(v) for k, v in remaining.items()},
+                            "total_remaining_salary": int(total_remaining),
+                        },
+                    }
+                )
+            self.repo.upsert_team_dead_caps(dead_rows)
+
+            self._insert_transactions_in_cur(
+                cur,
+                [
+                    {
+                        "type": "STRETCH_TO_FA",
+                        "action_type": "STRETCH_TO_FA",
+                        "action_date": stretched_date_iso,
+                        "date": stretched_date_iso,
+                        "season_year": int(season_year_i),
+                        "source": "contracts",
+                        "teams": [tid],
+                        "team_id": tid,
+                        "player_id": pid,
+                        "from_team": tid,
+                        "to_team": "FA",
+                        "source_type": "STRETCH",
+                        "origin_contract_id": contract_id,
+                        "remaining_salary_by_year": {int(k): int(v) for k, v in remaining.items()},
+                        "dead_cap_schedule": {int(k): int(v) for k, v in schedule.items()},
+                        "stretch_years": int(stretch_years_i),
+                    }
+                ],
+            )
+
+        return ServiceEvent(
+            type="stretch_player",
+            payload={
+                "date": stretched_date_iso,
+                "season_year": int(season_year_i),
+                "team_id": tid,
+                "player_id": pid,
+                "from_team": tid,
+                "to_team": "FA",
+                "source_type": "STRETCH",
+                "origin_contract_id": contract_id,
+                "remaining_salary_by_year": {int(k): int(v) for k, v in remaining.items()},
+                "dead_cap_schedule": {int(k): int(v) for k, v in schedule.items()},
+                "stretch_years": int(stretch_years_i),
+                "affected_player_ids": [pid],
+            },
+        )
 
     # ----------------------------
     # (T / S / C complex) Planned APIs (stubs)
