@@ -165,7 +165,30 @@ def ddl(*, now: str, schema_version: str) -> str:
                 );
                 CREATE INDEX IF NOT EXISTS idx_cap_holds_team_season_active
                     ON team_cap_holds(team_id, season_year, is_released);
-	"""
+
+                -- Team dead caps (Waive/Stretch source)
+                CREATE TABLE IF NOT EXISTS team_dead_caps (
+                    dead_cap_id TEXT PRIMARY KEY,
+                    team_id TEXT NOT NULL,
+                    player_id TEXT NOT NULL,
+                    origin_contract_id TEXT,
+                    source_type TEXT NOT NULL,
+                    applied_season_year INTEGER NOT NULL,
+                    amount INTEGER NOT NULL,
+                    is_voided INTEGER NOT NULL DEFAULT 0,
+                    voided_reason TEXT,
+                    meta_json TEXT,
+                    created_at TEXT NOT NULL DEFAULT '{now}',
+                    updated_at TEXT NOT NULL DEFAULT '{now}',
+                    UNIQUE(team_id, player_id, origin_contract_id, source_type, applied_season_year)
+                );
+                CREATE INDEX IF NOT EXISTS idx_dead_caps_team_season_voided
+                    ON team_dead_caps(team_id, applied_season_year, is_voided);
+                CREATE INDEX IF NOT EXISTS idx_dead_caps_player_season
+                    ON team_dead_caps(player_id, applied_season_year);
+                CREATE INDEX IF NOT EXISTS idx_dead_caps_origin_contract
+                    ON team_dead_caps(origin_contract_id);
+		"""
 
 
 def migrate(cur: sqlite3.Cursor, *, ensure_columns: EnsureColumnsFn) -> None:
@@ -204,4 +227,35 @@ def migrate(cur: sqlite3.Cursor, *, ensure_columns: EnsureColumnsFn) -> None:
     )
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_tx_season_type_date ON transactions_log(season_year, tx_type, tx_date);"
+    )
+
+    # Dead-cap ledger table/indexes (waive/stretch SSOT).
+    # Keep migrate path idempotent so existing DBs are brought up to date.
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS team_dead_caps (
+            dead_cap_id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL,
+            player_id TEXT NOT NULL,
+            origin_contract_id TEXT,
+            source_type TEXT NOT NULL,
+            applied_season_year INTEGER NOT NULL,
+            amount INTEGER NOT NULL,
+            is_voided INTEGER NOT NULL DEFAULT 0,
+            voided_reason TEXT,
+            meta_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(team_id, player_id, origin_contract_id, source_type, applied_season_year)
+        );
+        """
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_dead_caps_team_season_voided ON team_dead_caps(team_id, applied_season_year, is_voided);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_dead_caps_player_season ON team_dead_caps(player_id, applied_season_year);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_dead_caps_origin_contract ON team_dead_caps(origin_contract_id);"
     )

@@ -1475,6 +1475,189 @@ class LeagueRepo:
         except Exception:
             return 0
 
+    def upsert_team_dead_caps(self, rows: Sequence[Mapping[str, Any]]) -> None:
+        if not rows:
+            return
+        now = _utc_now_iso()
+        payload: list[tuple[str, str, str, Optional[str], str, int, int, int, Optional[str], Optional[str], str, str]] = []
+        for raw in rows:
+            if not isinstance(raw, Mapping):
+                continue
+            team_id = str(normalize_team_id(raw.get("team_id"), strict=False)).upper()
+            player_id = str(normalize_player_id(raw.get("player_id"), strict=False, allow_legacy_numeric=True))
+            source_type = str(raw.get("source_type") or "").strip().upper()
+            try:
+                season_year = int(raw.get("applied_season_year") or 0)
+            except Exception:
+                season_year = 0
+            try:
+                amount = int(raw.get("amount") or 0)
+            except Exception:
+                amount = 0
+            if not team_id or not player_id or not source_type or season_year <= 0 or amount < 0:
+                continue
+
+            origin_contract_id_raw = raw.get("origin_contract_id")
+            origin_contract_id = str(origin_contract_id_raw).strip() if origin_contract_id_raw is not None else None
+            if origin_contract_id == "":
+                origin_contract_id = None
+
+            dead_cap_id_raw = raw.get("dead_cap_id")
+            dead_cap_id = str(dead_cap_id_raw).strip() if dead_cap_id_raw is not None else ""
+            if not dead_cap_id:
+                seed = f"{team_id}|{player_id}|{origin_contract_id or ''}|{source_type}|{season_year}"
+                dead_cap_id = "DC_" + hashlib.sha1(seed.encode("utf-8")).hexdigest()[:20].upper()
+
+            is_voided = 1 if int(raw.get("is_voided") or 0) == 1 else 0
+            voided_reason_raw = raw.get("voided_reason")
+            voided_reason = str(voided_reason_raw).strip().upper() if voided_reason_raw is not None else None
+            if voided_reason == "":
+                voided_reason = None
+
+            meta_json: Optional[str] = None
+            meta_raw = raw.get("meta_json")
+            if meta_raw is not None:
+                if isinstance(meta_raw, str):
+                    meta_json = meta_raw
+                else:
+                    meta_json = _json_dumps(meta_raw)
+
+            payload.append(
+                (
+                    str(dead_cap_id),
+                    str(team_id),
+                    str(player_id),
+                    origin_contract_id,
+                    str(source_type),
+                    int(season_year),
+                    int(amount),
+                    int(is_voided),
+                    voided_reason,
+                    meta_json,
+                    str(now),
+                    str(now),
+                )
+            )
+        if not payload:
+            return
+
+        with self.transaction() as cur:
+            cur.executemany(
+                """
+                INSERT INTO team_dead_caps(
+                    dead_cap_id, team_id, player_id, origin_contract_id, source_type,
+                    applied_season_year, amount, is_voided, voided_reason, meta_json,
+                    created_at, updated_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(team_id, player_id, origin_contract_id, source_type, applied_season_year) DO UPDATE SET
+                    amount=excluded.amount,
+                    is_voided=excluded.is_voided,
+                    voided_reason=excluded.voided_reason,
+                    meta_json=excluded.meta_json,
+                    updated_at=excluded.updated_at;
+                """,
+                payload,
+            )
+
+    def list_team_dead_caps(
+        self,
+        team_id: str,
+        season_year: int,
+        *,
+        active_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        tid = str(normalize_team_id(team_id, strict=False)).upper()
+        sy = int(season_year)
+        where_active = "AND is_voided=0" if bool(active_only) else ""
+        rows = self._conn.execute(
+            f"""
+            SELECT dead_cap_id, team_id, player_id, origin_contract_id, source_type,
+                   applied_season_year, amount, is_voided, voided_reason, meta_json,
+                   created_at, updated_at
+            FROM team_dead_caps
+            WHERE UPPER(team_id)=UPPER(?) AND applied_season_year=?
+              {where_active}
+            ORDER BY player_id ASC, source_type ASC, dead_cap_id ASC;
+            """,
+            (str(tid), int(sy)),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            meta_raw = r["meta_json"]
+            meta_val: Any = None
+            if meta_raw is not None:
+                meta_val = _json_loads(meta_raw, meta_raw)
+            out.append(
+                {
+                    "dead_cap_id": str(r["dead_cap_id"]),
+                    "team_id": str(r["team_id"]).upper(),
+                    "player_id": str(r["player_id"]),
+                    "origin_contract_id": (None if r["origin_contract_id"] is None else str(r["origin_contract_id"])),
+                    "source_type": str(r["source_type"]).upper(),
+                    "applied_season_year": int(r["applied_season_year"]),
+                    "amount": int(r["amount"] or 0),
+                    "is_voided": int(r["is_voided"] or 0),
+                    "voided_reason": (None if r["voided_reason"] is None else str(r["voided_reason"])),
+                    "meta_json": meta_val,
+                    "created_at": str(r["created_at"] or ""),
+                    "updated_at": str(r["updated_at"] or ""),
+                }
+            )
+        return out
+
+    def sum_active_dead_caps(self, team_id: str, season_year: int) -> int:
+        tid = str(normalize_team_id(team_id, strict=False)).upper()
+        sy = int(season_year)
+        row = self._conn.execute(
+            """
+            SELECT SUM(COALESCE(amount, 0)) AS dead_sum
+            FROM team_dead_caps
+            WHERE UPPER(team_id)=UPPER(?) AND applied_season_year=? AND is_voided=0;
+            """,
+            (str(tid), int(sy)),
+        ).fetchone()
+        if not row:
+            return 0
+        try:
+            return int(row["dead_sum"] or 0)
+        except Exception:
+            return 0
+
+    def void_dead_caps(
+        self,
+        player_id: str,
+        team_id: str,
+        reason: str,
+        now_iso: str,
+        season_year: Optional[int] = None,
+    ) -> int:
+        pid = str(normalize_player_id(player_id, strict=False, allow_legacy_numeric=True))
+        tid = str(normalize_team_id(team_id, strict=False)).upper()
+        now = str(now_iso or _utc_now_iso())
+        why = str(reason or "OTHER").strip().upper()
+        sy = int(season_year) if season_year is not None else None
+        with self.transaction() as cur:
+            if sy is None:
+                cur.execute(
+                    """
+                    UPDATE team_dead_caps
+                    SET is_voided=1, voided_reason=?, updated_at=?
+                    WHERE player_id=? AND UPPER(team_id)=UPPER(?) AND is_voided=0;
+                    """,
+                    (str(why), str(now), str(pid), str(tid)),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE team_dead_caps
+                    SET is_voided=1, voided_reason=?, updated_at=?
+                    WHERE player_id=? AND UPPER(team_id)=UPPER(?) AND applied_season_year=? AND is_voided=0;
+                    """,
+                    (str(why), str(now), str(pid), str(tid), int(sy)),
+                )
+            return int(cur.rowcount or 0)
+
     def get_league_average_salary(self, season_year: int) -> int:
         """Return league average salary for a season.
 
@@ -2342,6 +2525,27 @@ class LeagueRepo:
         rows = self._conn.execute("SELECT COUNT(*) AS c FROM roster WHERE status='active';").fetchone()
         if rows and rows["c"] <= 0:
             raise ValueError("no active roster entries found")
+
+        # Dead cap guardrail: negative amounts are invalid.
+        bad_dead = self._conn.execute(
+            """
+            SELECT dead_cap_id, team_id, player_id, applied_season_year, amount
+            FROM team_dead_caps
+            WHERE amount < 0;
+            """
+        ).fetchall()
+        if bad_dead:
+            preview = [
+                {
+                    "dead_cap_id": str(r["dead_cap_id"]),
+                    "team_id": str(r["team_id"]),
+                    "player_id": str(r["player_id"]),
+                    "applied_season_year": int(r["applied_season_year"]),
+                    "amount": int(r["amount"]),
+                }
+                for r in bad_dead[:10]
+            ]
+            raise ValueError(f"team_dead_caps has negative amount rows: {preview}")
 
     def _smoke_check(self) -> None:
         """

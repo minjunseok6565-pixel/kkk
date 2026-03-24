@@ -47,6 +47,7 @@ def test_init_db_creates_bird_tables(tmp_path: Path) -> None:
 
     assert "team_bird_rights" in names
     assert "team_cap_holds" in names
+    assert "team_dead_caps" in names
 
 
 def test_bird_rights_upsert_list_get_renounce(tmp_path: Path) -> None:
@@ -118,6 +119,73 @@ def test_cap_holds_upsert_list_sum_release(tmp_path: Path) -> None:
         by_pid = {r["player_id"]: r for r in all_rows}
         assert by_pid["p2"]["is_released"] == 1
         assert by_pid["p2"]["released_reason"] == "RENOUNCE"
+
+
+def test_dead_caps_upsert_list_sum_void(tmp_path: Path) -> None:
+    with _mk_repo(tmp_path) as repo:
+        repo.upsert_team_dead_caps(
+            [
+                {
+                    "team_id": "BOS",
+                    "player_id": "p1",
+                    "origin_contract_id": "C1",
+                    "source_type": "WAIVE",
+                    "applied_season_year": 2027,
+                    "amount": 11_000_000,
+                    "meta_json": {"kind": "waive"},
+                },
+                {
+                    "team_id": "BOS",
+                    "player_id": "p1",
+                    "origin_contract_id": "C1",
+                    "source_type": "WAIVE",
+                    "applied_season_year": 2028,
+                    "amount": 12_000_000,
+                    "meta_json": {"kind": "waive"},
+                },
+                {
+                    "team_id": "BOS",
+                    "player_id": "p2",
+                    "origin_contract_id": "C2",
+                    "source_type": "STRETCH",
+                    "applied_season_year": 2027,
+                    "amount": 6_000_000,
+                    "meta_json": {"kind": "stretch"},
+                },
+            ]
+        )
+        # ON CONFLICT(update) path: same logical key updates amount.
+        repo.upsert_team_dead_caps(
+            [
+                {
+                    "team_id": "BOS",
+                    "player_id": "p2",
+                    "origin_contract_id": "C2",
+                    "source_type": "STRETCH",
+                    "applied_season_year": 2027,
+                    "amount": 6_500_000,
+                    "meta_json": {"kind": "stretch", "updated": True},
+                }
+            ]
+        )
+
+        assert repo.sum_active_dead_caps("BOS", 2027) == 17_500_000
+        assert repo.sum_active_dead_caps("BOS", 2028) == 12_000_000
+
+        active_2027 = repo.list_team_dead_caps("BOS", 2027, active_only=True)
+        assert len(active_2027) == 2
+        by_pid = {r["player_id"]: r for r in active_2027}
+        assert by_pid["p2"]["amount"] == 6_500_000
+        assert isinstance(by_pid["p2"]["meta_json"], dict)
+        assert by_pid["p2"]["meta_json"]["updated"] is True
+
+        changed = repo.void_dead_caps("p2", "BOS", "CORRECTION", "2027-07-01T00:00:00Z", season_year=2027)
+        assert changed == 1
+        assert repo.sum_active_dead_caps("BOS", 2027) == 11_000_000
+        all_2027 = repo.list_team_dead_caps("BOS", 2027, active_only=False)
+        by_pid_all = {r["player_id"]: r for r in all_2027}
+        assert by_pid_all["p2"]["is_voided"] == 1
+        assert by_pid_all["p2"]["voided_reason"] == "CORRECTION"
 
 
 def test_get_league_average_salary_for_season(tmp_path: Path) -> None:

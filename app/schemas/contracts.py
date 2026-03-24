@@ -9,6 +9,18 @@ class ReleaseToFARequest(BaseModel):
     player_id: str
     released_date: Optional[str] = None  # YYYY-MM-DD (default: in-game date)
 
+class WaivePlayerRequest(BaseModel):
+    team_id: str
+    player_id: str
+    waived_date: Optional[str] = None  # YYYY-MM-DD (default: in-game date)
+
+
+class StretchPlayerRequest(BaseModel):
+    team_id: str
+    player_id: str
+    stretch_years: int
+    stretched_date: Optional[str] = None  # YYYY-MM-DD (default: in-game date)
+
 
 class SignFreeAgentRequest(BaseModel):
     session_id: str  # must reference an ACCEPTED contract negotiation session
