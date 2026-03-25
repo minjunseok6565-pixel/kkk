@@ -22,6 +22,8 @@ from contracts.negotiation.utils import safe_float
 DEFAULT_MAX_RAISE_PCT_BY_CHANNEL: dict[str, float] = {
     # Main FA route (non-MLE)
     "STANDARD_FA": 0.08,
+    # Minimum channel (year-2 must equal year-1)
+    "MINIMUM": 0.0,
     # MLE channels
     "NT_MLE": 0.05,
     "TP_MLE": 0.05,

@@ -387,7 +387,7 @@ def start_contract_negotiation(
         negotiation_season_year = int(_extract_season_year_from_state() or 0)
         if negotiation_season_year <= 0:
             negotiation_season_year = int(safe_int((trade_rules_snapshot or {}).get("cap_base_season_year"), 2025))
-        available_contract_channels: list[str] = ["STANDARD_FA"]
+        available_contract_channels: list[str] = ["STANDARD_FA", "MINIMUM"]
         preferred_channel_u = str(preferred_channel or "").strip().upper()
 
         # Read context
@@ -425,9 +425,11 @@ def start_contract_negotiation(
                         cur=cur,
                         trade_rules=trade_rules_snapshot,
                     )
-                    available_contract_channels = ["STANDARD_FA"] + [str(ch) for ch in chs if str(ch) != "STANDARD_FA"]
+                    available_contract_channels = ["STANDARD_FA", "MINIMUM"] + [
+                        str(ch) for ch in chs if str(ch) not in {"STANDARD_FA", "MINIMUM"}
+                    ]
                 except Exception:
-                    available_contract_channels = ["STANDARD_FA"]
+                    available_contract_channels = ["STANDARD_FA", "MINIMUM"]
             elif mode_u == "RE_SIGN":
                 # Re-sign channels depend on per-season bird rights state.
                 right = r.get_bird_right(pid, tid, int(negotiation_season_year))
@@ -571,6 +573,12 @@ def _validate_offer_exp_aav_hard_cap(
     cfg: ContractNegotiationConfig,
 ) -> None:
     """Hard validation: reject offers above exp-bucket contract AAV cap."""
+    channel = str(getattr(offer, "contract_channel", "STANDARD_FA") or "STANDARD_FA").upper()
+    if channel == "MINIMUM":
+        # MINIMUM contracts use dedicated policy bounds (exp table + fixed years),
+        # and are intentionally not governed by exp-based AAV hard-cap checks.
+        return
+
     cap = float(safe_float(getattr(cfg, "salary_cap", None), 0.0))
     if cap <= 0.0:
         return
@@ -690,7 +698,45 @@ def _validate_offer_channel_policy(
     if mode_u != "SIGN_FA":
         return
 
-    if channel in {"STANDARD_FA", "MINIMUM"}:
+    if channel == "MINIMUM":
+        target_season_year = int(safe_int(constraints.get("negotiation_season_year"), 0)) if isinstance(constraints, Mapping) else 0
+        if target_season_year <= 0:
+            target_season_year = int(offer.start_season_year)
+        if target_season_year <= 0:
+            target_season_year = int(_extract_season_year_from_state() or 0)
+
+        player_snapshot = session.get("player_snapshot") if isinstance(session.get("player_snapshot"), Mapping) else {}
+        player_exp = int(safe_int(player_snapshot.get("exp"), 0))
+
+        try:
+            from contracts.minimum_policy import validate_minimum_offer
+
+            check = validate_minimum_offer(
+                offer=offer.to_payload(),
+                player_exp=int(player_exp),
+                season_year=int(target_season_year),
+            )
+        except ContractNegotiationError:
+            raise
+        except Exception as exc:
+            raise ContractNegotiationError(
+                NEGOTIATION_INVALID_OFFER,
+                "Failed to validate MINIMUM offer policy.",
+                {"contract_channel": str(channel), "error": str(exc)},
+            ) from exc
+
+        if not bool(check.ok):
+            raise ContractNegotiationError(
+                NEGOTIATION_INVALID_OFFER,
+                "Offer violates MINIMUM channel rules.",
+                {
+                    "contract_channel": str(channel),
+                    "minimum_validation": check.to_payload(),
+                },
+            )
+        return
+
+    if channel == "STANDARD_FA":
         return
 
     if channel not in {"NT_MLE", "TP_MLE", "ROOM_MLE"}:
