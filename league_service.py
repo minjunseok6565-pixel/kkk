@@ -2260,12 +2260,23 @@ class LeagueService:
         """Sign FA by contract channel.
 
         - STANDARD_FA: existing cap-checked flow (delegates to sign_free_agent)
-        - MINIMUM    : minimum-sign path (currently reuses STANDARD_FA cap-checked flow)
+        - MINIMUM    : dedicated minimum-sign flow (no cap/MLE budget checks)
         - *_MLE     : MLE policy validation + budget consumption flow
         """
         ch = str(contract_channel or "STANDARD_FA").strip().upper() or "STANDARD_FA"
-        if ch in {"STANDARD_FA", "MINIMUM"}:
+        if ch == "STANDARD_FA":
             return self.sign_free_agent(
+                team_id=team_id,
+                player_id=player_id,
+                signed_date=signed_date,
+                years=years,
+                salary_by_year=salary_by_year,
+                team_option_last_year=team_option_last_year,
+                team_option_years=team_option_years,
+                options=options,
+            )
+        if ch == "MINIMUM":
+            return self._sign_free_agent_minimum(
                 team_id=team_id,
                 player_id=player_id,
                 signed_date=signed_date,
@@ -2287,6 +2298,195 @@ class LeagueService:
             team_option_last_year=team_option_last_year,
             team_option_years=team_option_years,
             options=options,
+        )
+
+    def _sign_free_agent_minimum(
+        self,
+        *,
+        team_id: str,
+        player_id: str,
+        signed_date: date | str | None = None,
+        years: int = 1,
+        salary_by_year: Optional[Mapping[int, int]] = None,
+        team_option_last_year: bool = False,
+        team_option_years: Optional[Sequence[int]] = None,
+        options: Optional[Sequence[Mapping[str, Any]]] = None,
+    ) -> ServiceEvent:
+        """MINIMUM signing flow (FA only): cap/MLE independent + policy-anchored salary."""
+        from contracts.minimum_policy import (
+            build_minimum_salary_by_year,
+            validate_minimum_offer,
+        )
+
+        team_norm = self._norm_team_id(team_id, strict=True)
+        pid = self._norm_player_id(player_id)
+        signed_date_iso = _coerce_iso(signed_date)
+        season_year_i = _current_season_year_ssot()
+        years_i = int(years)
+        if years_i not in {1, 2}:
+            raise ValueError("MINIMUM years must be 1 or 2")
+
+        if bool(team_option_last_year):
+            raise ValueError("MINIMUM does not allow team_option_last_year")
+        team_option_years_list = list(team_option_years) if team_option_years is not None else []
+        if team_option_years_list:
+            raise ValueError("MINIMUM does not allow team_option_years")
+        options_list = list(options) if options is not None else []
+        if options_list:
+            raise ValueError("MINIMUM does not allow options")
+
+        def _infer_start_season_year_from_date(d_iso: str) -> int:
+            try:
+                d = _dt.date.fromisoformat(str(d_iso)[:10])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid signed_date ISO: {d_iso!r}") from exc
+            start_this = _dt.date(d.year, int(SEASON_START_MONTH), int(SEASON_START_DAY))
+            start_prev = _dt.date(d.year - 1, int(SEASON_START_MONTH), int(SEASON_START_DAY))
+            end_prev = start_prev + _dt.timedelta(days=int(SEASON_LENGTH_DAYS))
+            if d >= start_this:
+                return d.year
+            if d >= end_prev:
+                return d.year
+            return d.year - 1
+
+        with self._atomic() as cur:
+            roster = cur.execute(
+                """
+                SELECT team_id
+                FROM roster
+                WHERE player_id=? AND status='active';
+                """,
+                (pid,),
+            ).fetchone()
+            if not roster:
+                raise KeyError(f"active roster entry not found for player_id={player_id}")
+
+            current_team = str(roster["team_id"]).upper()
+            if current_team != "FA":
+                raise ValueError(f"player_id={player_id} is not a free agent (team_id={current_team})")
+
+            p_row = cur.execute(
+                """
+                SELECT exp
+                FROM players
+                WHERE player_id=?
+                LIMIT 1;
+                """,
+                (pid,),
+            ).fetchone()
+            if not p_row:
+                raise KeyError(f"player not found for player_id={player_id}")
+            try:
+                player_exp = int(p_row["exp"] or 0)
+            except Exception:
+                player_exp = int(p_row[0] or 0)
+
+            salary_norm_input = self._normalize_salary_by_year(salary_by_year)
+            if salary_norm_input:
+                start_season_year = min(int(k) for k in salary_norm_input.keys())
+            else:
+                start_season_year = _infer_start_season_year_from_date(signed_date_iso)
+
+            # Build policy-anchored salary curve (SSOT)
+            salary_norm = build_minimum_salary_by_year(
+                exp=int(player_exp),
+                start_season_year=int(start_season_year),
+                years=int(years_i),
+            )
+
+            # If caller supplied salary_by_year, require exact policy match.
+            if salary_norm_input:
+                check = validate_minimum_offer(
+                    {
+                        "start_season_year": int(start_season_year),
+                        "years": int(years_i),
+                        "salary_by_year": {str(k): float(v) for k, v in salary_norm_input.items()},
+                        "options": [],
+                    },
+                    player_exp=int(player_exp),
+                    season_year=int(start_season_year),
+                )
+                if not bool(check.ok):
+                    raise ValueError(f"MINIMUM salary_by_year mismatch: {check.to_payload()}")
+
+            contract_id = str(new_contract_id())
+            contract = make_contract_record(
+                contract_id=contract_id,
+                player_id=pid,
+                team_id=team_norm,
+                signed_date_iso=signed_date_iso,
+                start_season_year=int(start_season_year),
+                years=years_i,
+                salary_by_year=salary_norm,
+                options=[],
+                status="ACTIVE",
+            )
+            contract["guaranteed_years"] = int(years_i)
+            contract["contract_channel"] = "MINIMUM"
+
+            self._upsert_contract_records_in_cur(cur, {contract_id: contract})
+            self._activate_contract_for_player_in_cur(cur, pid, contract_id)
+            self._move_player_team_in_cur(cur, pid, team_norm)
+
+            season_salary = salary_norm.get(str(int(start_season_year)))
+            if season_salary is not None:
+                self._set_roster_salary_in_cur(cur, pid, int(float(season_salary)))
+
+            try:
+                cur.execute("DELETE FROM free_agents WHERE player_id=?;", (pid,))
+            except sqlite3.OperationalError as exc:
+                msg = str(exc).lower()
+                if ("no such table" in msg) and ("free_agents" in msg):
+                    logger.warning(
+                        "[FREE_AGENTS_TABLE_MISSING] free_agents table missing; skipping cleanup (player_id=%s)",
+                        pid,
+                    )
+                else:
+                    raise
+
+            first_year_salary_i = int(float(salary_norm.get(str(int(start_season_year)), 0.0)))
+            self._insert_transactions_in_cur(
+                cur,
+                [
+                    {
+                        "type": "SIGN_FA_MINIMUM",
+                        "date": signed_date_iso,
+                        "action_date": signed_date_iso,
+                        "action_type": "SIGN_FA_MINIMUM",
+                        "season_year": int(season_year_i),
+                        "source": "contracts",
+                        "teams": [team_norm],
+                        "team_id": team_norm,
+                        "player_id": pid,
+                        "from_team": "FA",
+                        "to_team": team_norm,
+                        "contract_id": contract_id,
+                        "start_season_year": int(start_season_year),
+                        "years": int(years_i),
+                        "contract_channel": "MINIMUM",
+                        "first_year_salary": int(first_year_salary_i),
+                    }
+                ],
+            )
+
+        return ServiceEvent(
+            type="sign_free_agent_minimum",
+            payload={
+                "date": signed_date_iso,
+                "season_year": int(season_year_i),
+                "player_id": pid,
+                "affected_player_ids": [pid],
+                "from_team": "FA",
+                "to_team": team_norm,
+                "team_id": team_norm,
+                "contract_id": contract_id,
+                "signed_date": signed_date_iso,
+                "start_season_year": int(start_season_year),
+                "years": int(years_i),
+                "guaranteed_years": int(years_i),
+                "team_option_years": [],
+                "contract_channel": "MINIMUM",
+            },
         )
 
     def _sign_free_agent_mle(
