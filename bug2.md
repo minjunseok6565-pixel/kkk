@@ -15,9 +15,6 @@
 오프시즌 단계에서 이미 만료 계약 선수를 FA로 옮긴 뒤, UI가 다시 `/api/contracts/release-to-fa`를 호출한다. 이때 `from_team == "FA"`인 선수는 release 로직에서 에러가 나므로 방출 버튼이 반복 실패한다.  
 → **쉽게 설명하면:** 이미 방출된 선수를 또 방출하려 해서 실패하는 “중복 처리” 문제다.
 
-**3. 워크아웃 추가 진행 플로우가 빈 후보 상태에서 막힘**  
-`round < workoutMaxRounds` 조건만으로 `워크아웃 추가 진행`이 열려, 실제 초청 가능 선수가 0명이어도 `WORKOUT_INVITE_SELECT`로 진입한다. 이후 “추가 초청 가능한 선수가 없습니다”만 뜨고 진행 버튼은 비활성화된다.  
-→ **쉽게 설명하면:** “다음 단계로 갈 수 있는 버튼”은 켜져 있는데, 들어가 보면 실제로 할 수 있는 작업이 없어 진행이 멈춘다.
 
 **4. standalone 로스터 import CLI 경로가 깨짐**  
 `_state_season_year_ssot()`가 season_year 미존재 시 예외를 던지는 구조로 바뀌면서, `import_roster_excel()` standalone 실행(특히 `Salary == "--"` 보정 경로)에서 `RuntimeError`가 난다.  
@@ -59,9 +56,6 @@ promotion 흐름에서 기존 세션을 재사용할 때 offer payload는 바꾸
 
 ### 트레이드 생성 로직 / Skeleton / Template / Sweetener
 
-**11. `buy_target_basketball_norm_mode="FIXED"`가 실제로 무시됨**  
-설정상 FIXED/PERCENTILE/HYBRID를 지원하지만, norm context 구성에서 비인식 값이 사실상 PERCENTILE로 귀결되어 FIXED 의도가 반영되지 않는다.  
-→ **쉽게 설명하면:** 설정 파일에서 FIXED를 골라도 엔진은 거의 항상 PERCENTILE 방식으로 계산한다.
 
 **12. `PackageEffectsConfig`가 legacy constructor 필드를 받지 않아 호환성 런타임 실패**  
 기존에 전달되던 필드(`depth_need_scale`, `cap_flex_scale`, `cap_room_weight_base`, `upgrade_scale` 등) 제거로, 구버전 rule key를 넘기는 환경에서 `TypeError`가 난다.  
@@ -145,3 +139,11 @@ owner/round 중심 필터나 상태 맵 직접 노출 방식은 consumed/과거/
 **19. template-first 비활성 시 combined routing 자체가 비는 회귀 가능**  
 `build_offer_skeletons_buy/sell`에서 combined-phase 실행이 fallback 조건 블록에 종속되면, 특정 플래그 조합에서 route가 0개가 된다.  
 → **쉽게 설명하면:** “template-first만 끄자” 했는데, 결과적으로 전체 경로가 같이 꺼져 아무 후보도 못 만드는 상태다.
+
+**3. 워크아웃 추가 진행 플로우가 빈 후보 상태에서 막힘**  
+`round < workoutMaxRounds` 조건만으로 `워크아웃 추가 진행`이 열려, 실제 초청 가능 선수가 0명이어도 `WORKOUT_INVITE_SELECT`로 진입한다. 이후 “추가 초청 가능한 선수가 없습니다”만 뜨고 진행 버튼은 비활성화된다.  
+→ **쉽게 설명하면:** “다음 단계로 갈 수 있는 버튼”은 켜져 있는데, 들어가 보면 실제로 할 수 있는 작업이 없어 진행이 멈춘다.
+
+**11. `buy_target_basketball_norm_mode="FIXED"`가 실제로 무시됨**  
+설정상 FIXED/PERCENTILE/HYBRID를 지원하지만, norm context 구성에서 비인식 값이 사실상 PERCENTILE로 귀결되어 FIXED 의도가 반영되지 않는다.  
+→ **쉽게 설명하면:** 설정 파일에서 FIXED를 골라도 엔진은 거의 항상 PERCENTILE 방식으로 계산한다.
