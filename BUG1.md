@@ -19,7 +19,7 @@
 
 ## 시뮬레이션 / 매치업 / 시즌 진행 흐름
 
-20. **만료 계약 선수 재협상 버튼이 일반적인 오프시즌 흐름에서 실패함** — 선수는 이미 FA로 이동했는데 `mode: "RE_SIGN"`으로 협상을 시작해서 서비스에서 거절된다.
+20. **만료 계약자 액션의 `RE_SIGN` 호출 조건이 부정확함** — UI가 `is_currently_fa`를 확인하지 않고 `mode: "RE_SIGN"`을 호출해, 비FA 행에서도 재계약 협상을 시도할 수 있다. `RE_SIGN` 자체는 FA + Bird 권한 조건에서 정상 경로이며, 문제는 호출 가드 부재다.
 21. **이미 FA인 선수에게도 ‘방출’ 호출을 보내 에러가 남** — common path에서 `/api/contracts/release-to-fa`가 의미 없이 실패한다.
 
 ## 일정 / 대시보드 / 스탠딩 / 팀 상세
@@ -63,7 +63,7 @@
 6. **#8** listing-interest 비활성화 시 PUBLIC listing 탐지 경로가 사라짐
 7. **#14** 팀 선택 UI가 고정 `divisionOrder` 기준이라 비표준 division 누락 가능
 8. **#16** tactics 저장 변환에서 **5+5 강제 검증 부재**
-9. **#20** 만료 계약자 액션에서 여전히 `mode: "RE_SIGN"` 호출 경로 존재
+9. **#20** 만료 계약자 액션에서 `is_currently_fa` 가드 없이 `mode: "RE_SIGN"` 호출
 10. **#21** 같은 경로에서 `/api/contracts/release-to-fa` 호출 유지
 11. **#24** `as_of_date`와 7일 일정 부하 계산 기준일이 혼재됨
 12. **#33** `!nextGame` 분기에서 KPI snapshot 갱신 누락
