@@ -75,9 +75,7 @@ promotion 흐름에서 기존 세션을 재사용할 때 offer payload는 바꾸
 높은 점수순 선집중 후 채우는 방식 때문에, 더 싼 조합으로 성립 가능한 케이스에서도 상위 자산이 먼저 소모될 수 있다.  
 → **쉽게 설명하면:** 작은 물건 사는데 고액권부터 깨는 방식이라 전체 거래 효율이 떨어진다.
 
-**15. preset override label 추출이 action alias를 처리 못함**  
-`_extract_preset_override_label`가 `actions.get(base_action)`의 exact key 접근에 의존해 alias 저장값을 놓칠 수 있다. validator 허용 범위와 runtime 해석 범위가 어긋난다.  
-→ **쉽게 설명하면:** 저장은 됐는데 실행 때는 “그 키를 모른다”고 해서 override가 조용히 무시될 수 있다.
+
 
 **16. `skeleton_overhaul_enabled` 플래그가 실질적으로 무시됨**  
 호출 경로가 v3 registry를 기본으로 타면서 `False` 설정으로 legacy 동작을 강제하려는 의도가 반영되지 않는 구간이 있다.  
@@ -91,9 +89,7 @@ promotion 흐름에서 기존 세션을 재사용할 때 offer payload는 바꾸
 `tpl_<tier>_placeholder_<n>` 형태를 강제해, planner가 tag naming을 조금만 바꿔도 실질적으로 정상 후보가 필터에서 사라질 수 있다.  
 → **쉽게 설명하면:** 내용은 맞는데 라벨 이름 철자 규칙이 다르다는 이유로 전부 버려지는 상황이다.
 
-**19. template-first 비활성 시 combined routing 자체가 비는 회귀 가능**  
-`build_offer_skeletons_buy/sell`에서 combined-phase 실행이 fallback 조건 블록에 종속되면, 특정 플래그 조합에서 route가 0개가 된다.  
-→ **쉽게 설명하면:** “template-first만 끄자” 했는데, 결과적으로 전체 경로가 같이 꺼져 아무 후보도 못 만드는 상태다.
+
 
 **20. pick protection 변형 생성이 sweetener ON/OFF에 종속됨**  
 `maybe_apply_pick_protection_variants`가 sweetener 흐름 내부에 묶여, sweetener 비활성/추가치 0일 때 protection도 통째로 비활성화된다.  
@@ -141,3 +137,11 @@ owner/round 중심 필터나 상태 맵 직접 노출 방식은 consumed/과거/
 
 - 본 문서는 “지금은 문제 아님” 7건(#5, #8, #9, #15, #27, #30, #32 기존 번호)을 제거한 뒤 재정렬한 버전이다.
 - 각 항목의 “쉽게 설명하면” 문구는 실제 코드 경로/함수명 기준으로 이해 중심 설명을 추가한 것이다.
+
+**15. preset override label 추출이 action alias를 처리 못함**  
+`_extract_preset_override_label`가 `actions.get(base_action)`의 exact key 접근에 의존해 alias 저장값을 놓칠 수 있다. validator 허용 범위와 runtime 해석 범위가 어긋난다.  
+→ **쉽게 설명하면:** 저장은 됐는데 실행 때는 “그 키를 모른다”고 해서 override가 조용히 무시될 수 있다.
+
+**19. template-first 비활성 시 combined routing 자체가 비는 회귀 가능**  
+`build_offer_skeletons_buy/sell`에서 combined-phase 실행이 fallback 조건 블록에 종속되면, 특정 플래그 조합에서 route가 0개가 된다.  
+→ **쉽게 설명하면:** “template-first만 끄자” 했는데, 결과적으로 전체 경로가 같이 꺼져 아무 후보도 못 만드는 상태다.
