@@ -97,17 +97,19 @@
 1. **#1** 기본 공개설정 `default_offer_privacy`가 commit 시 반영되지 않음
 2. **#2** grievance helper의 `legs` 구조 가정이 현재 `serialize_deal` 구조와 불일치
 3. **#3** publicized 판정이 session/deal 중 하나만 true여도 true 처리됨
-4. **#7** `ai_proactive_listing_player_cooldown_days=0`이 `or 7` 때문에 무력화됨
-5. **#8** listing-interest 비활성화 시 PUBLIC listing 탐지 경로가 사라짐
-6. **#14** 팀 선택 UI가 고정 `divisionOrder` 기준이라 비표준 division 누락 가능
-7. **#16** tactics 저장 변환에서 **5+5 강제 검증 부재**
-8. **#34** medical overview의 `top_n`이 **20으로 clamp**됨
+4. **#6** 같은 상대 팀 쌍에서 낮은 점수 제안이 top offer를 덮어쓸 수 있음
+5. **#7** `ai_proactive_listing_player_cooldown_days=0`이 `or 7` 때문에 무력화됨
+6. **#8** listing-interest 비활성화 시 PUBLIC listing 탐지 경로가 사라짐
+7. **#14** 팀 선택 UI가 고정 `divisionOrder` 기준이라 비표준 division 누락 가능
+8. **#16** tactics 저장 변환에서 **5+5 강제 검증 부재**
 9. **#20** 만료 계약자 액션에서 여전히 `mode: "RE_SIGN"` 호출 경로 존재
 10. **#21** 같은 경로에서 `/api/contracts/release-to-fa` 호출 유지
 11. **#24** `as_of_date`와 7일 일정 부하 계산 기준일이 혼재됨
 12. **#33** `!nextGame` 분기에서 KPI snapshot 갱신 누락
-13. **#35** risk / OUT / 복귀 집합이 일자별이 아니라 시작일 기준으로 재사용됨
-14. **#41** `_safe_team_signal(... or default)` 때문에 유효한 `0.0`이 치환될 수 있음
+13. **#34** medical overview의 `top_n`이 **20으로 clamp**됨
+14. **#35** risk / OUT / 복귀 집합이 일자별이 아니라 시작일 기준으로 재사용됨
+15. **#38** practice preview의 `require_date_iso` 예외 매핑
+16. **#41** `_safe_team_signal(... or default)` 때문에 유효한 `0.0`이 치환될 수 있음
 
 ---
 
@@ -115,123 +117,55 @@
 
 (= 실질적 4개 의견축이 모두 해결/해소/무효라고 본 항목)
 
-1. **#18** `_matchups_instr_signature()`에 `matchups_temp_locks` 반영됨
-2. **#23** 승률 포맷 관련 기존 절단 버그는 현재 코드에서 성립하지 않음
-3. **#25** 존재하지 않는 team ID 처리 시 500이 아니라 404 변환됨
-4. **#32** injury feed title이 `player_name` / `name` 모두 허용됨
-5. **#5** `select_targets_sell`의 `listed_pri > 0` 관련 지적은 현재 기준 문제 아님
-6. **#12** `showTacticsScreen → applyTacticsDetail` 진입 시 draft 재설정됨
-7. **#13** scouting assign/unassign 실패 피드백 경로가 반영됨
-8. **#22** `/api/team-schedule` deep-copy 성능 이슈는 해소됨
-9. **#28** schedule load 실패 후 stale state 재사용 이슈는 해소됨
-10. **#36** `unavailable_count` top_n truncation 관련 지적은 현재 기준 문제 아님
-11. **#37** fallback 데이터에 out/returning 날짜가 포함됨
-12. **#48** `pick_expectations` caller override 우선순위 이슈는 현재 기준 문제 아님
+1. **#4** 가중치 결합 로직 의도 대비 오동작 여부
+2. **#5** `select_targets_sell`의 `listed_pri > 0` 관련 지적은 현재 기준 문제 아님
+3. **#11** 중복 검사 대상 범위
+4. **#12** `showTacticsScreen → applyTacticsDetail` 진입 시 draft 재설정됨
+5. **#13** scouting assign/unassign 실패 피드백 경로가 반영됨
+6. **#15** `_plan_from_row` 경로 관련
+7. **#17** `autoBalanceTacticsMinutes` 관련 지적
+8. **#18** `_matchups_instr_signature()`에 `matchups_temp_locks` 반영됨
+9. **#19** DEV 플레이인/플레이오프 호출 순서 문제
+10. **#22** `/api/team-schedule` deep-copy 성능 이슈는 해소됨
+11. **#23** 승률 포맷 관련 기존 절단 버그는 현재 코드에서 성립하지 않음
+12. **#25** 존재하지 않는 team ID 처리 시 500이 아니라 404 변환됨
+13. **#26** Home 캐시 stale 가능성
+14. **#27** prediction `available=true` 조건식
+15. **#28** schedule load 실패 후 stale state 재사용 이슈는 해소됨
+16. **#29** next-game countdown 로직
+17. **#32** injury feed title이 `player_name` / `name` 모두 허용됨
+18. **#36** `unavailable_count` top_n truncation 관련 지적은 현재 기준 문제 아님
+19. **#37** fallback 데이터에 out/returning 날짜가 포함됨
+20. **#39** attribute key 체계 불일치
+21. **#40** `SURPLUS_EXPENDABLE` fallback/override 우선순위
+22. **#42** `DraftLotteryRules.validate()` 관련 지적
+23. **#43** lottery nested PMF 공유 여부
+24. **#44** ledger 대상 팀 집합 누락
+25. **#45** v1/v2 diff 비교 데이터 주입
+26. **#46** same-owner swap 과대평가 여부
+27. **#47** `defense_role_groups` 설정 경로
+28. **#48** `pick_expectations` caller override 우선순위 이슈는 현재 기준 문제 아님
+29. **#49** unsupported distribution fallback에서 `ev_pick=0.0` premium 취급
+30. **#50** swap exercise prob fallback = 1.0 여부
+31. **#51** tick-context fast path `order` 미정의
+32. **#52** `use_valuation_context_v2=false` 시 package effect 적용 잔존 여부
+33. **#53** `before_ledgers` 기준선 구성 로직
+34. **#54** fit-swap gate threshold 구식값 사용 여부
+35. **#55** `_team_supply` 분모 처리
+36. **#56** `contract_gap_cap_share abs` 적용 여부
+37. **#57** prev-tier cache hit율 이슈
+38. **#58** hysteresis 이후 tie-break 역전 여부
 
 ---
 
 ## 3) 보고서별로 의견이 갈리는 사항
 
-여기부터는 전부 “합의 없음”이야.
-다만 성격이 달라서 5개 하위 그룹으로 나눠볼게.
+여기에는 요청대로 **#9, #10, #30, #31만** 남겼어.
 
----
-
-### 3-1) **문제 쪽으로 기울지만 완전 합의는 아닌 항목**
-
-이 항목들은 일부 보고서는 “문제”, 일부는 “보류”로 봤어.
-
-* **#9** `_compute_confidence()` REJECT 경계 / `overpay_floor`
-
-  * 1: 문제 / 2: 보류 / 3: 문제 / 4: 문제
-
-* **#10** defensive override 로딩의 `or` 체인 때문에 빈 `{}` 초기화 의도 미반영
-
-  * 1: 문제 / 2: 보류 / 3: 보류 / 4: 문제
-
----
-
-### 3-2) **해결 쪽으로 기울지만 완전 합의는 아닌 항목**
-
-이 항목들은 일부 보고서는 “해결”, 일부는 “보류” 또는 “누락”으로 봤어.
-
-* **#17** `autoBalanceTacticsMinutes` 관련 지적
-
-  * 1: 보류 / 2: 보류 / 3: 해결 / 4: 보류
-
-* **#19** DEV 플레이인/플레이오프 호출 순서 문제
-
-  * 1: 보류 / 2: 보류 / 3: 해결 / 4: 보류
-
-* **#30** standings 실패 시 KPI fallback 표기
-
-  * 1: 보류 / 2: 보류 / 3: 해결 / 4: 보류
-
-* **#31** no next-game 시 placeholder 잔존
-
-  * 1: 보류 / 2: 보류 / 3: 해결 / 4: 보류
-
-* **#38** practice preview의 `require_date_iso` 예외 매핑
-
-  * 1: 보류 / 2: 보류 / 3: 해결 / 4: 보류
-
-* **#42** `DraftLotteryRules.validate()` 관련 지적
-
-  * 1: 보류 / 2: 보류 / 3: 해결 / 4: 보류
-
-* **#47** `defense_role_groups` 설정 경로
-
-  * 1: 보류 / 2: 보류 / 3: 해결 / 4: 보류
-
----
-
-### 3-3) **보고서끼리 직접 충돌하는 항목**
-
-이건 “보류”가 아니라 실제로 **문제 vs 해결**이 정면으로 갈린 항목이야.
-
-* **#11** 중복 검사 대상 범위
-
-  * 1: 해결
-  * 2: **누락**
-  * 3: 문제
-  * 4: 해결
-
-즉, 이 항목은 보고서 간 해석 차이가 가장 크고, 실제 코드 확인이 가장 필요해 보여.
-
----
-
-### 3-4) **확정 보류 (사실상 전부 보류인 항목)**
-
-이 항목들은 4개 보고서가 모두 “보류/재현 필요” 쪽이어서, 아직 결론을 못 낸 항목들이야.
-
-* **#4** 가중치 결합 로직 의도 대비 오동작 여부
-* **#26** Home 캐시 stale 가능성
-* **#27** prediction `available=true` 조건식
-* **#40** `SURPLUS_EXPENDABLE` fallback/override 우선순위
-* **#44** ledger 대상 팀 집합 누락
-* **#46** same-owner swap 과대평가 여부
-* **#53** `before_ledgers` 기준선 구성 로직
-* **#54** fit-swap gate threshold 구식값 사용 여부
-* **#55** `_team_supply` 분모 처리
----
-
-### 3-5) **기타 검증 필요 항목**
-
-아래 항목들도 여전히 보고서 간 완전 합의가 없어, 추가 코드 확인/재현이 필요해.
-
-* **#6** 같은 pair overwrite 여부
-* **#15** `_plan_from_row` 경로 관련
-* **#29** next-game countdown 로직
-* **#39** attribute key 체계 불일치
-* **#43** lottery nested PMF 공유 여부
-* **#45** v1/v2 diff 비교 데이터 주입
-* **#49** unsupported distribution fallback에서 `ev_pick=0.0` premium 취급
-* **#50** swap exercise prob fallback = 1.0 여부
-* **#51** tick-context fast path `order` 미정의
-* **#52** `use_valuation_context_v2=false` 시 package effect 적용 잔존 여부
-* **#56** `contract_gap_cap_share abs` 적용 여부
-* **#57** prev-tier cache hit율 이슈
-* **#58** hysteresis 이후 tie-break 역전 여부
+1. **#9** `_compute_confidence()` REJECT 경계 / `overpay_floor`
+2. **#10** defensive override 로딩의 `or` 체인 때문에 빈 `{}` 초기화 의도 미반영
+3. **#30** standings 실패 시 KPI fallback 표기
+4. **#31** no next-game 시 placeholder 잔존
 
 ---
 
@@ -239,19 +173,15 @@
 
 ### 공통으로 “문제”라고 본 항목
 
-**#1, #2, #3, #7, #8, #14, #16, #20, #21, #24, #33, #34, #35, #41**
+**#1, #2, #3, #6, #7, #8, #14, #16, #20, #21, #24, #33, #34, #35, #38, #41**
 
 ### 공통으로 “문제 아님”이라고 본 항목
 
-**#5, #12, #13, #18, #22, #23, #25, #28, #32, #36, #37, #48**
-
-### 확정 보류 항목
-
-**#4, #26, #27, #40, #44, #46, #53, #54, #55**
+**#4, #5, #11, #12, #13, #15, #17, #18, #19, #22, #23, #25, #26, #27, #28, #29, #32, #36, #37, #39, #40, #42, #43, #44, #45, #46, #47, #48, #49, #50, #51, #52, #53, #54, #55, #56, #57, #58**
 
 ### 의견이 갈린 항목
 
-**#6, #9, #10, #11, #15, #17, #19, #29, #30, #31, #38, #39, #42, #43, #45, #47, #49, #50, #51, #52, #56, #57, #58**
+**#9, #10, #30, #31**
 
 ---
 
