@@ -29,8 +29,12 @@ DEFAULT_MAX_RAISE_PCT_BY_CHANNEL: dict[str, float] = {
     "TP_MLE": 0.05,
     "ROOM_MLE": 0.05,
     # Other negotiation types (defaults; tunable)
+    "SIGN_FA": 0.08,
     "RE_SIGN": 0.08,
     "EXTEND": 0.08,
+    "EXTEND_ROOKIE": 0.08,
+    "EXTEND_VETERAN": 0.08,
+    "EXTEND_DVE": 0.08,
 }
 
 
@@ -118,33 +122,88 @@ def validate_salary_raise_curve(
     salary_by_year: Mapping[Any, Any] | None,
     max_raise_pct: Any,
 ) -> RaiseCurveValidation:
-    """Validate that each next-year salary <= previous_year * (1 + max_raise_pct)."""
+    """Deprecated: use validate_salary_curve_with_anchor.
+
+    Backward-compatible wrapper that anchors on the first contract-year salary.
+    """
     curve = _normalize_salary_by_year(salary_by_year)
     pct = float(safe_float(max_raise_pct, 0.0))
     if pct < 0.0:
         pct = 0.0
 
     years = sorted(curve.keys())
+    anchor = float(curve[years[0]]) if years else 0.0
+    chk = validate_salary_curve_with_anchor(
+        curve,
+        anchor_salary=anchor,
+        max_delta_pct=pct,
+        allow_descend=True,
+    )
+    return RaiseCurveValidation(
+        ok=bool(chk.ok),
+        max_raise_pct=float(pct),
+        checked_years=[int(y) for y in (chk.checked_years or years)],
+        violations=[dict(v) for v in (chk.violations or [])],
+    )
+
+
+def validate_salary_curve_with_anchor(
+    salary_by_year: Mapping[Any, Any] | None,
+    anchor_salary: Any,
+    max_delta_pct: Any,
+    *,
+    allow_descend: bool = True,
+) -> RaiseCurveValidation:
+    """Validate fixed-delta salary curve against first-year anchor.
+
+    Rule:
+      salary_i <= anchor + i * (anchor * max_delta_pct)
+    where i is 0-based index from the first season year in salary_by_year.
+    """
+    curve = _normalize_salary_by_year(salary_by_year)
+    years = sorted(curve.keys())
+    pct = float(safe_float(max_delta_pct, 0.0))
+    if pct < 0.0:
+        pct = 0.0
+
+    anchor = float(safe_float(anchor_salary, 0.0))
+    if anchor <= 0.0 and years:
+        anchor = float(curve[years[0]])
+
     if len(years) <= 1:
         return RaiseCurveValidation(ok=True, max_raise_pct=float(pct), checked_years=[int(y) for y in years], violations=[])
 
     violations: list[dict[str, Any]] = []
     eps = 1e-6
-    for i in range(1, len(years)):
-        prev_y = int(years[i - 1])
-        y = int(years[i])
-        prev_sal = float(curve[prev_y])
+    delta = float(anchor) * float(pct)
+
+    for i, y in enumerate(years):
         sal = float(curve[y])
-        max_allowed = float(prev_sal) * (1.0 + float(pct))
+        max_allowed = float(anchor) + float(i) * float(delta)
+        min_allowed = float(anchor) - float(i) * float(delta)
         if sal > (max_allowed + eps):
             violations.append(
                 {
-                    "prev_year": int(prev_y),
                     "year": int(y),
-                    "prev_salary": float(prev_sal),
+                    "index": int(i),
                     "salary": float(sal),
                     "max_allowed": float(max_allowed),
-                    "raise_pct": (float(sal) / float(prev_sal) - 1.0) if prev_sal > 0.0 else None,
+                    "anchor_salary": float(anchor),
+                    "max_delta_pct": float(pct),
+                    "direction": "UP",
+                }
+            )
+            continue
+        if not allow_descend and sal < (min_allowed - eps):
+            violations.append(
+                {
+                    "year": int(y),
+                    "index": int(i),
+                    "salary": float(sal),
+                    "min_allowed": float(min_allowed),
+                    "anchor_salary": float(anchor),
+                    "max_delta_pct": float(pct),
+                    "direction": "DOWN",
                 }
             )
 

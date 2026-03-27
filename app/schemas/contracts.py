@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, root_validator, validator
 
 
 class ReleaseToFARequest(BaseModel):
@@ -62,8 +62,34 @@ class ContractNegotiationStartRequest(BaseModel):
     team_id: str
     player_id: str
     mode: str = "SIGN_FA"  # SIGN_FA(일반 FA) | RE_SIGN(FA + 팀 Bird 권한 보유자 전용) | EXTEND(현재 팀 소속 연장)
+    extension_type: Optional[str] = None  # EXTEND 계열에서만 사용: ROOKIE|VETERAN|DVE
     valid_days: Optional[int] = 7  # in-game days the offer window stays open (best-effort)
     preferred_channel: Optional[str] = None  # RE_SIGN: BIRD_FULL|BIRD_EARLY|BIRD_NON, SIGN_FA: STANDARD_FA|MINIMUM|NT_MLE|TP_MLE|ROOM_MLE (mode별 검증)
+
+    @validator("mode", pre=True, always=True)
+    def _normalize_mode(cls, value: Optional[str]) -> str:
+        return str(value or "SIGN_FA").strip().upper() or "SIGN_FA"
+
+    @validator("extension_type", pre=True, always=True)
+    def _normalize_extension_type(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = str(value).strip().upper()
+        return normalized or None
+
+    @root_validator
+    def _validate_extension_mode_and_type(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        mode = str(values.get("mode") or "").strip().upper()
+        extension_type = values.get("extension_type")
+        is_extend_mode = mode == "EXTEND" or mode.startswith("EXTEND_")
+
+        if not is_extend_mode and extension_type is not None:
+            raise ValueError("extension_type is only allowed when mode is EXTEND or EXTEND_*")
+        if is_extend_mode and extension_type is None:
+            raise ValueError("extension_type is required when mode is EXTEND or EXTEND_*")
+        if extension_type is not None and extension_type not in {"ROOKIE", "VETERAN", "DVE"}:
+            raise ValueError("extension_type must be one of: ROOKIE, VETERAN, DVE")
+        return values
 
 
 class ContractOfferPayload(BaseModel):
@@ -75,6 +101,7 @@ class ContractOfferPayload(BaseModel):
     contract_channel: Optional[str] = "STANDARD_FA"  # RE_SIGN는 Bird-only(BIRD_FULL|BIRD_EARLY|BIRD_NON), SIGN_FA는 STANDARD_FA|MINIMUM|MLE 계열
     options: Optional[List[Dict[str, Any]]] = None
     non_monetary: Optional[Dict[str, Any]] = None
+    extension_profile: Optional[Dict[str, Any]] = None
 
 
 class ContractNegotiationOfferRequest(BaseModel):
