@@ -24,6 +24,7 @@ from contracts.policy.salary_limits import (
     rookie_extension_first_year_ceiling,
     veteran_extension_first_year_ceiling,
 )
+from contracts.policy.raise_limits import validate_salary_curve_with_anchor
 
 
 _EXTENSION_TYPES = {"ROOKIE", "VETERAN", "DVE"}
@@ -178,41 +179,19 @@ def validate_fixed_raise_curve(
     first_year_salary: float,
     max_delta_pct: float = 0.08,
 ) -> list[dict[str, Any]]:
-    curve: dict[int, float] = {}
-    if isinstance(salary_by_year, Mapping):
-        for k, v in salary_by_year.items():
-            try:
-                y = int(k)
-            except Exception:
-                continue
-            s = float(safe_float(v, 0.0))
-            if s > 0.0:
-                curve[y] = s
-
-    years = sorted(curve.keys())
-    anchor = float(safe_float(first_year_salary, 0.0))
-    if anchor <= 0.0 and years:
-        anchor = float(curve[years[0]])
-    if anchor <= 0.0:
-        return [{"reason": "invalid_first_year_salary", "first_year_salary": float(first_year_salary)}]
-
-    delta = float(anchor) * max(0.0, float(safe_float(max_delta_pct, 0.08)))
-    eps = 1e-6
+    chk = validate_salary_curve_with_anchor(
+        salary_by_year,
+        anchor_salary=first_year_salary,
+        max_delta_pct=max_delta_pct,
+        allow_descend=True,
+    )
     violations: list[dict[str, Any]] = []
-    for i, y in enumerate(years):
-        max_allowed = float(anchor) + float(i) * float(delta)
-        salary = float(curve[y])
-        if salary > (max_allowed + eps):
-            violations.append(
-                {
-                    "year": int(y),
-                    "index": int(i),
-                    "salary": float(salary),
-                    "max_allowed": float(max_allowed),
-                    "first_year_salary": float(anchor),
-                    "max_delta_pct": float(max_delta_pct),
-                }
-            )
+    for v in (chk.violations or []):
+        row = dict(v)
+        if "anchor_salary" in row and "first_year_salary" not in row:
+            row["first_year_salary"] = float(row.pop("anchor_salary"))
+        row.pop("direction", None)
+        violations.append(row)
     return violations
 
 
