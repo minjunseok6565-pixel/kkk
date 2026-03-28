@@ -20,6 +20,12 @@ from league_repo import LeagueRepo
 from league_service import LeagueService, CapViolationError
 from schema import normalize_player_id, normalize_team_id
 
+from contracts.policy.extension_rules import (
+    calc_extension_first_year_limit,
+    validate_extension_eligibility,
+    validate_extension_total_seasons,
+    validate_fixed_raise_curve,
+)
 from contracts.policy.salary_limits import build_exp_aav_limit
 
 from .config import ContractNegotiationConfig, DEFAULT_CONTRACT_NEGOTIATION_CONFIG
@@ -31,10 +37,18 @@ from .errors import (
     NEGOTIATION_CLOSED,
     NEGOTIATION_COMMIT_FAILED,
     NEGOTIATION_COMMIT_NOT_ACCEPTED,
+    NEGOTIATION_EXTENSION_FIRST_YEAR_EXCEEDS_LIMIT,
+    NEGOTIATION_EXTENSION_FIXED_RAISE_EXCEEDED,
+    NEGOTIATION_EXTENSION_TOTAL_SEASONS_EXCEEDED,
+    NEGOTIATION_EXTENSION_TYPE_REQUIRED,
     NEGOTIATION_EXPIRED,
     NEGOTIATION_INVALID_MODE,
     NEGOTIATION_INVALID_OFFER,
     NEGOTIATION_OFFER_EXCEEDS_EXP_AAV_HARD_CAP,
+    MSG_NEGOTIATION_EXTENSION_FIRST_YEAR_EXCEEDS_LIMIT,
+    MSG_NEGOTIATION_EXTENSION_FIXED_RAISE_EXCEEDED,
+    MSG_NEGOTIATION_EXTENSION_TOTAL_SEASONS_EXCEEDED,
+    MSG_NEGOTIATION_EXTENSION_TYPE_REQUIRED,
 )
 from .store import (
     append_message,
@@ -57,6 +71,54 @@ from .store import (
 )
 from .types import ContractOffer, NegotiationDecision, PlayerPosition
 from .utils import coerce_date_iso, date_add_days, safe_float, safe_int
+
+
+_EXT_MODE_TO_TYPE: dict[str, str] = {
+    "EXTEND_ROOKIE": "ROOKIE",
+    "EXTEND_VETERAN": "VETERAN",
+    "EXTEND_DVE": "DVE",
+}
+
+
+def _normalize_extend_mode(mode_u: str, extension_type: Optional[str]) -> tuple[str, str]:
+    mode_n = str(mode_u or "SIGN_FA").upper()
+    ext_t = str(extension_type or "").strip().upper()
+    if mode_n in _EXT_MODE_TO_TYPE:
+        if not ext_t:
+            ext_t = _EXT_MODE_TO_TYPE[mode_n]
+        return mode_n, ext_t
+    if mode_n != "EXTEND":
+        return mode_n, ext_t
+    if not ext_t:
+        raise ContractNegotiationError(
+            NEGOTIATION_EXTENSION_TYPE_REQUIRED,
+            MSG_NEGOTIATION_EXTENSION_TYPE_REQUIRED,
+            {"mode": mode_n},
+        )
+    mapped = {
+        "ROOKIE": "EXTEND_ROOKIE",
+        "VETERAN": "EXTEND_VETERAN",
+        "DVE": "EXTEND_DVE",
+    }.get(ext_t)
+    if not mapped:
+        raise ContractNegotiationError(
+            NEGOTIATION_BAD_PAYLOAD,
+            "Invalid extension_type for EXTEND mode",
+            {"extension_type": ext_t},
+        )
+    return mapped, ext_t
+
+
+def _load_active_contract_context(repo: LeagueRepo, player_id: str) -> dict[str, Any]:
+    active_ids = repo.get_active_contract_id_by_player()
+    cid = str(active_ids.get(str(player_id)) or "")
+    if not cid:
+        return {}
+    contracts_map = repo.get_contracts_map(active_only=True)
+    row = contracts_map.get(cid)
+    if not isinstance(row, Mapping):
+        return {}
+    return dict(row)
 
 
 def _extract_salary_cap_from_state() -> Optional[float]:
@@ -358,6 +420,7 @@ def start_contract_negotiation(
     player_id: str,
     *,
     mode: str = "SIGN_FA",
+    extension_type: Optional[str] = None,
     now_iso: Optional[str] = None,
     valid_days: Optional[int] = None,
     preferred_channel: Optional[str] = None,
@@ -368,9 +431,9 @@ def start_contract_negotiation(
     """Create a new negotiation session."""
     tid = str(normalize_team_id(team_id, strict=True)).upper()
     pid = str(normalize_player_id(player_id, strict=False, allow_legacy_numeric=True))
-    mode_u = str(mode or "SIGN_FA").upper()
+    mode_u, extension_type_u = _normalize_extend_mode(str(mode or "SIGN_FA").upper(), extension_type)
 
-    if mode_u not in {"SIGN_FA", "RE_SIGN", "EXTEND"}:
+    if mode_u not in {"SIGN_FA", "RE_SIGN", "EXTEND", "EXTEND_ROOKIE", "EXTEND_VETERAN", "EXTEND_DVE"}:
         raise ContractNegotiationError(
             NEGOTIATION_INVALID_MODE,
             "Invalid negotiation mode",
@@ -407,13 +470,14 @@ def start_contract_negotiation(
                     "Player must be a free agent for re-sign",
                     {"player_id": pid, "team_id": current_team, "negotiating_team": tid},
                 )
-            if mode_u == "EXTEND" and current_team != tid:
+            if mode_u.startswith("EXTEND") and current_team != tid:
                 raise ContractNegotiationError(
                     NEGOTIATION_INVALID_MODE,
                     "Player is not on this team for extend",
                     {"player_id": pid, "team_id": current_team, "negotiating_team": tid},
                 )
             roster = r.get_team_roster(tid)
+            active_contract_ctx = _load_active_contract_context(r, pid) if mode_u.startswith("EXTEND") else {}
 
             if mode_u == "SIGN_FA":
                 try:
@@ -461,6 +525,8 @@ def start_contract_negotiation(
                         },
                     )
                 available_contract_channels = [str(ch)]
+            elif mode_u.startswith("EXTEND_"):
+                available_contract_channels = [str(mode_u)]
 
             if preferred_channel_u:
                 if preferred_channel_u in set(available_contract_channels):
@@ -497,6 +563,8 @@ def start_contract_negotiation(
             "mental": mental,
             "role_bucket": role_bucket,
             "leverage": float(leverage),
+            "sign_year": int(negotiation_season_year),
+            "active_contract": dict(active_contract_ctx) if isinstance(active_contract_ctx, Mapping) else {},
         }
         team_snapshot = {
             "team_id": tid,
@@ -504,6 +572,48 @@ def start_contract_negotiation(
         }
 
         cfg_eff = _with_salary_cap(cfg)
+        extension_constraints: dict[str, Any] = {}
+        if mode_u.startswith("EXTEND"):
+            if not active_contract_ctx:
+                raise ContractNegotiationError(
+                    NEGOTIATION_INVALID_MODE,
+                    "Active contract is required for extension negotiation",
+                    {"player_id": pid, "team_id": tid},
+                )
+            now_date_iso = str(now_date)
+            league_ctx = {
+                "sign_year": int(negotiation_season_year),
+                "salary_cap": float(safe_float(getattr(cfg_eff, "salary_cap", 0.0), 0.0)),
+                "eaps": float(safe_float((trade_rules_snapshot or {}).get("eaps"), 0.0)),
+                "player_tx_history": (trade_rules_snapshot or {}).get("player_tx_history"),
+                "higher_max_criteria_by_player": (trade_rules_snapshot or {}).get("higher_max_criteria_by_player"),
+                "higher_max_criteria_resolver": (trade_rules_snapshot or {}).get("higher_max_criteria_resolver"),
+            }
+            validate_extension_eligibility(
+                extension_type=str(extension_type_u),
+                player_ctx=player_snapshot,
+                contract_ctx=active_contract_ctx,
+                league_ctx=league_ctx,
+                now_date_iso=now_date_iso,
+            )
+            sign_year = int(negotiation_season_year)
+            start_y = int(safe_int(active_contract_ctx.get("start_season_year"), sign_year))
+            years_i = int(safe_int(active_contract_ctx.get("years"), 0))
+            current_end = start_y + years_i - 1 if years_i > 0 else sign_year
+            prev_salary = float(safe_float((active_contract_ctx.get("salary_by_year") or {}).get(current_end), 0.0))
+            lim = calc_extension_first_year_limit(
+                extension_type=str(extension_type_u),
+                salary_cap=float(safe_float(getattr(cfg_eff, "salary_cap", 0.0), 0.0)),
+                prev_salary=float(prev_salary),
+                eaps=float(safe_float((trade_rules_snapshot or {}).get("eaps"), 0.0)),
+                exp=int(safe_int(player_snapshot.get("exp"), 0)),
+            )
+            extension_constraints = {
+                "extension_type": str(extension_type_u),
+                "first_year_salary_limit": dict(lim),
+                "max_total_seasons_at_sign": 6 if extension_type_u in {"ROOKIE", "DVE"} else 5,
+                "raise_rule": "ANCHOR_8_PERCENT",
+            }
 
         pos = build_player_position(
             player_snapshot,
@@ -530,11 +640,15 @@ def start_contract_negotiation(
                 "available_contract_channels": list(available_contract_channels),
                 "trade_rules_snapshot": dict(trade_rules_snapshot or {}),
                 "negotiation_season_year": int(negotiation_season_year),
+                **extension_constraints,
             },
         )
         session["available_contract_channels"] = list(available_contract_channels)
         session["trade_rules_snapshot"] = dict(trade_rules_snapshot or {})
         session["negotiation_season_year"] = int(negotiation_season_year)
+        if extension_constraints:
+            for k, v in extension_constraints.items():
+                session[k] = v
         if preferred_channel_u:
             session["preferred_channel"] = str(preferred_channel_u)
 
@@ -695,6 +809,15 @@ def _validate_offer_channel_policy(
             )
         return
 
+    if mode_u.startswith("EXTEND"):
+        if channel != mode_u:
+            raise ContractNegotiationError(
+                NEGOTIATION_INVALID_OFFER,
+                "EXTEND offer channel must match negotiation extension mode.",
+                {"contract_channel": channel, "expected": mode_u},
+            )
+        return
+
     if mode_u != "SIGN_FA":
         return
 
@@ -817,6 +940,85 @@ def _validate_offer_channel_policy(
         ) from exc
 
 
+def _validate_offer_extension_first_year(*, session: Mapping[str, Any], offer: ContractOffer) -> None:
+    mode_u = str(session.get("mode") or "").upper()
+    if not mode_u.startswith("EXTEND"):
+        return
+    constraints = session.get("constraints") if isinstance(session.get("constraints"), Mapping) else {}
+    limit = constraints.get("first_year_salary_limit") if isinstance(constraints, Mapping) else None
+    if not isinstance(limit, Mapping):
+        return
+    start_year = int(offer.start_season_year)
+    first_salary = float(safe_float((offer.salary_by_year or {}).get(start_year), 0.0))
+    max_first = float(safe_float(limit.get("max_first_year"), 0.0))
+    min_first = float(safe_float(limit.get("min_first_year"), 0.0))
+    if max_first > 0.0 and first_salary > max_first:
+        raise ContractNegotiationError(
+            NEGOTIATION_EXTENSION_FIRST_YEAR_EXCEEDS_LIMIT,
+            MSG_NEGOTIATION_EXTENSION_FIRST_YEAR_EXCEEDS_LIMIT,
+            {"first_year_salary": first_salary, "max_first_year": max_first, "limit": dict(limit)},
+        )
+    if min_first > 0.0 and first_salary < min_first:
+        raise ContractNegotiationError(
+            NEGOTIATION_EXTENSION_FIRST_YEAR_EXCEEDS_LIMIT,
+            MSG_NEGOTIATION_EXTENSION_FIRST_YEAR_EXCEEDS_LIMIT,
+            {"first_year_salary": first_salary, "min_first_year": min_first, "limit": dict(limit)},
+        )
+
+
+def _validate_offer_extension_fixed_raise(*, session: Mapping[str, Any], offer: ContractOffer) -> None:
+    mode_u = str(session.get("mode") or "").upper()
+    if not mode_u.startswith("EXTEND"):
+        return
+    start_year = int(offer.start_season_year)
+    first_salary = float(safe_float((offer.salary_by_year or {}).get(start_year), 0.0))
+    violations = validate_fixed_raise_curve(
+        salary_by_year=offer.salary_by_year,
+        first_year_salary=first_salary,
+        max_delta_pct=0.08,
+    )
+    if violations:
+        raise ContractNegotiationError(
+            NEGOTIATION_EXTENSION_FIXED_RAISE_EXCEEDED,
+            MSG_NEGOTIATION_EXTENSION_FIXED_RAISE_EXCEEDED,
+            {"violations": list(violations), "raise_rule": "ANCHOR_8_PERCENT"},
+        )
+
+
+def _validate_offer_extension_total_seasons(*, session: Mapping[str, Any], offer: ContractOffer) -> None:
+    mode_u = str(session.get("mode") or "").upper()
+    if not mode_u.startswith("EXTEND"):
+        return
+    constraints = session.get("constraints") if isinstance(session.get("constraints"), Mapping) else {}
+    player_snapshot = session.get("player_snapshot") if isinstance(session.get("player_snapshot"), Mapping) else {}
+    sign_year = int(
+        safe_int(
+            (constraints.get("negotiation_season_year") if isinstance(constraints, Mapping) else None)
+            or player_snapshot.get("sign_year"),
+            0,
+        )
+    )
+    contract_ctx = player_snapshot.get("active_contract") if isinstance(player_snapshot, Mapping) else None
+    if not isinstance(contract_ctx, Mapping):
+        return
+    try:
+        validate_extension_total_seasons(
+            current_start_year=int(safe_int(contract_ctx.get("start_season_year"), 0)),
+            current_years=int(safe_int(contract_ctx.get("years"), 0)),
+            added_years=int(offer.years),
+            sign_year=int(sign_year),
+            extension_type=str((constraints.get("extension_type") or "").upper()),
+        )
+    except ContractNegotiationError as exc:
+        if exc.code == NEGOTIATION_EXTENSION_TOTAL_SEASONS_EXCEEDED:
+            raise
+        raise ContractNegotiationError(
+            NEGOTIATION_EXTENSION_TOTAL_SEASONS_EXCEEDED,
+            MSG_NEGOTIATION_EXTENSION_TOTAL_SEASONS_EXCEEDED,
+            {"error": str(exc)},
+        ) from exc
+
+
 def submit_contract_offer(
     db_path: str,
     session_id: str,
@@ -857,6 +1059,9 @@ def submit_contract_offer(
     # Evaluate
     cfg_eff = _with_salary_cap(cfg)
     _validate_offer_channel_policy(db_path=db_path, session=session, offer=offer)
+    _validate_offer_extension_first_year(session=session, offer=offer)
+    _validate_offer_extension_fixed_raise(session=session, offer=offer)
+    _validate_offer_extension_total_seasons(session=session, offer=offer)
     _validate_offer_exp_aav_hard_cap(session=session, offer=offer, cfg=cfg_eff)
     decision: NegotiationDecision = evaluate_offer(session, offer, cfg=cfg_eff)
 
@@ -954,6 +1159,9 @@ def accept_last_counter(
 
     cfg_eff = _with_salary_cap(cfg)
     _validate_offer_channel_policy(db_path=db_path, session=session, offer=offer)
+    _validate_offer_extension_first_year(session=session, offer=offer)
+    _validate_offer_extension_fixed_raise(session=session, offer=offer)
+    _validate_offer_extension_total_seasons(session=session, offer=offer)
     _validate_offer_exp_aav_hard_cap(session=session, offer=offer, cfg=cfg_eff)
 
     set_agreed_offer(session_id, offer.to_payload())
@@ -1029,10 +1237,17 @@ def commit_contract_negotiation(
                 salary_by_year={int(k): float(v) for k, v in offer.salary_by_year.items()},
                 options=[dict(x) for x in (offer.options or [])],
             )
-        elif mode_u == "EXTEND":
+        elif mode_u.startswith("EXTEND"):
             ev = svc.extend_contract(
                 tid,
                 pid,
+                contract_channel=str(getattr(offer, "contract_channel", mode_u) or mode_u).upper(),
+                extension_type=str(
+                    (session.get("constraints") or {}).get("extension_type")
+                    if isinstance(session.get("constraints"), Mapping)
+                    else ""
+                ).upper()
+                or None,
                 signed_date=signed_date,
                 years=int(offer.years),
                 salary_by_year={int(k): float(v) for k, v in offer.salary_by_year.items()},

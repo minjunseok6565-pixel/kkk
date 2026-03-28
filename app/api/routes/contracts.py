@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from fastapi import APIRouter, HTTPException
 
@@ -34,6 +34,46 @@ from app.services.contract_facade import _commit_accepted_contract_negotiation, 
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _http_from_negotiation_error(exc: Exception) -> HTTPException:
+    """Map ContractNegotiationError into stable HTTP status/detail."""
+    try:
+        from contracts.negotiation.errors import (
+            ContractNegotiationError,
+            NEGOTIATION_EXTENSION_FIRST_YEAR_EXCEEDS_LIMIT,
+            NEGOTIATION_EXTENSION_FIXED_RAISE_EXCEEDED,
+            NEGOTIATION_EXTENSION_NOT_ELIGIBLE,
+            NEGOTIATION_EXTENSION_OPTION_WINDOW_VIOLATION,
+            NEGOTIATION_EXTENSION_TOTAL_SEASONS_EXCEEDED,
+            NEGOTIATION_EXTENSION_TYPE_INVALID,
+            NEGOTIATION_EXTENSION_TYPE_REQUIRED,
+            NEGOTIATION_EXTENSION_WINDOW_CLOSED,
+        )
+    except Exception:
+        return HTTPException(status_code=500, detail=str(exc))
+
+    if not isinstance(exc, ContractNegotiationError):
+        return HTTPException(status_code=500, detail=str(exc))
+
+    code = str(getattr(exc, "code", "NEGOTIATION_ERROR") or "NEGOTIATION_ERROR")
+    message = str(getattr(exc, "message", str(exc)) or str(exc))
+    details = getattr(exc, "details", None)
+    detail_payload: Dict[str, Any] = {"code": code, "message": message, "details": details}
+
+    conflict_codes = {
+        NEGOTIATION_EXTENSION_TYPE_REQUIRED,
+        NEGOTIATION_EXTENSION_TYPE_INVALID,
+        NEGOTIATION_EXTENSION_NOT_ELIGIBLE,
+        NEGOTIATION_EXTENSION_WINDOW_CLOSED,
+        NEGOTIATION_EXTENSION_FIRST_YEAR_EXCEEDS_LIMIT,
+        NEGOTIATION_EXTENSION_TOTAL_SEASONS_EXCEEDED,
+        NEGOTIATION_EXTENSION_FIXED_RAISE_EXCEEDED,
+        NEGOTIATION_EXTENSION_OPTION_WINDOW_VIOLATION,
+    }
+    if code in conflict_codes:
+        return HTTPException(status_code=409, detail=detail_payload)
+    return HTTPException(status_code=400, detail=detail_payload)
 
 
 
@@ -333,6 +373,7 @@ async def api_contracts_negotiation_start(req: ContractNegotiationStartRequest):
             team_id=req.team_id,
             player_id=req.player_id,
             mode=req.mode,
+            extension_type=req.extension_type,
             valid_days=req.valid_days,
             preferred_channel=req.preferred_channel,
             now_iso=str(now_iso),
@@ -343,6 +384,9 @@ async def api_contracts_negotiation_start(req: ContractNegotiationStartRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        mapped = _http_from_negotiation_error(e)
+        if mapped.status_code != 500:
+            raise mapped
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -369,6 +413,9 @@ async def api_contracts_negotiation_offer(req: ContractNegotiationOfferRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        mapped = _http_from_negotiation_error(e)
+        if mapped.status_code != 500:
+            raise mapped
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -394,6 +441,9 @@ async def api_contracts_negotiation_accept_counter(req: ContractNegotiationAccep
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        mapped = _http_from_negotiation_error(e)
+        if mapped.status_code != 500:
+            raise mapped
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -516,9 +566,14 @@ async def api_contracts_extend(req: ExtendRequest):
             expected_team_id=req.team_id,
             expected_player_id=req.player_id,
             signed_date_iso=str(signed_date_iso),
-            allowed_modes={"EXTEND"},
+            allowed_modes={"EXTEND", "EXTEND_ROOKIE", "EXTEND_VETERAN", "EXTEND_DVE"},
         )
         _validate_repo_integrity(str(db_path))
+        event = out.get("event") if isinstance(out, Mapping) else None
+        if isinstance(event, Mapping):
+            out["extension_type"] = event.get("extension_type")
+            out["first_year_limit_snapshot"] = event.get("first_year_limit_snapshot")
+            out["raise_rule"] = event.get("raise_rule")
         return out
     except HTTPException:
         raise
