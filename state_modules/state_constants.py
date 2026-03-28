@@ -9,6 +9,12 @@ from config import (
     CAP_BASE_SECOND_APRON,
     CAP_BASE_SEASON_YEAR,
     CAP_ROUND_UNIT,
+    MLE_ANNUAL_GROWTH_RATE,
+    MLE_BASE_NT,
+    MLE_BASE_ROOM,
+    MLE_BASE_SEASON_YEAR,
+    MLE_BASE_TP,
+    MLE_ENABLED,
 )
 
 DEFAULT_TRADE_RULES: Dict[str, Any] = {
@@ -46,6 +52,23 @@ DEFAULT_TRADE_RULES: Dict[str, Any] = {
     "roster_limit_rule_enabled": False,
     "max_pick_years_ahead": 7,
     "stepien_lookahead": 7,
+    "mle_enabled": MLE_ENABLED,
+    "mle_base_season_year": MLE_BASE_SEASON_YEAR,
+    "mle_annual_growth_rate": MLE_ANNUAL_GROWTH_RATE,
+    "mle_channels": {
+        "NT_MLE": {
+            "first_year_base": MLE_BASE_NT,
+            "max_years": 4,
+        },
+        "TP_MLE": {
+            "first_year_base": MLE_BASE_TP,
+            "max_years": 2,
+        },
+        "ROOM_MLE": {
+            "first_year_base": MLE_BASE_ROOM,
+            "max_years": 3,
+        },
+    },
 }
 
 _ALLOWED_SCHEDULE_STATUSES = {"scheduled", "final", "in_progress", "canceled"}

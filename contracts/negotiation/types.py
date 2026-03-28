@@ -22,6 +22,17 @@ ContractNegotiationStatus = Literal["ACTIVE", "CLOSED", "EXPIRED"]
 NegotiationSpeaker = Literal["TEAM", "PLAYER", "SYSTEM"]
 NegotiationVerdict = Literal["ACCEPT", "COUNTER", "REJECT", "WALK"]
 
+ALLOWED_CONTRACT_CHANNELS: set[str] = {
+    "STANDARD_FA",
+    "NT_MLE",
+    "TP_MLE",
+    "ROOM_MLE",
+    "BIRD_FULL",
+    "BIRD_EARLY",
+    "BIRD_NON",
+    "MINIMUM",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class Reason:
@@ -67,6 +78,7 @@ class ContractOffer:
     start_season_year: int
     years: int
     salary_by_year: Dict[int, float]
+    contract_channel: str = "STANDARD_FA"
     options: List[Dict[str, Any]] = field(default_factory=list)
     non_monetary: Dict[str, Any] = field(default_factory=dict)
 
@@ -112,6 +124,12 @@ class ContractOffer:
         if years_i <= 0:
             raise ValueError("offer.years must be >= 1")
 
+        contract_channel = str(payload.get("contract_channel") or "STANDARD_FA").strip().upper() or "STANDARD_FA"
+        if contract_channel not in ALLOWED_CONTRACT_CHANNELS:
+            raise ValueError(
+                f"offer.contract_channel must be one of {sorted(ALLOWED_CONTRACT_CHANNELS)}, got={contract_channel!r}"
+            )
+
         # Canonicalize salary_by_year: contiguous years, length == years
         if not salary_by_year:
             raise ValueError("offer.salary_by_year is required")
@@ -156,6 +174,7 @@ class ContractOffer:
             start_season_year=int(start_season_year),
             years=int(years_i),
             salary_by_year=canonical,
+            contract_channel=str(contract_channel),
             options=[dict(v) for _, v in sorted(dedup.items(), key=lambda kv: kv[0])],
             non_monetary=dict(non_monetary),
         )
@@ -172,6 +191,7 @@ class ContractOffer:
             "start_season_year": int(self.start_season_year),
             "years": int(self.years),
             "salary_by_year": {int(k): float(v) for k, v in (self.salary_by_year or {}).items()},
+            "contract_channel": str(self.contract_channel or "STANDARD_FA").upper(),
             "options": [dict(x) for x in (self.options or [])],
             "non_monetary": dict(self.non_monetary or {}),
         }

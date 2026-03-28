@@ -560,6 +560,67 @@ class LeagueService:
 
         return int(total)
 
+    def _compute_team_cap_salary_with_holds_in_cur(self, cur, team_id: str, season_year: int) -> int:
+        """Team cap salary = roster payroll + active cap holds + active dead caps."""
+        tid = self._norm_team_id(team_id, strict=False)
+        sy = int(season_year)
+        payroll = int(self._compute_team_payroll_for_season_in_cur(cur, tid, sy))
+        hold_sum = 0
+        dead_sum = 0
+        try:
+            row = cur.execute(
+                """
+                SELECT SUM(COALESCE(hold_amount, 0)) AS hold_sum
+                FROM team_cap_holds
+                WHERE UPPER(team_id)=UPPER(?) AND season_year=? AND is_released=0;
+                """,
+                (str(tid), int(sy)),
+            ).fetchone()
+            if row:
+                try:
+                    hold_sum = int(row["hold_sum"] or 0)
+                except Exception:
+                    hold_sum = int(row[0] or 0)
+        except sqlite3.OperationalError:
+            hold_sum = 0
+        except Exception as e:
+            _warn_limited(
+                "CAP_HOLD_SUM_QUERY_FAILED",
+                f"team_id={tid!r} season_year={sy!r} exc_type={type(e).__name__}",
+                limit=3,
+            )
+            hold_sum = 0
+        dead_sum = int(self._sum_team_dead_caps_in_cur(cur, tid, sy))
+        return int(payroll + max(0, int(hold_sum)) + max(0, int(dead_sum)))
+
+    def _sum_team_dead_caps_in_cur(self, cur, team_id: str, season_year: int) -> int:
+        tid = self._norm_team_id(team_id, strict=False)
+        sy = int(season_year)
+        try:
+            row = cur.execute(
+                """
+                SELECT SUM(COALESCE(amount, 0)) AS dead_sum
+                FROM team_dead_caps
+                WHERE UPPER(team_id)=UPPER(?) AND applied_season_year=? AND is_voided=0;
+                """,
+                (str(tid), int(sy)),
+            ).fetchone()
+            if not row:
+                return 0
+            try:
+                return int(row["dead_sum"] or 0)
+            except Exception:
+                return int(row[0] or 0)
+        except sqlite3.OperationalError:
+            return 0
+        except Exception as e:
+            _warn_limited(
+                "DEAD_CAP_SUM_QUERY_FAILED",
+                f"team_id={tid!r} season_year={sy!r} exc_type={type(e).__name__}",
+                limit=3,
+            )
+            return 0
+
     def _tx_exists_by_deal_id(self, cur, deal_id: str) -> bool:
         if not deal_id:
             return False
@@ -613,6 +674,60 @@ class LeagueService:
             rows,
         )
 
+    def _update_room_mle_flag_if_below_cap_in_cur(self, cur, team_id: str, *, season_year: Optional[int] = None) -> None:
+        """Mark room-MLE flag when team payroll drops below salary cap in a season.
+
+        Safe/no-op behavior:
+        - Ignores FA or empty team ids.
+        - Silently returns if state/cap model/table is unavailable.
+        """
+        tid = str(team_id or "").strip().upper()
+        if not tid or tid == "FA":
+            return
+
+        try:
+            sy = int(season_year) if season_year is not None else int(_current_season_year_ssot())
+        except Exception:
+            return
+
+        try:
+            tr = _trade_rules_ssot()
+            cap_model = CapModel.from_trade_rules(tr, current_season_year=int(sy))
+            salary_cap = int(cap_model.salary_cap_for_season(int(sy)))
+        except Exception:
+            return
+
+        if salary_cap <= 0:
+            return
+
+        payroll = int(self._compute_team_payroll_for_season_in_cur(cur, tid, int(sy)))
+        if payroll >= int(salary_cap):
+            return
+
+        now = _utc_now_iso()
+        try:
+            cur.execute(
+                """
+                INSERT INTO team_room_mle_flags(season_year, team_id, became_below_cap_once, updated_at)
+                VALUES (?, UPPER(?), 1, ?)
+                ON CONFLICT(season_year, team_id)
+                DO UPDATE SET
+                    became_below_cap_once = CASE
+                        WHEN became_below_cap_once = 1 THEN 1
+                        ELSE excluded.became_below_cap_once
+                    END,
+                    updated_at = excluded.updated_at;
+                """,
+                (int(sy), str(tid), str(now)),
+            )
+        except sqlite3.OperationalError as e:
+            _warn_limited(
+                "ROOM_MLE_FLAG_TABLE_UNAVAILABLE",
+                f"team_id={tid!r} season_year={sy!r} exc_type={type(e).__name__}",
+                limit=3,
+            )
+            return
+
     def _move_player_team_in_cur(self, cur, player_id: str, to_team_id: str) -> None:
         """
         Roster move + active contract team sync (same behavior as LeagueRepo.trade_player),
@@ -628,6 +743,10 @@ class LeagueService:
         ).fetchone()
         if not exists:
             raise KeyError(f"active roster entry not found for player_id={player_id}")
+        try:
+            from_tid = str(exists["team_id"]).upper()
+        except Exception:
+            from_tid = str(exists[0]).upper() if exists else ""
 
         cur.execute(
             "UPDATE roster SET team_id=?, updated_at=? WHERE player_id=?;",
@@ -638,13 +757,27 @@ class LeagueService:
             (to_tid, now, pid),
         )
 
+        # Room-MLE flag hook: evaluate both teams after payroll-changing team move.
+        self._update_room_mle_flag_if_below_cap_in_cur(cur, from_tid)
+        self._update_room_mle_flag_if_below_cap_in_cur(cur, to_tid)
+
     def _set_roster_salary_in_cur(self, cur, player_id: str, salary_amount: int) -> None:
         pid = self._norm_player_id(player_id)
         now = _utc_now_iso()
+        row = cur.execute(
+            "SELECT team_id FROM roster WHERE player_id=? AND status='active' LIMIT 1;",
+            (pid,),
+        ).fetchone()
+        try:
+            team_id = str(row["team_id"]).upper() if row else ""
+        except Exception:
+            team_id = str(row[0]).upper() if row else ""
         cur.execute(
             "UPDATE roster SET salary_amount=?, updated_at=? WHERE player_id=?;",
             (int(salary_amount), now, pid),
         )
+        # Room-MLE flag hook: salary changes can drop payroll below cap.
+        self._update_room_mle_flag_if_below_cap_in_cur(cur, team_id)
 
     def _load_contract_row_in_cur(self, cur, contract_id: str) -> Dict[str, Any]:
         row = cur.execute(
@@ -1028,7 +1161,91 @@ class LeagueService:
         with self._atomic() as cur:
             self._set_roster_salary_in_cur(cur, player_id, int(salary_amount))
 
-    def release_player_to_free_agency(self, player_id: str, released_date: date | str | None = None) -> ServiceEvent:
+    def _get_active_contract_for_player_in_cur(self, cur, player_id: str) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        pid = self._norm_player_id(player_id)
+        row = cur.execute(
+            "SELECT contract_id FROM active_contracts WHERE player_id=? LIMIT 1;",
+            (pid,),
+        ).fetchone()
+        if not row:
+            return None, None
+        try:
+            cid = str(row["contract_id"])
+        except Exception:
+            cid = str(row[0])
+        if not cid:
+            return None, None
+        contract = self._load_contract_row_in_cur(cur, cid)
+        return cid, contract
+
+    def _remaining_salary_schedule(self, contract: Mapping[str, Any], current_season_year: int) -> Dict[int, int]:
+        out: Dict[int, int] = {}
+        by_year = contract.get("salary_by_year") or {}
+        if not isinstance(by_year, Mapping):
+            return out
+        for k, v in by_year.items():
+            try:
+                y = int(k)
+                amt = int(float(v))
+            except Exception:
+                continue
+            if y < int(current_season_year):
+                continue
+            if amt <= 0:
+                continue
+            out[int(y)] = int(amt)
+        return dict(sorted(out.items(), key=lambda kv: int(kv[0])))
+
+    def _build_waive_dead_cap_rows(
+        self,
+        *,
+        team_id: str,
+        player_id: str,
+        origin_contract_id: Optional[str],
+        remaining_salary_by_year: Mapping[int, int],
+        now_iso: str,
+    ) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for season_year, amount in sorted(remaining_salary_by_year.items(), key=lambda kv: int(kv[0])):
+            rows.append(
+                {
+                    "team_id": str(team_id).upper(),
+                    "player_id": str(player_id),
+                    "origin_contract_id": (str(origin_contract_id) if origin_contract_id else None),
+                    "source_type": "WAIVE",
+                    "applied_season_year": int(season_year),
+                    "amount": int(max(0, int(amount))),
+                    "is_voided": 0,
+                    "voided_reason": None,
+                    "meta_json": {
+                        "policy": "waive",
+                        "created_at": str(now_iso),
+                    },
+                }
+            )
+        return rows
+
+    def _build_stretch_dead_cap_rows(self, total: int, start_year: int, stretch_years: int) -> Dict[int, int]:
+        total_i = max(0, int(total))
+        years_i = max(1, int(stretch_years))
+        start_i = int(start_year)
+        base = total_i // years_i
+        rem = total_i % years_i
+        out: Dict[int, int] = {}
+        for i in range(years_i):
+            y = int(start_i + i)
+            add = 1 if i < rem else 0
+            out[y] = int(base + add)
+        return out
+
+    def release_player_to_free_agency(
+        self,
+        player_id: str,
+        released_date: date | str | None = None,
+        *,
+        mode: str | None = None,
+        release_reason: str | None = None,
+    ) -> ServiceEvent:
         """Release player to FA by moving roster.team_id to 'FA'.
 
         free_agents is derived from roster.team_id == 'FA' by default (SSOT),
@@ -1050,6 +1267,16 @@ class LeagueService:
             if from_team == "FA":
                 raise ValueError(f"player_id={player_id} is already a free agent")
 
+            mode_norm = str(mode or "").strip().upper()
+            if mode_norm == "EXPIRATION_ONLY":
+                _, active_contract = self._get_active_contract_for_player_in_cur(cur, pid)
+                if isinstance(active_contract, Mapping):
+                    remaining = self._remaining_salary_schedule(active_contract, int(season_year_i))
+                    if remaining:
+                        raise ValueError(
+                            f"player_id={player_id} has remaining contract salary and cannot be released in EXPIRATION_ONLY mode"
+                        )
+
             self._move_player_team_in_cur(cur, pid, "FA")
 
             # Log (SSOT): standardized contract-related transaction
@@ -1068,6 +1295,8 @@ class LeagueService:
                         "player_id": pid,
                         "from_team": from_team,
                         "to_team": "FA",
+                        "release_reason": str(release_reason or "GENERAL").strip().upper(),
+                        "release_mode": mode_norm or "GENERAL",
                     }
                 ],
             )
@@ -1083,9 +1312,202 @@ class LeagueService:
                 "affected_player_ids": [pid],
                 "from_team": from_team,
                 "to_team": "FA",
+                "release_mode": mode_norm or "GENERAL",
+                "release_reason": str(release_reason or "GENERAL").strip().upper(),
             },
         )
         return event
+
+    def waive_player(
+        self,
+        *,
+        team_id: str,
+        player_id: str,
+        waived_date: date | str | None = None,
+    ) -> ServiceEvent:
+        waived_date_iso = _coerce_iso(waived_date)
+        season_year_i = _current_season_year_ssot()
+        with self._atomic() as cur:
+            pid = self._norm_player_id(player_id)
+            tid = self._norm_team_id(team_id, strict=False)
+            row = cur.execute(
+                "SELECT team_id FROM roster WHERE player_id=? AND status='active' LIMIT 1;",
+                (pid,),
+            ).fetchone()
+            if not row:
+                raise KeyError(f"active roster entry not found for player_id={player_id}")
+            current_team = str(row["team_id"]).upper()
+            if current_team != tid:
+                raise ValueError(f"player_id={player_id} is not on team_id={tid} (current={current_team})")
+
+            contract_id, contract = self._get_active_contract_for_player_in_cur(cur, pid)
+            if not contract_id or not isinstance(contract, Mapping):
+                raise ValueError(f"active contract not found for player_id={player_id}")
+            remaining = self._remaining_salary_schedule(contract, int(season_year_i))
+            if not remaining:
+                raise ValueError(f"no remaining salary to waive for player_id={player_id}")
+
+            self._move_player_team_in_cur(cur, pid, "FA")
+            now_iso = _utc_now_iso()
+            dead_rows = self._build_waive_dead_cap_rows(
+                team_id=tid,
+                player_id=pid,
+                origin_contract_id=contract_id,
+                remaining_salary_by_year=remaining,
+                now_iso=now_iso,
+            )
+            self.repo.upsert_team_dead_caps(dead_rows)
+
+            self._insert_transactions_in_cur(
+                cur,
+                [
+                    {
+                        "type": "WAIVE_TO_FA",
+                        "action_type": "WAIVE_TO_FA",
+                        "action_date": waived_date_iso,
+                        "date": waived_date_iso,
+                        "season_year": int(season_year_i),
+                        "source": "contracts",
+                        "teams": [tid],
+                        "team_id": tid,
+                        "player_id": pid,
+                        "from_team": tid,
+                        "to_team": "FA",
+                        "source_type": "WAIVE",
+                        "origin_contract_id": contract_id,
+                        "remaining_salary_by_year": {int(k): int(v) for k, v in remaining.items()},
+                        "dead_cap_schedule": {int(k): int(v) for k, v in remaining.items()},
+                    }
+                ],
+            )
+
+        return ServiceEvent(
+            type="waive_player",
+            payload={
+                "date": waived_date_iso,
+                "season_year": int(season_year_i),
+                "team_id": tid,
+                "player_id": pid,
+                "from_team": tid,
+                "to_team": "FA",
+                "source_type": "WAIVE",
+                "origin_contract_id": contract_id,
+                "remaining_salary_by_year": {int(k): int(v) for k, v in remaining.items()},
+                "dead_cap_schedule": {int(k): int(v) for k, v in remaining.items()},
+                "affected_player_ids": [pid],
+            },
+        )
+
+    def stretch_player(
+        self,
+        *,
+        team_id: str,
+        player_id: str,
+        stretch_years: int,
+        stretched_date: date | str | None = None,
+    ) -> ServiceEvent:
+        stretched_date_iso = _coerce_iso(stretched_date)
+        season_year_i = _current_season_year_ssot()
+        with self._atomic() as cur:
+            pid = self._norm_player_id(player_id)
+            tid = self._norm_team_id(team_id, strict=False)
+            row = cur.execute(
+                "SELECT team_id FROM roster WHERE player_id=? AND status='active' LIMIT 1;",
+                (pid,),
+            ).fetchone()
+            if not row:
+                raise KeyError(f"active roster entry not found for player_id={player_id}")
+            current_team = str(row["team_id"]).upper()
+            if current_team != tid:
+                raise ValueError(f"player_id={player_id} is not on team_id={tid} (current={current_team})")
+
+            contract_id, contract = self._get_active_contract_for_player_in_cur(cur, pid)
+            if not contract_id or not isinstance(contract, Mapping):
+                raise ValueError(f"active contract not found for player_id={player_id}")
+            remaining = self._remaining_salary_schedule(contract, int(season_year_i))
+            remaining_years = len(remaining)
+            if remaining_years <= 0:
+                raise ValueError(f"no remaining salary to stretch for player_id={player_id}")
+            max_stretch_years = int((remaining_years * 2) + 1)
+            stretch_years_i = int(stretch_years)
+            if stretch_years_i < 1 or stretch_years_i > max_stretch_years:
+                raise ValueError(
+                    f"stretch_years must be between 1 and {max_stretch_years} (remaining_years={remaining_years})"
+                )
+
+            total_remaining = int(sum(int(v) for v in remaining.values()))
+            schedule = self._build_stretch_dead_cap_rows(
+                int(total_remaining),
+                int(season_year_i),
+                int(stretch_years_i),
+            )
+
+            self._move_player_team_in_cur(cur, pid, "FA")
+            now_iso = _utc_now_iso()
+            dead_rows: List[Dict[str, Any]] = []
+            for y, amt in sorted(schedule.items(), key=lambda kv: int(kv[0])):
+                dead_rows.append(
+                    {
+                        "team_id": tid,
+                        "player_id": pid,
+                        "origin_contract_id": contract_id,
+                        "source_type": "STRETCH",
+                        "applied_season_year": int(y),
+                        "amount": int(max(0, int(amt))),
+                        "is_voided": 0,
+                        "voided_reason": None,
+                        "meta_json": {
+                            "policy": "stretch",
+                            "created_at": str(now_iso),
+                            "stretch_years": int(stretch_years_i),
+                            "remaining_salary_by_year": {int(k): int(v) for k, v in remaining.items()},
+                            "total_remaining_salary": int(total_remaining),
+                        },
+                    }
+                )
+            self.repo.upsert_team_dead_caps(dead_rows)
+
+            self._insert_transactions_in_cur(
+                cur,
+                [
+                    {
+                        "type": "STRETCH_TO_FA",
+                        "action_type": "STRETCH_TO_FA",
+                        "action_date": stretched_date_iso,
+                        "date": stretched_date_iso,
+                        "season_year": int(season_year_i),
+                        "source": "contracts",
+                        "teams": [tid],
+                        "team_id": tid,
+                        "player_id": pid,
+                        "from_team": tid,
+                        "to_team": "FA",
+                        "source_type": "STRETCH",
+                        "origin_contract_id": contract_id,
+                        "remaining_salary_by_year": {int(k): int(v) for k, v in remaining.items()},
+                        "dead_cap_schedule": {int(k): int(v) for k, v in schedule.items()},
+                        "stretch_years": int(stretch_years_i),
+                    }
+                ],
+            )
+
+        return ServiceEvent(
+            type="stretch_player",
+            payload={
+                "date": stretched_date_iso,
+                "season_year": int(season_year_i),
+                "team_id": tid,
+                "player_id": pid,
+                "from_team": tid,
+                "to_team": "FA",
+                "source_type": "STRETCH",
+                "origin_contract_id": contract_id,
+                "remaining_salary_by_year": {int(k): int(v) for k, v in remaining.items()},
+                "dead_cap_schedule": {int(k): int(v) for k, v in schedule.items()},
+                "stretch_years": int(stretch_years_i),
+                "affected_player_ids": [pid],
+            },
+        )
 
     # ----------------------------
     # (T / S / C complex) Planned APIs (stubs)
@@ -1706,7 +2128,7 @@ class LeagueService:
             except Exception:
                 first_year_salary_i = 0
 
-            payroll_before = self._compute_team_payroll_for_season_in_cur(cur, team_norm, int(start_season_year))
+            payroll_before = self._compute_team_cap_salary_with_holds_in_cur(cur, team_norm, int(start_season_year))
             payroll_after = int(payroll_before) + int(first_year_salary_i)
 
             if payroll_after > int(salary_cap):
@@ -1822,6 +2244,524 @@ class LeagueService:
             },
         )
 
+    def sign_free_agent_with_channel(
+        self,
+        team_id: str,
+        player_id: str,
+        *,
+        contract_channel: str = "STANDARD_FA",
+        signed_date: date | str | None = None,
+        years: int = 1,
+        salary_by_year: Optional[Mapping[int, int]] = None,
+        team_option_last_year: bool = False,
+        team_option_years: Optional[Sequence[int]] = None,
+        options: Optional[Sequence[Mapping[str, Any]]] = None,
+    ) -> ServiceEvent:
+        """Sign FA by contract channel.
+
+        - STANDARD_FA: existing cap-checked flow (delegates to sign_free_agent)
+        - MINIMUM    : dedicated minimum-sign flow (no cap/MLE budget checks)
+        - *_MLE     : MLE policy validation + budget consumption flow
+        """
+        ch = str(contract_channel or "STANDARD_FA").strip().upper() or "STANDARD_FA"
+        if ch == "STANDARD_FA":
+            return self.sign_free_agent(
+                team_id=team_id,
+                player_id=player_id,
+                signed_date=signed_date,
+                years=years,
+                salary_by_year=salary_by_year,
+                team_option_last_year=team_option_last_year,
+                team_option_years=team_option_years,
+                options=options,
+            )
+        if ch == "MINIMUM":
+            return self._sign_free_agent_minimum(
+                team_id=team_id,
+                player_id=player_id,
+                signed_date=signed_date,
+                years=years,
+                salary_by_year=salary_by_year,
+                team_option_last_year=team_option_last_year,
+                team_option_years=team_option_years,
+                options=options,
+            )
+        if ch not in {"NT_MLE", "TP_MLE", "ROOM_MLE"}:
+            raise ValueError(f"Unsupported contract_channel: {contract_channel!r}")
+        return self._sign_free_agent_mle(
+            team_id=team_id,
+            player_id=player_id,
+            contract_channel=ch,
+            signed_date=signed_date,
+            years=years,
+            salary_by_year=salary_by_year,
+            team_option_last_year=team_option_last_year,
+            team_option_years=team_option_years,
+            options=options,
+        )
+
+    def _sign_free_agent_minimum(
+        self,
+        *,
+        team_id: str,
+        player_id: str,
+        signed_date: date | str | None = None,
+        years: int = 1,
+        salary_by_year: Optional[Mapping[int, int]] = None,
+        team_option_last_year: bool = False,
+        team_option_years: Optional[Sequence[int]] = None,
+        options: Optional[Sequence[Mapping[str, Any]]] = None,
+    ) -> ServiceEvent:
+        """MINIMUM signing flow (FA only): cap/MLE independent + policy-anchored salary."""
+        from contracts.minimum_policy import (
+            build_minimum_salary_by_year,
+            validate_minimum_offer,
+        )
+
+        team_norm = self._norm_team_id(team_id, strict=True)
+        pid = self._norm_player_id(player_id)
+        signed_date_iso = _coerce_iso(signed_date)
+        season_year_i = _current_season_year_ssot()
+        years_i = int(years)
+        if years_i not in {1, 2}:
+            raise ValueError("MINIMUM years must be 1 or 2")
+
+        if bool(team_option_last_year):
+            raise ValueError("MINIMUM does not allow team_option_last_year")
+        team_option_years_list = list(team_option_years) if team_option_years is not None else []
+        if team_option_years_list:
+            raise ValueError("MINIMUM does not allow team_option_years")
+        options_list = list(options) if options is not None else []
+        if options_list:
+            raise ValueError("MINIMUM does not allow options")
+
+        def _infer_start_season_year_from_date(d_iso: str) -> int:
+            try:
+                d = _dt.date.fromisoformat(str(d_iso)[:10])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid signed_date ISO: {d_iso!r}") from exc
+            start_this = _dt.date(d.year, int(SEASON_START_MONTH), int(SEASON_START_DAY))
+            start_prev = _dt.date(d.year - 1, int(SEASON_START_MONTH), int(SEASON_START_DAY))
+            end_prev = start_prev + _dt.timedelta(days=int(SEASON_LENGTH_DAYS))
+            if d >= start_this:
+                return d.year
+            if d >= end_prev:
+                return d.year
+            return d.year - 1
+
+        with self._atomic() as cur:
+            roster = cur.execute(
+                """
+                SELECT team_id
+                FROM roster
+                WHERE player_id=? AND status='active';
+                """,
+                (pid,),
+            ).fetchone()
+            if not roster:
+                raise KeyError(f"active roster entry not found for player_id={player_id}")
+
+            current_team = str(roster["team_id"]).upper()
+            if current_team != "FA":
+                raise ValueError(f"player_id={player_id} is not a free agent (team_id={current_team})")
+
+            p_row = cur.execute(
+                """
+                SELECT exp
+                FROM players
+                WHERE player_id=?
+                LIMIT 1;
+                """,
+                (pid,),
+            ).fetchone()
+            if not p_row:
+                raise KeyError(f"player not found for player_id={player_id}")
+            try:
+                player_exp = int(p_row["exp"] or 0)
+            except Exception:
+                player_exp = int(p_row[0] or 0)
+
+            salary_norm_input = self._normalize_salary_by_year(salary_by_year)
+            if salary_norm_input:
+                start_season_year = min(int(k) for k in salary_norm_input.keys())
+            else:
+                start_season_year = _infer_start_season_year_from_date(signed_date_iso)
+
+            # Build policy-anchored salary curve (SSOT)
+            salary_norm = build_minimum_salary_by_year(
+                exp=int(player_exp),
+                start_season_year=int(start_season_year),
+                years=int(years_i),
+            )
+
+            # If caller supplied salary_by_year, require exact policy match.
+            if salary_norm_input:
+                check = validate_minimum_offer(
+                    {
+                        "start_season_year": int(start_season_year),
+                        "years": int(years_i),
+                        "salary_by_year": {str(k): float(v) for k, v in salary_norm_input.items()},
+                        "options": [],
+                    },
+                    player_exp=int(player_exp),
+                    season_year=int(start_season_year),
+                )
+                if not bool(check.ok):
+                    raise ValueError(f"MINIMUM salary_by_year mismatch: {check.to_payload()}")
+
+            contract_id = str(new_contract_id())
+            contract = make_contract_record(
+                contract_id=contract_id,
+                player_id=pid,
+                team_id=team_norm,
+                signed_date_iso=signed_date_iso,
+                start_season_year=int(start_season_year),
+                years=years_i,
+                salary_by_year=salary_norm,
+                options=[],
+                status="ACTIVE",
+            )
+            contract["guaranteed_years"] = int(years_i)
+            contract["contract_channel"] = "MINIMUM"
+
+            self._upsert_contract_records_in_cur(cur, {contract_id: contract})
+            self._activate_contract_for_player_in_cur(cur, pid, contract_id)
+            self._move_player_team_in_cur(cur, pid, team_norm)
+
+            season_salary = salary_norm.get(str(int(start_season_year)))
+            if season_salary is not None:
+                self._set_roster_salary_in_cur(cur, pid, int(float(season_salary)))
+
+            try:
+                cur.execute("DELETE FROM free_agents WHERE player_id=?;", (pid,))
+            except sqlite3.OperationalError as exc:
+                msg = str(exc).lower()
+                if ("no such table" in msg) and ("free_agents" in msg):
+                    logger.warning(
+                        "[FREE_AGENTS_TABLE_MISSING] free_agents table missing; skipping cleanup (player_id=%s)",
+                        pid,
+                    )
+                else:
+                    raise
+
+            first_year_salary_i = int(float(salary_norm.get(str(int(start_season_year)), 0.0)))
+            self._insert_transactions_in_cur(
+                cur,
+                [
+                    {
+                        "type": "SIGN_FA_MINIMUM",
+                        "date": signed_date_iso,
+                        "action_date": signed_date_iso,
+                        "action_type": "SIGN_FA_MINIMUM",
+                        "season_year": int(season_year_i),
+                        "source": "contracts",
+                        "teams": [team_norm],
+                        "team_id": team_norm,
+                        "player_id": pid,
+                        "from_team": "FA",
+                        "to_team": team_norm,
+                        "contract_id": contract_id,
+                        "start_season_year": int(start_season_year),
+                        "years": int(years_i),
+                        "contract_channel": "MINIMUM",
+                        "first_year_salary": int(first_year_salary_i),
+                    }
+                ],
+            )
+
+        return ServiceEvent(
+            type="sign_free_agent_minimum",
+            payload={
+                "date": signed_date_iso,
+                "season_year": int(season_year_i),
+                "player_id": pid,
+                "affected_player_ids": [pid],
+                "from_team": "FA",
+                "to_team": team_norm,
+                "team_id": team_norm,
+                "contract_id": contract_id,
+                "signed_date": signed_date_iso,
+                "start_season_year": int(start_season_year),
+                "years": int(years_i),
+                "guaranteed_years": int(years_i),
+                "team_option_years": [],
+                "contract_channel": "MINIMUM",
+            },
+        )
+
+    def _sign_free_agent_mle(
+        self,
+        *,
+        team_id: str,
+        player_id: str,
+        contract_channel: str,
+        signed_date: date | str | None = None,
+        years: int = 1,
+        salary_by_year: Optional[Mapping[int, int]] = None,
+        team_option_last_year: bool = False,
+        team_option_years: Optional[Sequence[int]] = None,
+        options: Optional[Sequence[Mapping[str, Any]]] = None,
+    ) -> ServiceEvent:
+        """MLE signing flow (FA only): validates channel/offer/budget then commits."""
+        from contracts.mle_policy import (
+            consume_first_year_budget,
+            validate_mle_offer,
+        )
+
+        ch = str(contract_channel or "").strip().upper()
+        if ch not in {"NT_MLE", "TP_MLE", "ROOM_MLE"}:
+            raise ValueError(f"Unsupported MLE contract_channel: {contract_channel!r}")
+
+        team_norm = self._norm_team_id(team_id, strict=True)
+        pid = self._norm_player_id(player_id)
+        signed_date_iso = _coerce_iso(signed_date)
+        season_year_i = _current_season_year_ssot()
+        years_i = int(years)
+        if years_i <= 0:
+            raise ValueError("years must be >= 1")
+
+        team_option_last_year_b = bool(team_option_last_year)
+        team_option_years_list = list(team_option_years) if team_option_years is not None else []
+        if team_option_years_list and years_i < 2:
+            raise ValueError("team_option_years requires years >= 2")
+        if team_option_last_year_b and years_i < 2:
+            raise ValueError("team_option_last_year requires years >= 2")
+
+        def _infer_start_season_year_from_date(d_iso: str) -> int:
+            try:
+                d = _dt.date.fromisoformat(str(d_iso)[:10])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid signed_date ISO: {d_iso!r}") from exc
+            start_this = _dt.date(d.year, int(SEASON_START_MONTH), int(SEASON_START_DAY))
+            start_prev = _dt.date(d.year - 1, int(SEASON_START_MONTH), int(SEASON_START_DAY))
+            end_prev = start_prev + _dt.timedelta(days=int(SEASON_LENGTH_DAYS))
+            if d >= start_this:
+                return d.year
+            if d >= end_prev:
+                return d.year
+            return d.year - 1
+
+        with self._atomic() as cur:
+            roster = cur.execute(
+                """
+                SELECT team_id, salary_amount
+                FROM roster
+                WHERE player_id=? AND status='active';
+                """,
+                (pid,),
+            ).fetchone()
+            if not roster:
+                raise KeyError(f"active roster entry not found for player_id={player_id}")
+
+            current_team = str(roster["team_id"]).upper()
+            if current_team != "FA":
+                raise ValueError(f"player_id={player_id} is not a free agent (team_id={current_team})")
+
+            salary_norm = self._normalize_salary_by_year(salary_by_year)
+            if salary_norm:
+                start_season_year = min(int(k) for k in salary_norm.keys())
+            else:
+                start_season_year = _infer_start_season_year_from_date(signed_date_iso)
+                base_salary = roster["salary_amount"]
+                if base_salary is None:
+                    base_salary = 0
+                salary_norm = {
+                    str(y): float(base_salary)
+                    for y in range(int(start_season_year), int(start_season_year) + years_i)
+                }
+            normalized_options, guaranteed_years, option_years_sorted = _normalize_contract_options(
+                start_season_year=int(start_season_year),
+                years=int(years_i),
+                salary_by_year=salary_norm,
+                options=options,
+                team_option_years=team_option_years_list,
+                team_option_last_year=team_option_last_year_b,
+                context=f"sign_free_agent_{str(ch).lower()}",
+            )
+
+            trade_rules = _trade_rules_ssot()
+            cap_salary_before = int(
+                self._compute_team_cap_salary_with_holds_in_cur(cur, team_norm, int(start_season_year))
+            )
+            def _to_int(v: Any) -> int:
+                try:
+                    return int(v)
+                except Exception:
+                    return 0
+
+            cap_i = _to_int(trade_rules.get("salary_cap"))
+            first_i = _to_int(trade_rules.get("first_apron"))
+            second_i = _to_int(trade_rules.get("second_apron"))
+
+            eligible: list[str] = []
+            if cap_i > 0 and first_i > 0 and cap_salary_before > cap_i and cap_salary_before <= first_i:
+                eligible.append("NT_MLE")
+            if first_i > 0 and second_i > 0 and cap_salary_before > first_i and cap_salary_before <= second_i:
+                eligible.append("TP_MLE")
+
+            try:
+                row_room = cur.execute(
+                    """
+                    SELECT became_below_cap_once
+                    FROM team_room_mle_flags
+                    WHERE season_year=? AND UPPER(team_id)=UPPER(?)
+                    LIMIT 1;
+                    """,
+                    (int(start_season_year), str(team_norm)),
+                ).fetchone()
+                room_flag = False
+                if row_room:
+                    try:
+                        room_flag = int(row_room["became_below_cap_once"] or 0) == 1
+                    except Exception:
+                        room_flag = int(row_room[0] or 0) == 1
+                if room_flag:
+                    eligible.append("ROOM_MLE")
+            except Exception:
+                pass
+
+            # deterministic ordering
+            eligible = [x for x in ("NT_MLE", "TP_MLE", "ROOM_MLE") if x in set(eligible)]
+            if ch not in set(eligible):
+                raise CapViolationError(
+                    code="MLE_CHANNEL_NOT_ELIGIBLE",
+                    message=f"team_id={team_norm} is not eligible for {ch} in season={int(start_season_year)}",
+                    details={
+                        "team_id": team_norm,
+                        "season_year": int(start_season_year),
+                        "contract_channel": str(ch),
+                        "eligible_channels": list(eligible),
+                    },
+                )
+
+            offer_check = validate_mle_offer(
+                channel=ch,
+                offer={
+                    "years": int(years_i),
+                    "salary_by_year": {int(k): float(v) for k, v in salary_norm.items()},
+                },
+                season_year=int(start_season_year),
+                trade_rules=trade_rules,
+            )
+            if not bool(offer_check.ok):
+                raise CapViolationError(
+                    code="MLE_OFFER_INVALID",
+                    message=f"MLE offer validation failed for channel={ch}",
+                    details=offer_check.to_payload(),
+                )
+
+            first_year_salary_raw = salary_norm.get(str(int(start_season_year)))
+            try:
+                first_year_salary_i = int(float(first_year_salary_raw)) if first_year_salary_raw is not None else 0
+            except Exception:
+                first_year_salary_i = 0
+            if first_year_salary_i <= 0:
+                raise ValueError("MLE first-year salary must be > 0")
+
+            try:
+                budget_usage = consume_first_year_budget(
+                    team_id=str(team_norm),
+                    channel=str(ch),
+                    season_year=int(start_season_year),
+                    first_year_salary=int(first_year_salary_i),
+                    cur=cur,
+                    trade_rules=trade_rules,
+                )
+            except ValueError as exc:
+                raise CapViolationError(
+                    code="MLE_BUDGET_EXCEEDED",
+                    message=str(exc),
+                    details={
+                        "team_id": team_norm,
+                        "season_year": int(start_season_year),
+                        "contract_channel": str(ch),
+                        "first_year_salary": int(first_year_salary_i),
+                    },
+                ) from exc
+
+            contract_id = str(new_contract_id())
+            contract = make_contract_record(
+                contract_id=contract_id,
+                player_id=pid,
+                team_id=team_norm,
+                signed_date_iso=signed_date_iso,
+                start_season_year=int(start_season_year),
+                years=years_i,
+                salary_by_year=salary_norm,
+                options=normalized_options,
+                status="ACTIVE",
+            )
+            contract["guaranteed_years"] = int(guaranteed_years)
+            if option_years_sorted:
+                contract["team_option_years"] = [int(y) for y in option_years_sorted]
+            contract["contract_channel"] = str(ch)
+
+            self._upsert_contract_records_in_cur(cur, {contract_id: contract})
+            self._activate_contract_for_player_in_cur(cur, pid, contract_id)
+            self._move_player_team_in_cur(cur, pid, team_norm)
+
+            season_salary = salary_norm.get(str(int(start_season_year)))
+            if season_salary is not None:
+                self._set_roster_salary_in_cur(cur, pid, int(float(season_salary)))
+
+            try:
+                cur.execute("DELETE FROM free_agents WHERE player_id=?;", (pid,))
+            except sqlite3.OperationalError as exc:
+                msg = str(exc).lower()
+                if ("no such table" in msg) and ("free_agents" in msg):
+                    logger.warning(
+                        "[FREE_AGENTS_TABLE_MISSING] free_agents table missing; skipping cleanup (player_id=%s)",
+                        pid,
+                    )
+                else:
+                    raise
+
+            self._insert_transactions_in_cur(
+                cur,
+                [
+                    {
+                        "type": "SIGN_FA_MLE",
+                        "date": signed_date_iso,
+                        "action_date": signed_date_iso,
+                        "action_type": "SIGN_FA_MLE",
+                        "season_year": int(season_year_i),
+                        "source": "contracts",
+                        "teams": [team_norm],
+                        "team_id": team_norm,
+                        "player_id": pid,
+                        "from_team": "FA",
+                        "to_team": team_norm,
+                        "contract_id": contract_id,
+                        "start_season_year": int(start_season_year),
+                        "years": years_i,
+                        "contract_channel": str(ch),
+                        "first_year_salary": int(first_year_salary_i),
+                        "mle_budget_usage": dict(budget_usage),
+                    }
+                ],
+            )
+
+        return ServiceEvent(
+            type="sign_free_agent_mle",
+            payload={
+                "date": signed_date_iso,
+                "season_year": int(season_year_i),
+                "player_id": pid,
+                "affected_player_ids": [pid],
+                "from_team": "FA",
+                "to_team": team_norm,
+                "team_id": team_norm,
+                "contract_id": contract_id,
+                "signed_date": signed_date_iso,
+                "start_season_year": int(start_season_year),
+                "years": years_i,
+                "guaranteed_years": int(guaranteed_years),
+                "team_option_years": [int(y) for y in option_years_sorted] if option_years_sorted else [],
+                "contract_channel": str(ch),
+                "mle_budget_usage": dict(budget_usage),
+            },
+        )
+
     def sign_two_way(
         self,
         team_id: str,
@@ -1929,6 +2869,7 @@ class LeagueService:
         team_id: str,
         player_id: str,
         *,
+        contract_channel: str = "STANDARD_FA",
         signed_date: date | str | None = None,
         years: int = 1,
         salary_by_year: Optional[Mapping[int, int]] = None,
@@ -1936,7 +2877,7 @@ class LeagueService:
         team_option_years: Optional[Sequence[int]] = None,
         options: Optional[Sequence[Mapping[str, Any]]] = None,
     ) -> ServiceEvent:
-        """Re-sign a player (DB): contracts + active contract + salary."""
+        """Bird-rights re-sign for an FA player (DB): contracts + active contract + salary."""
         team_norm = self._norm_team_id(team_id, strict=True)
         pid = self._norm_player_id(player_id)
         signed_date_iso = _coerce_iso(signed_date)
@@ -1966,6 +2907,31 @@ class LeagueService:
                 return d.year
             return d.year - 1
 
+        ch = str(contract_channel or "STANDARD_FA").strip().upper() or "STANDARD_FA"
+        bird_channel_to_type = {
+            "BIRD_FULL": "FULL_BIRD",
+            "BIRD_EARLY": "EARLY_BIRD",
+            "BIRD_NON": "NON_BIRD",
+        }
+        if ch not in bird_channel_to_type:
+            raise CapViolationError(
+                code="BIRD_CHANNEL_REQUIRED",
+                message="RE_SIGN only supports Bird contract channels.",
+                details={
+                    "team_id": str(team_norm),
+                    "player_id": str(pid),
+                    "contract_channel": str(ch),
+                    "allowed_contract_channels": ["BIRD_EARLY", "BIRD_FULL", "BIRD_NON"],
+                },
+            )
+
+        from contracts.policy.bird_rights_policy import (
+            first_year_limit_for_bird_type,
+            max_raise_pct_for_bird_type,
+            max_years_for_bird_type,
+        )
+        from contracts.policy.raise_limits import validate_salary_raise_curve
+
         with self._atomic() as cur:
             roster = cur.execute(
                 """
@@ -1979,11 +2945,9 @@ class LeagueService:
                 raise KeyError(f"active roster entry not found for player_id={player_id}")
 
             current_team = str(roster["team_id"]).upper()
-            if current_team == "FA":
-                raise ValueError(f"player_id={player_id} is currently FA; use sign_free_agent")
-            if current_team != team_norm:
+            if current_team != "FA":
                 raise ValueError(
-                    f"player_id={player_id} is on team_id={current_team}; cannot re-sign for {team_norm}"
+                    f"player_id={player_id} must be FA for re-sign; current team_id={current_team}"
                 )
 
             salary_norm = self._normalize_salary_by_year(salary_by_year)
@@ -2008,6 +2972,114 @@ class LeagueService:
                 context="re_sign",
             )
 
+            bird_type_required = str(bird_channel_to_type[ch]).upper()
+            right = self.repo.get_bird_right(pid, team_norm, int(start_season_year))
+            if (not isinstance(right, Mapping)) or int(right.get("is_renounced") or 0) == 1:
+                raise CapViolationError(
+                    code="BIRD_RIGHT_NOT_AVAILABLE",
+                    message="Bird right is not available for this player/team/season.",
+                    details={
+                        "team_id": team_norm,
+                        "player_id": pid,
+                        "season_year": int(start_season_year),
+                        "contract_channel": str(ch),
+                    },
+                )
+            right_type = str(right.get("bird_type") or "").upper()
+            if right_type != bird_type_required:
+                raise CapViolationError(
+                    code="BIRD_RIGHT_NOT_AVAILABLE",
+                    message="Bird right type does not match selected contract channel.",
+                    details={
+                        "team_id": team_norm,
+                        "player_id": pid,
+                        "season_year": int(start_season_year),
+                        "contract_channel": str(ch),
+                        "required_bird_type": str(bird_type_required),
+                        "available_bird_type": str(right_type),
+                    },
+                )
+
+            max_years = int(max_years_for_bird_type(right_type))
+            if years_i > max_years:
+                raise CapViolationError(
+                    code="BIRD_YEARS_EXCEEDED",
+                    message=f"Bird contract years exceed max allowed for {right_type}.",
+                    details={
+                        "team_id": team_norm,
+                        "player_id": pid,
+                        "contract_channel": str(ch),
+                        "bird_type": str(right_type),
+                        "years": int(years_i),
+                        "max_years": int(max_years),
+                    },
+                )
+
+            prev_salary = 0.0
+            try:
+                prev_salary = float(roster["salary_amount"] or 0.0)
+            except Exception:
+                prev_salary = 0.0
+
+            player_row = cur.execute(
+                "SELECT exp FROM players WHERE player_id=? LIMIT 1;",
+                (pid,),
+            ).fetchone()
+            exp_i = 0
+            if player_row:
+                try:
+                    exp_i = int(player_row["exp"] or 0)
+                except Exception:
+                    exp_i = int(player_row[0] or 0)
+
+            league_avg = float(self.repo.get_league_average_salary(int(start_season_year)))
+            first_limit = first_year_limit_for_bird_type(
+                bird_type=right_type,
+                prev_salary=float(prev_salary),
+                exp=int(exp_i),
+                season_year=int(start_season_year),
+                trade_rules=_trade_rules_ssot(),
+                league_average_salary=float(league_avg),
+            )
+
+            first_year_salary = 0
+            if salary_norm:
+                y0 = min(int(k) for k in salary_norm.keys())
+                try:
+                    first_year_salary = int(float(salary_norm.get(str(y0)) or 0))
+                except Exception:
+                    first_year_salary = 0
+            if first_year_salary > int(first_limit.max_first_year_salary):
+                raise CapViolationError(
+                    code="BIRD_FIRST_YEAR_LIMIT_EXCEEDED",
+                    message="Bird first-year salary exceeds the allowed limit.",
+                    details={
+                        "team_id": team_norm,
+                        "player_id": pid,
+                        "contract_channel": str(ch),
+                        "bird_type": str(right_type),
+                        "first_year_salary": int(first_year_salary),
+                        "first_year_limit": int(first_limit.max_first_year_salary),
+                        "limit_reason": str(first_limit.reason),
+                    },
+                )
+
+            max_raise_pct = float(max_raise_pct_for_bird_type(right_type, trade_rules=_trade_rules_ssot()))
+            raise_check = validate_salary_raise_curve(salary_norm, max_raise_pct)
+            if not bool(raise_check.ok):
+                raise CapViolationError(
+                    code="BIRD_RAISE_LIMIT_EXCEEDED",
+                    message="Bird salary raise curve exceeds max_raise_pct.",
+                    details={
+                        "team_id": team_norm,
+                        "player_id": pid,
+                        "contract_channel": str(ch),
+                        "bird_type": str(right_type),
+                        "max_raise_pct": float(max_raise_pct),
+                        "raise_validation": raise_check.to_payload(),
+                    },
+                )
+
             contract_id = str(new_contract_id())
             contract = make_contract_record(
                 contract_id=contract_id,
@@ -2027,6 +3099,7 @@ class LeagueService:
             contract["guaranteed_years"] = int(guaranteed_years)
             if option_years_sorted:
                 contract["team_option_years"] = [int(y) for y in option_years_sorted]
+            contract["contract_channel"] = str(ch)
 
             self._upsert_contract_records_in_cur(cur, {contract_id: contract})
             self._activate_contract_for_player_in_cur(cur, pid, contract_id)
@@ -2037,6 +3110,18 @@ class LeagueService:
             season_salary = salary_norm.get(str(int(start_season_year)))
             if season_salary is not None:
                 self._set_roster_salary_in_cur(cur, pid, int(float(season_salary)))
+
+            # If there is an active cap hold for this player/season, release it now.
+            try:
+                self.repo.release_cap_hold(
+                    player_id=pid,
+                    team_id=team_norm,
+                    season_year=int(start_season_year),
+                    reason="SIGNED",
+                    now_iso=signed_date_iso,
+                )
+            except Exception:
+                pass
 
             # Optional: log re-sign transaction
             self._insert_transactions_in_cur(
@@ -2057,6 +3142,7 @@ class LeagueService:
                         "contract_id": contract_id,
                         "start_season_year": int(start_season_year),
                         "years": years_i,
+                        "contract_channel": str(ch),
                     }
                 ],
             )
@@ -2078,6 +3164,7 @@ class LeagueService:
                 "years": years_i,
                 "guaranteed_years": int(guaranteed_years),
                 "team_option_years": [int(y) for y in option_years_sorted] if option_years_sorted else [],
+                "contract_channel": str(ch),
             },
         )
 
