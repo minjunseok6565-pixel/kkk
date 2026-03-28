@@ -85,7 +85,12 @@ def _commit_accepted_contract_negotiation(
         raise HTTPException(status_code=409, detail={"code": "NEGOTIATION_KIND_MISMATCH", "session_id": sid})
 
     mode = str(session.get("mode") or "").upper()
-    if allowed_modes is not None and mode not in allowed_modes:
+    mode_allowed = True
+    if allowed_modes is not None:
+        mode_allowed = mode in allowed_modes
+        if not mode_allowed and mode.startswith("EXTEND"):
+            mode_allowed = "EXTEND" in allowed_modes or any(str(x).startswith("EXTEND") for x in allowed_modes)
+    if not mode_allowed:
         raise HTTPException(
             status_code=409,
             detail={"code": "NEGOTIATION_MODE_MISMATCH", "session_id": sid, "mode": mode, "allowed": sorted(allowed_modes)},
@@ -160,10 +165,17 @@ def _commit_accepted_contract_negotiation(
                     salary_by_year=offer.salary_by_year,
                     options=[dict(x) for x in (offer.options or [])],
                 )
-            elif mode == "EXTEND":
+            elif mode.startswith("EXTEND"):
                 event = svc.extend_contract(
                     team_id=team_norm,
                     player_id=pid_norm,
+                    contract_channel=str(getattr(offer, "contract_channel", mode) or mode).upper(),
+                    extension_type=str(
+                        (session.get("constraints") or {}).get("extension_type")
+                        if isinstance(session.get("constraints"), dict)
+                        else ""
+                    ).upper()
+                    or None,
                     signed_date=signed_date_iso,
                     years=int(offer.years),
                     salary_by_year=offer.salary_by_year,
