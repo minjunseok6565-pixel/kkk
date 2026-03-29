@@ -1,0 +1,264 @@
+1) MINIMUM 서명 타입 불일치
+MINIMUM 경로는 트랜잭션 type/action_type을 SIGN_FA_MINIMUM으로 기록합니다.
+
+그런데 룰 메타 수집의 계약 타입 allowlist에는 SIGN_FA_MINIMUM이 없습니다. (SIGN_FREE_AGENT, RE_SIGN, SIGN_TWO_WAY, RELEASE_TO_FA 등만 포함)
+
+최근 서명 밴 계산은 last_contract_action_type in {SIGN_FREE_AGENT, RE_SIGN, SIGN_TWO_WAY} 또는 signed_via_free_agency=True일 때만 적용됩니다.
+
+따라서 MINIMUM 서명이 메타에 안 잡히면 밴이 약해질 수 있다는 지적은 맞습니다.
+
+2) cap hold 삽입 시점 vs room flag 계산 시점
+시즌 전환 중 선수 이동(_move_player_team_in_cur) 때 room-flag를 즉시 계산합니다.
+
+이 계산은 _compute_team_payroll_for_season_in_cur(순수 payroll) 기반입니다.
+
+cap hold는 expire_contracts_for_season_transition 이후 process_offseason에서 나중에 upsert됩니다.
+
+ROOM_MLE 자격은 team_room_mle_flags를 직접 참조합니다.
+
+즉 “홀드 반영 전 아래로 내려갔다고 찍혀서 ROOM_MLE가 잘못 열릴 수 있다”는 우려가 타당합니다.
+
+3) cap hold 해제가 re_sign에만 있음
+re_sign에서는 release_cap_hold(...)를 호출합니다.
+
+반면 sign_free_agent/_sign_free_agent_minimum에서는 hold 해제 호출이 없습니다.
+
+cap 체크는 hold를 합산하는 함수(_compute_team_cap_salary_with_holds_in_cur)를 사용합니다.
+
+그래서 기존 팀 hold가 남아 이후 cap 계산을 부풀릴 수 있다는 지적은 맞습니다.
+
+4) _channel_years_cap의 snapshot 참조 위치
+_channel_years_cap는 session["trade_rules_snapshot"](top-level)만 읽습니다.
+
+start_contract_negotiation은 snapshot을 constraints에도 넣고, top-level에도 넣습니다.
+
+세션 저장은 dict 전체 deepcopy로 이뤄져 top-level 필드를 버리지 않습니다.
+
+따라서 “top-level이 저장되지 않아 항상 무시된다”는 표현은 현재 코드 기준으로 부정확합니다. 다만, engine이 constraints fallback 없이 top-level만 보는 구조는 취약점이 맞습니다.
+
+5) raise validator snapshot 참조 위치
+raise validator도 top-level session["trade_rules_snapshot"]만 읽습니다.
+
+반면 서비스 계층의 채널 정책 검증은 constraints.trade_rules_snapshot을 읽습니다.
+
+즉 참조 일관성이 깨져 있어 흐름에 따라 override 가시성이 달라질 수 있다는 문제 제기는 타당합니다.
+
+다만 4번과 동일하게 “저장이 안 된다” 자체는 현재 저장 코드와 맞지 않습니다.
+
+6) 제안된 dead-cap unique index
+현재 실제 스키마 unique는 (team_id, player_id, origin_contract_id, source_type, applied_season_year)입니다.
+
+저장/upsert도 동일 키를 사용합니다.
+
+그래서 질문의 새 인덱스(team_id, player_id, season_year, mode)는 현재 코드엔 아직 적용되어 있지 않음이 먼저입니다.
+
+다만 그 제안이 도입된다면 재계약 후 재방출 같은 정상 시나리오에서 과도 충돌을 낼 수 있다는 우려는 설계적으로 타당합니다.
+
+7) release 타입 변경 시 downstream 누락
+move-event 수집은 release 타입을 RELEASE_TO_FA/release_to_free_agency 중심으로 필터링합니다.
+
+rule-player-meta의 계약 타입도 RELEASE_TO_FA/legacy lowercase 위주입니다.
+
+따라서 RELEASE_WAIVE/RELEASE_STRETCH만 새로 쓰면 누락될 수 있다는 지적은 맞습니다.
+
+8) RE_SIGN_OR_EXTEND 누락
+현재 CONTRACT_TYPES에 RE_SIGN_OR_EXTEND(대문자)는 없고 lowercase re_sign_or_extend만 있습니다.
+
+get_transactions_for_players는 SQL에서 tx_type IN (...) exact 매칭을 씁니다.
+
+그래서 과거에 대문자 타입이 저장되어 있다면 누락될 수 있다는 지적은 유효합니다.
+
+9) raw action/type 저장 + 정규화 미흡
+메타 빌더는 action_type/type 값을 그대로 넣고(정규화 없음),
+
+signed_via_free_agency도 last_action_type == "SIGN_FREE_AGENT" 정확 일치만 봅니다.
+
+최근 서명 밴도 canonical uppercase 집합만 인정합니다.
+
+따라서 legacy lowercase가 safety net 역할을 못 할 수 있다는 지적이 맞습니다.
+
+10) 선택 직후 save 버튼 상태
+선택 변경 시 playerTrainingSelectedPlayerId만 바꾸고 로딩 문구를 띄우지만, 즉시 refreshPlayerTrainingSaveUi()를 호출하지 않습니다.
+
+save 버튼 활성 판단은 현재 선택 pid + dirty 상태 기반입니다.
+
+즉 느린 응답 중 구 draft 상태가 남아 잘못 저장되는 레이스가 생길 수 있다는 지적은 타당합니다.
+
+11) 응답 순서 역전(race) 보호 없음
+await fetchPlayerTrainingPlan(pid) 후 바로 공용 draft/UI를 갱신합니다.
+
+이 사이에 선택이 바뀌었는지 검증(selectedPlayerId === pid)이 없습니다.
+
+그래서 A→B 빠른 클릭에서 A 응답이 늦게 와 B 화면을 덮어쓸 수 있다는 지적이 맞습니다.
+
+12) 테스트 patch 대상 불일치 (실패 재현)
+테스트는 core.repair_until_valid를 patch합니다.
+
+그런데 core는 repair_until_valid_many만 import해 사용합니다.
+
+실제로 이 테스트 파일 실행 시 AttributeError로 3개 테스트 모두 실패했습니다 (아래 명령어 결과).
+→ 지적 완전 유효.
+
+13) tier 분류 경로 성능 회귀
+_classify_tier_by_league_rank는 _get_league_rank_snapshot()를 호출하고,
+
+snapshot 생성 시 active 팀 전체를 순회하며 성능/로스터 시그널을 계산합니다.
+
+캐시는 evaluator 인스턴스 로컬입니다.
+
+non-tick_ctx 경로는 호출마다 TeamSituationEvaluator(...)를 새로 만듭니다.
+
+그래서 요청당 리그 전체 계산 반복 가능성이 있어 성능 이슈 지적이 타당합니다.
+
+14) soft boundary exp overflow 위험
+소프트 경계 계산에서 math.exp(d / max(tau, eps))를 그대로 사용합니다.
+
+config 검증은 rank_boundary_tau > 0만 강제합니다(매우 작은 양수 허용).
+
+따라서 tau=1e-6 같은 값이면 overflow 가능성이 있고, 런타임 예외 위험 지적이 맞습니다.
+
+
+-------------------------------
+
+## 협상 / 트레이드 / 마켓
+
+1. **협상 시작 시 기본 공개설정이 실제 커밋에 반영되지 않음** — `default_offer_privacy`를 시작 시 저장하지만, 커밋 시에는 항상 `req.offer_privacy`와 `PRIVATE` 기본값만 사용해서 세션 기본값이 사실상 무력화된다.
+2. **직렬화된 딜의 `legs` 구조 불일치로 grievance 로직 비활성화** — helper는 `legs`가 list일 때만 처리하는데, 실제 `serialize_deal` 결과는 team ID keyed dict라서 항상 빈 결과가 된다.
+3. **공개화(publicized) idempotency 키가 너무 넓음** — session key 또는 deal key 중 하나만 publicized여도 이미 처리된 것으로 간주해서, 같은 세션의 이후 leaked deal 부작용(리스팅/이벤트/grievance)이 스킵된다.
+6. **같은 상대 팀 쌍에 대해 더 낮은 점수의 제안이 더 좋은 제안을 덮어쓸 수 있음** — duplicate-opponent guard 제거로 한 tick 안에 같은 pair의 여러 proposal이 처리되면서, 나중 proposal이 `set_last_offer`로 top offer를 덮어쓴다.
+7. **`ai_proactive_listing_player_cooldown_days=0` 설정이 실제로는 쿨다운 해제가 안 됨** — `or 7` 처리 때문에 0이 다시 7로 바뀌어 튜닝이 무효가 된다.
+8. **listing-interest scoring을 끄면 PUBLIC 리스팅도 발견되지 않음** — `select_targets_buy`에서 `is_public_listing`이 `listing_meta_by_player`에만 의존해서, 해당 플래그가 꺼지면 PUBLIC 리스팅 예외도 함께 사라진다.
+9. **음수 `min_surplus_required` 허용 시 confidence 계산이 과대평가될 수 있음** — 실제 reject 경계는 `accept_threshold`인데, `_compute_confidence()`는 여전히 `overpay_floor` 기준으로 거리를 재서 reject confidence가 부정확해진다.
+
+## 전술 / 라인업 / 스카우팅 UI
+
+10. **빈 `{}`로 defensive override를 지우려 해도 지워지지 않음** — `or` 체인 때문에 빈 map이 falsy로 처리되어 레거시 값이나 context 값이 다시 살아난다.
+14. **비표준 division 또는 빈 division 팀이 팀 선택 UI에서 누락됨** — `renderTeams`가 사실상 `divisionOrder[conference]`만 순회해서 fallback이 죽어 있다.
+16. **라인업 검증이 5+5 구조를 강제하지 않음** — 총 10명만 맞으면 통과해서, 10 starters / 0 rotation 같은 잘못된 플랜도 저장된다.
+
+## 시뮬레이션 / 매치업 / 시즌 진행 흐름
+
+20. **만료 계약자 액션의 `RE_SIGN` 호출 조건이 부정확함** — UI가 `is_currently_fa`를 확인하지 않고 `mode: "RE_SIGN"`을 호출해, 비FA 행에서도 재계약 협상을 시도할 수 있다. `RE_SIGN` 자체는 FA + Bird 권한 조건에서 정상 경로이며, 문제는 호출 가드 부재다.
+21. **이미 FA인 선수에게도 ‘방출’ 호출을 보내 에러가 남** — common path에서 `/api/contracts/release-to-fa`가 의미 없이 실패한다.
+
+## 일정 / 대시보드 / 스탠딩 / 팀 상세
+
+24. **`as_of_date`를 줘도 7일 일정 부하 수치가 현재 날짜 기준으로 계산됨** — 과거 시점 스냅샷과 현재 일정 창이 한 응답에 섞인다.
+30. **스탠딩 API 실패 시 KPI가 ‘미확인’이 아니라 가짜 `0-0 / 0.0%`로 보임** — `normalizeRecord(null)` 결과가 그대로 UI에 들어간다.
+31. **다가오는 경기가 없을 때 next-game 카드 일부가 영구 로딩처럼 보임** — early return으로 priority/quick-intel/timeline/feed가 loading placeholder 상태에 남는다.
+33. **다가오는 경기가 없으면 KPI snapshot 자체를 렌더링하지 않음** — `refreshMainDashboard`의 `!nextGame` 분기에서 record/standing/health 값 갱신이 생략된다.
+
+## 메디컬 / 부상 캘린더
+
+34. **부상 이벤트 수가 과소집계될 수 있음** — 캘린더는 `top_n=30`을 요청하지만 실제 helper는 20으로 clamp해서 그 이상 이벤트가 잘린다.
+35. **일자별 위험/OUT/복귀 카운트가 전 구간에서 고정됨** — `high_pids`, `out_pids`, `returning_pids`를 시작일 기준으로 한 번만 계산해 매일 재사용한다.
+
+## 입력 검증 / 메타 API 계약
+
+38. **잘못된 `date_iso` 입력이 400이 아니라 500으로 처리됨** — practice preview에서 `require_date_iso` 예외를 잡지 않아 클라이언트 입력 실수가 서버 에러가 된다.
+
+## 가치평가 / 드래프트 / 픽 / 딜 스코어링
+
+41. **`_safe_team_signal`이 유효한 `0.0` 신호를 missing으로 취급함** — `... or default` 때문에 낮은 flexibility 팀이 잘못 보정된다.
+
+
+
+---------------------------
+
+드래프트 / 오프시즌 / 계약
+1. 드래프트 번들에서 컴바인 데이터 추출 경로가 잘못됨
+extractCombineRowsFromBundle가 p.meta.combine를 읽고 있는데, 실제 /api/offseason/draft/bundle 응답의 combine은 pool.prospects[].combine 상위 필드에 있다. 그 결과 Top-10 카드와 상세의 combine 정보가 빈 값으로 보인다.
+→ 쉽게 설명하면: 서버는 정상 데이터를 줬는데, 프론트가 다른 위치를 읽어서 “데이터가 없는 것처럼” 잘못 표시하는 문제다.
+
+2. 만료 계약 선수의 “방출” 버튼이 구조적으로 실패함
+오프시즌 단계에서 이미 만료 계약 선수를 FA로 옮긴 뒤, UI가 다시 /api/contracts/release-to-fa를 호출한다. 이때 from_team == "FA"인 선수는 release 로직에서 에러가 나므로 방출 버튼이 반복 실패한다.
+→ 쉽게 설명하면: 이미 방출된 선수를 또 방출하려 해서 실패하는 “중복 처리” 문제다.
+
+4. standalone 로스터 import CLI 경로가 깨짐
+_state_season_year_ssot()가 season_year 미존재 시 예외를 던지는 구조로 바뀌면서, import_roster_excel() standalone 실행(특히 Salary == "--" 보정 경로)에서 RuntimeError가 난다.
+→ 쉽게 설명하면: 예전엔 단독 import가 됐는데, 지금은 “리그 상태가 먼저 준비돼야만” 돌아서 독립 실행성이 깨진 상태다.
+
+전술 / 훈련 / 프론트 UI
+5. Player Training 화면에서 선수 변경 직후 잘못된 선수 플랜 저장 가능
+선수 전환 직후 저장 버튼 비활성/초기화 처리가 부족해, 이전 선수의 dirty draft가 남은 채 새 선수 ID로 저장될 수 있다. 또한 selectPlayerForTraining 비동기 응답 도착 순서가 역전되면, 느린 이전 응답이 현재 선택 선수 UI를 덮어쓸 수 있다.
+→ 쉽게 설명하면: 화면에는 B 선수를 보고 있는데, 내부 임시데이터는 A 선수 기준으로 남아 “다른 선수에게 잘못 저장”될 수 있는 상태다.
+
+6. 숫자 정렬 CSS가 Trade Block 테이블까지 오염됨
+숫자 컬럼 우측 정렬 selector가 .market-fa-table 전체에 걸려 있는데, Trade Block 테이블도 같은 클래스를 공유한다. 그 결과 숫자가 아닌 포지션/액션 열까지 우측 정렬된다.
+→ 쉽게 설명하면: 한 화면 스타일을 고치다가 같은 클래스를 쓰는 다른 표까지 같이 깨진 “범위 누수”다.
+
+트레이드 / 협상 / 오퍼 프로모션
+7. ACTIVE 협상 세션 수 제한이 사실상 사라짐
+active session 수를 집계/캐시하더라도 실제 생성 경로에서 hard cap을 강제하지 않아, 특정 tick에서 ACTIVE 세션이 과도하게 늘어날 수 있다. 이는 lock/state 증가와 commit 경로 부담으로 이어진다.
+→ 쉽게 설명하면: 동시 협상 개수 제한판이 달려 있는데 실제로는 제동이 안 걸려 한꺼번에 폭증할 수 있다.
+
+8. REJECT 오퍼가 과도하게 LOWBALL로 승격됨
+exceed_overpay > probe_max 조건에서 REJECT 제안이 광범위하게 LOWBALL로 넘어가면서, 원래의 상한 억제/완충 경로가 우회될 수 있다.
+→ 쉽게 설명하면: “거절로 끝내야 할 제안”이 오히려 “공격적 재협상 대상”으로 잘못 분류되는 문제다.
+
+9. overpay_allowed vs probe_max 스케일 불일치로 톤 오분류
+DecisionPolicy.decide는 multi-axis 기반 허용치를 쓰는데, reject tone 판단은 max(outgoing_total, 6.0) 중심 probe_max를 사용한다. 픽/스왑 비중 딜에서 경계값 주변 오분류가 생긴다.
+→ 쉽게 설명하면: 같은 제안을 두 계산기가 서로 다른 자로 재서, 한쪽은 “탐색” 한쪽은 “저가 공세”로 다르게 판정하는 상태다.
+
+10. 세션 재사용 시 created_at 미갱신으로 즉시 만료 가능
+promotion 흐름에서 기존 세션을 재사용할 때 offer payload는 바꾸지만 created_at이 유지되어, 다음 open 시 age hard-cap에 곧바로 걸릴 수 있다.
+→ 쉽게 설명하면: 새 제안으로 갱신했는데 주민등록상 생일은 옛날 그대로라 “오래된 세션”으로 즉시 퇴장되는 셈이다.
+
+트레이드 생성 로직 / Skeleton / Template / Sweetener
+12. PackageEffectsConfig가 legacy constructor 필드를 받지 않아 호환성 런타임 실패
+기존에 전달되던 필드(depth_need_scale, cap_flex_scale, cap_room_weight_base, upgrade_scale 등) 제거로, 구버전 rule key를 넘기는 환경에서 TypeError가 난다.
+→ 쉽게 설명하면: 예전 옵션명을 아직 쓰는 환경은 “점수가 조금 달라지는” 수준이 아니라 객체 생성부터 터진다.
+
+13. 아웃고잉 후보 빌더가 실제 불가 선수까지 후보에 포함
+후보 수집이 out_cat.players 전체 순회에 치우쳐 lock/recent-signing 등 거래 금지 조건이 충분히 걸러지지 않으면, 어차피 실패할 skeleton을 대량 생성한다.
+→ 쉽게 설명하면: 처음부터 팔 수 없는 선수를 장바구니에 넣어 놓고, 나중 단계에서 계속 반려당해 시간만 쓰는 구조다.
+
+14. greedy fill이 고가치 자산을 먼저 소모해 저·중티어 딜 효율 저하
+높은 점수순 선집중 후 채우는 방식 때문에, 더 싼 조합으로 성립 가능한 케이스에서도 상위 자산이 먼저 소모될 수 있다.
+→ 쉽게 설명하면: 작은 물건 사는데 고액권부터 깨는 방식이라 전체 거래 효율이 떨어진다.
+
+16. skeleton_overhaul_enabled 플래그가 실질적으로 무시됨
+호출 경로가 v3 registry를 기본으로 타면서 False 설정으로 legacy 동작을 강제하려는 의도가 반영되지 않는 구간이 있다.
+→ 쉽게 설명하면: 설정 스위치를 꺼도 내부 배선이 이미 새 회로에 고정돼 있어 이전 방식으로 못 돌아간다.
+
+17. template_only에서 빈 route가 “비활성”이 아니라 “전체 허용”으로 해석됨
+skeleton_route_template_*가 빈 튜플일 때 downstream이 제약 없음으로 간주하면, 특정 tier를 끄려던 의도와 반대로 전체 template가 열릴 수 있다.
+→ 쉽게 설명하면: “아무 것도 실행하지 마”가 아니라 “아무 제한 없이 다 실행”으로 읽히는 의미 역전이다.
+
+18. template wrapper의 expected_tag 하드코딩으로 유효 후보 전량 드롭 가능
+tpl_<tier>_placeholder_<n> 형태를 강제해, planner가 tag naming을 조금만 바꿔도 실질적으로 정상 후보가 필터에서 사라질 수 있다.
+→ 쉽게 설명하면: 내용은 맞는데 라벨 이름 철자 규칙이 다르다는 이유로 전부 버려지는 상황이다.
+
+20. pick protection 변형 생성이 sweetener ON/OFF에 종속됨
+maybe_apply_pick_protection_variants가 sweetener 흐름 내부에 묶여, sweetener 비활성/추가치 0일 때 protection도 통째로 비활성화된다.
+→ 쉽게 설명하면: 원래 별개 옵션이었는데, 지금은 한 스위치를 끄면 다른 기능도 같이 꺼지는 결합 문제가 생겼다.
+
+21. 보호 변형 평가에서 opponent_repeat_count=0 하드코딩
+기본 proposal 평가에는 repeat-partner 패널티가 적용되는데, protection 재평가에서 0 고정이면 반복 거래 억제 신호가 사라진다.
+→ 쉽게 설명하면: 본심사에는 감점 규칙이 있는데 재심사 단계에서 그 규칙을 빼버려 점수가 왜곡된다.
+
+22. repair_until_valid_many 이후 repaired variant 루프의 예산/하드캡 재확인 누락
+한 base에서 복수 repaired 후보가 생겨도 loop 내부에서 _budget_or_hard_cap_reached를 즉시 재체크하지 않으면, 제한 도달 후에도 불필요한 평가/검증이 추가 실행된다.
+→ 쉽게 설명하면: “예산 끝” 경고등이 켜졌는데 다음 작업칸으로 그냥 진행해 추가 비용을 쓰는 구조다.
+
+자산 / API / Trade Lab
+23. “tradable assets” API가 실제 거래 불가 픽을 포함해 반환할 수 있음
+owner/round 중심 필터나 상태 맵 직접 노출 방식은 consumed/과거/trade_locked/DB lock 픽을 완전히 배제하지 못해, 프론트 선택 후 evaluate 단계에서 확정 반려가 발생한다.
+→ 쉽게 설명하면: 목록에서는 선택 가능해 보이는데 제출 순간 “원래 못 쓰는 자산”이라 거절되는 불일치다.
+
+24. renderAssetList의 innerHTML 직접 조합으로 stored XSS 위험
+서버 문자열(player/pick label)을 escape 없이 HTML에 삽입하면 저장형 악성 문자열이 그대로 실행될 수 있다. Trade Lab 렌더 경로는 escapeHtml 적용이 필요하다.
+→ 쉽게 설명하면: 데이터로 저장된 문자열이 화면에 그려질 때 코드로 실행될 수 있는 보안 취약점이다.
+
+티어링 / 평가 / 성능
+25. bubble bonus가 실제 경쟁권 밖 팀에도 적용될 수 있음
+gb_to_6th, gb_to_10th를 거리값으로 쓰면서 상한 조건만 검사하면, 안전권 상위팀도 보너스를 받는 케이스가 생긴다.
+→ 쉽게 설명하면: 플레이오프 막차 경쟁팀에게 주려던 가산점이 이미 넉넉한 팀에도 잘못 붙는 문제다.
+
+26. tier 분류가 league-rank 전체 스냅샷 경로를 자주 타서 hot path 성능 저하
+_classify_tier_by_league_rank가 호출 단위로 리그 전체 신호 계산을 동반하면, 단일 팀 평가 요청도 전체 리그 계산으로 확장되어 지연이 커진다.
+→ 쉽게 설명하면: 한 팀만 물어봤는데 매번 30팀 전체를 다시 채점하는 식이라 느려진다.
+
+27. soft-boundary 확률 계산이 작은 tau에서 overflow 위험
+math.exp(d / max(tau, eps)) 형태에 충분한 clamp가 없으면 tau가 매우 작을 때 OverflowError가 발생해 tier 계산이 크래시할 수 있다.
+→ 쉽게 설명하면: 경계값 보정식이 너무 가파른 설정을 만나면 수치가 폭발해 계산이 멈춘다.
