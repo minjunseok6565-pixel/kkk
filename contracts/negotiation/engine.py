@@ -11,7 +11,7 @@ from dataclasses import asdict, replace
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from contracts.policy.salary_limits import contract_aav_max_abs_for_exp
-from contracts.policy.raise_limits import max_raise_pct_for_contract_channel, validate_salary_raise_curve
+from contracts.policy.raise_limits import max_raise_pct_for_contract_channel, validate_salary_curve_with_anchor
 
 from .config import ContractNegotiationConfig, DEFAULT_CONTRACT_NEGOTIATION_CONFIG
 from .types import ContractOffer, NegotiationDecision, PlayerPosition, Reason
@@ -520,6 +520,10 @@ def evaluate_offer(
 
     # Hard bounds (guardrails): apply channel cap first, then global bounds.
     channel_years_cap = int(_channel_years_cap(offer, session, cfg))
+    constraints = session.get("constraints") if isinstance(session.get("constraints"), Mapping) else {}
+    max_total_at_sign = int(safe_int(constraints.get("max_total_seasons_at_sign"), 0)) if isinstance(constraints, Mapping) else 0
+    if max_total_at_sign > 0:
+        channel_years_cap = min(int(channel_years_cap), int(max_total_at_sign))
     if offer.years < int(cfg.min_years_allowed) or offer.years > int(channel_years_cap):
         return NegotiationDecision(
             verdict="REJECT",
@@ -549,7 +553,14 @@ def evaluate_offer(
             season_year=int(offer.start_season_year),
         )
     )
-    raise_chk = validate_salary_raise_curve(offer.salary_by_year, max_raise_pct)
+    start_year = int(offer.start_season_year)
+    anchor_salary = float(safe_float((offer.salary_by_year or {}).get(start_year), 0.0))
+    raise_chk = validate_salary_curve_with_anchor(
+        offer.salary_by_year,
+        anchor_salary=anchor_salary,
+        max_delta_pct=max_raise_pct,
+        allow_descend=True,
+    )
     if not bool(raise_chk.ok):
         return NegotiationDecision(
             verdict="REJECT",

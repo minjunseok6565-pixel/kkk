@@ -19,7 +19,7 @@ from typing import Any, Mapping
 from contracts.negotiation.utils import safe_float, safe_int
 from contracts.policy.raise_limits import (
     max_raise_pct_for_contract_channel,
-    validate_salary_raise_curve,
+    validate_salary_curve_with_anchor,
 )
 from config import (
     MLE_ANNUAL_GROWTH_RATE,
@@ -288,7 +288,13 @@ def validate_mle_offer(
         )
 
     max_raise_pct = float(max_raise_pct_for_contract_channel(ch, trade_rules=trade_rules, season_year=sy))
-    raise_chk = validate_salary_raise_curve(curve, max_raise_pct)
+    anchor_salary = float(curve[min(curve.keys())]) if curve else 0.0
+    raise_chk = validate_salary_curve_with_anchor(
+        curve,
+        anchor_salary=anchor_salary,
+        max_delta_pct=max_raise_pct,
+        allow_descend=True,
+    )
     if not raise_chk.ok:
         reasons.append(
             {

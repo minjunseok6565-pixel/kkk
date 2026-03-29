@@ -8,7 +8,14 @@ from contracts.options import normalize_option_record
 from .utils import clamp01, json_dumps, safe_float, safe_int
 
 
-ContractNegotiationMode = Literal["SIGN_FA", "RE_SIGN", "EXTEND"]
+ContractNegotiationMode = Literal[
+    "SIGN_FA",
+    "RE_SIGN",
+    "EXTEND",
+    "EXTEND_ROOKIE",
+    "EXTEND_VETERAN",
+    "EXTEND_DVE",
+]
 ContractNegotiationPhase = Literal[
     "INIT",
     "NEGOTIATING",
@@ -31,6 +38,9 @@ ALLOWED_CONTRACT_CHANNELS: set[str] = {
     "BIRD_EARLY",
     "BIRD_NON",
     "MINIMUM",
+    "EXTEND_ROOKIE",
+    "EXTEND_VETERAN",
+    "EXTEND_DVE",
 }
 
 

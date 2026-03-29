@@ -99,3 +99,51 @@ def build_exp_aav_limit(
         max_aav_abs=float(max_abs),
     )
 
+
+def max_tier_upper_bound(exp: Any, salary_cap: Any, prev_salary: Any) -> float:
+    """Return extension max-tier upper bound using exp bucket and 105% prev-salary floor."""
+    cap = float(safe_float(salary_cap, 0.0))
+    prev = float(safe_float(prev_salary, 0.0))
+    tier_cap_abs = float(contract_aav_max_abs_for_exp(exp=exp, salary_cap=cap))
+    prev_floor = float(prev) * 1.05 if prev > 0.0 else 0.0
+    return float(max(tier_cap_abs, prev_floor))
+
+
+def veteran_extension_first_year_ceiling(
+    prev_salary: Any,
+    eaps: Any,
+    exp: Any,
+    salary_cap: Any,
+) -> float:
+    """VE first-year ceiling constrained by 140% base and max-tier upper bound."""
+    prev = float(safe_float(prev_salary, 0.0))
+    eaps_f = float(safe_float(eaps, 0.0))
+    base_140 = max(prev * 1.40, eaps_f * 1.40)
+    tier_upper = float(max_tier_upper_bound(exp=exp, salary_cap=salary_cap, prev_salary=prev))
+    return float(min(base_140, tier_upper))
+
+
+def rookie_extension_first_year_ceiling(prev_salary: Any, salary_cap: Any) -> float:
+    """RSE first-year ceiling: max(25% cap, 105% of previous salary)."""
+    prev = float(safe_float(prev_salary, 0.0))
+    cap = float(safe_float(salary_cap, 0.0))
+    return float(max(cap * 0.25, prev * 1.05))
+
+
+def dve_first_year_band(
+    salary_cap: Any,
+    min_pct: Any = 0.30,
+    max_pct: Any = 0.35,
+) -> dict[str, float]:
+    """DVE first-year min/max band based on cap percentages."""
+    cap = float(safe_float(salary_cap, 0.0))
+    lo = float(safe_float(min_pct, 0.30))
+    hi = float(safe_float(max_pct, 0.35))
+    if lo < 0.0:
+        lo = 0.0
+    if hi < lo:
+        hi = lo
+    return {
+        "min_first_year": float(cap * lo) if cap > 0.0 else 0.0,
+        "max_first_year": float(cap * hi) if cap > 0.0 else 0.0,
+    }

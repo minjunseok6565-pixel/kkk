@@ -67,6 +67,18 @@ from contracts.options import (
     recompute_contract_years_from_salary,
 )
 from contracts.options_policy import default_option_decision_policy
+from contracts.policy.extension_rules import (
+    calc_extension_first_year_limit,
+    infer_extension_type,
+    validate_extension_eligibility,
+    validate_extension_total_seasons,
+    validate_fixed_raise_curve,
+    validate_option_decision_window,
+)
+from contracts.policy.raise_limits import (
+    max_raise_pct_for_contract_channel,
+    validate_salary_curve_with_anchor,
+)
 
 
 def _today_iso() -> str:
@@ -470,6 +482,68 @@ class LeagueService:
                 continue
             out[str(year_i)] = val_f
         return out
+
+    def _enforce_salary_curve_ssot_on_commit(
+        self,
+        *,
+        salary_by_year: Mapping[str, Any],
+        contract_channel: str,
+        season_year: int,
+        trade_rules: Optional[Mapping[str, Any]] = None,
+        max_raise_pct_override: Optional[float] = None,
+        error_code: str = "CONTRACT_RAISE_LIMIT_EXCEEDED",
+        error_message: str = "salary curve exceeds allowed fixed raise limit",
+        error_details: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        """Commit-level salary curve SSOT guard.
+
+        This enforces a fixed anchor curve:
+        salary_i <= anchor + i * (anchor * max_raise_pct)
+        """
+        years_sorted = sorted(int(k) for k in (salary_by_year or {}).keys())
+        if not years_sorted:
+            raise ValueError("salary_by_year is required")
+        start_year = int(years_sorted[0])
+        anchor_salary = float(
+            salary_by_year.get(str(start_year))
+            or salary_by_year.get(int(start_year))
+            or 0.0
+        )
+        if anchor_salary <= 0.0:
+            raise ValueError("first-year salary must be > 0")
+
+        max_raise_pct = (
+            float(max_raise_pct_override)
+            if max_raise_pct_override is not None
+            else float(
+                max_raise_pct_for_contract_channel(
+                    str(contract_channel or "STANDARD_FA").upper(),
+                    trade_rules=trade_rules if isinstance(trade_rules, Mapping) else None,
+                    season_year=int(season_year),
+                )
+            )
+        )
+        chk = validate_salary_curve_with_anchor(
+            salary_by_year,
+            anchor_salary=anchor_salary,
+            max_delta_pct=max_raise_pct,
+            allow_descend=True,
+        )
+        if bool(chk.ok):
+            return
+        details = {
+            "contract_channel": str(contract_channel or "STANDARD_FA").upper(),
+            "season_year": int(season_year),
+            "max_raise_pct": float(max_raise_pct),
+            "raise_validation": chk.to_payload(),
+        }
+        if isinstance(error_details, Mapping):
+            details.update({str(k): v for k, v in error_details.items()})
+        raise CapViolationError(
+            code=str(error_code),
+            message=str(error_message),
+            details=details,
+        )
 
     def _salary_for_season(self, contract: Mapping[str, Any], season_year: int) -> Optional[int]:
         salary_by_year = contract.get("salary_by_year") or {}
@@ -2152,6 +2226,16 @@ class LeagueService:
                     },
                 )
 
+            self._enforce_salary_curve_ssot_on_commit(
+                salary_by_year=salary_norm,
+                contract_channel="STANDARD_FA",
+                season_year=int(start_season_year),
+                trade_rules=_trade_rules_ssot(),
+                error_code="FA_RAISE_LIMIT_EXCEEDED",
+                error_message="FA salary raise curve exceeds channel max_raise_pct.",
+                error_details={"team_id": team_norm, "player_id": pid},
+            )
+
             contract_id = str(new_contract_id())
             contract = make_contract_record(
                 contract_id=contract_id,
@@ -2392,6 +2476,15 @@ class LeagueService:
                 exp=int(player_exp),
                 start_season_year=int(start_season_year),
                 years=int(years_i),
+            )
+            self._enforce_salary_curve_ssot_on_commit(
+                salary_by_year=salary_norm,
+                contract_channel="MINIMUM",
+                season_year=int(start_season_year),
+                trade_rules=_trade_rules_ssot(),
+                error_code="MINIMUM_RAISE_LIMIT_EXCEEDED",
+                error_message="MINIMUM salary curve must follow fixed anchor raise limit.",
+                error_details={"team_id": team_norm, "player_id": pid},
             )
 
             # If caller supplied salary_by_year, require exact policy match.
@@ -2649,6 +2742,16 @@ class LeagueService:
                     message=f"MLE offer validation failed for channel={ch}",
                     details=offer_check.to_payload(),
                 )
+
+            self._enforce_salary_curve_ssot_on_commit(
+                salary_by_year=salary_norm,
+                contract_channel=str(ch),
+                season_year=int(start_season_year),
+                trade_rules=trade_rules,
+                error_code="MLE_RAISE_LIMIT_EXCEEDED",
+                error_message="MLE salary raise curve exceeds channel max_raise_pct.",
+                error_details={"team_id": team_norm, "player_id": pid},
+            )
 
             first_year_salary_raw = salary_norm.get(str(int(start_season_year)))
             try:
@@ -2930,7 +3033,6 @@ class LeagueService:
             max_raise_pct_for_bird_type,
             max_years_for_bird_type,
         )
-        from contracts.policy.raise_limits import validate_salary_raise_curve
 
         with self._atomic() as cur:
             roster = cur.execute(
@@ -3065,20 +3167,19 @@ class LeagueService:
                 )
 
             max_raise_pct = float(max_raise_pct_for_bird_type(right_type, trade_rules=_trade_rules_ssot()))
-            raise_check = validate_salary_raise_curve(salary_norm, max_raise_pct)
-            if not bool(raise_check.ok):
-                raise CapViolationError(
-                    code="BIRD_RAISE_LIMIT_EXCEEDED",
-                    message="Bird salary raise curve exceeds max_raise_pct.",
-                    details={
-                        "team_id": team_norm,
-                        "player_id": pid,
-                        "contract_channel": str(ch),
-                        "bird_type": str(right_type),
-                        "max_raise_pct": float(max_raise_pct),
-                        "raise_validation": raise_check.to_payload(),
-                    },
-                )
+            self._enforce_salary_curve_ssot_on_commit(
+                salary_by_year=salary_norm,
+                contract_channel=str(ch),
+                season_year=int(start_season_year),
+                max_raise_pct_override=float(max_raise_pct),
+                error_code="BIRD_RAISE_LIMIT_EXCEEDED",
+                error_message="Bird salary raise curve exceeds max_raise_pct.",
+                error_details={
+                    "team_id": team_norm,
+                    "player_id": pid,
+                    "bird_type": str(right_type),
+                },
+            )
 
             contract_id = str(new_contract_id())
             contract = make_contract_record(
@@ -3173,6 +3274,8 @@ class LeagueService:
         team_id: str,
         player_id: str,
         *,
+        contract_channel: str = "EXTEND_VETERAN",
+        extension_type: Optional[str] = None,
         signed_date: date | str | None = None,
         years: int = 1,
         salary_by_year: Optional[Mapping[int, int]] = None,
@@ -3188,6 +3291,7 @@ class LeagueService:
         """
         team_norm = self._norm_team_id(team_id, strict=True)
         pid = self._norm_player_id(player_id)
+        contract_channel_u = str(contract_channel or "EXTEND_VETERAN").strip().upper() or "EXTEND_VETERAN"
         signed_date_iso = _coerce_iso(signed_date)
         season_year_i = _current_season_year_ssot()
         years_i = int(years)
@@ -3272,6 +3376,117 @@ class LeagueService:
                         f"extension salary_by_year cannot overlap existing contract years: year={y} extend_start={extend_start_year}"
                     )
 
+            player_row = cur.execute(
+                "SELECT exp FROM players WHERE player_id=? LIMIT 1;",
+                (pid,),
+            ).fetchone()
+            exp_i = 0
+            if player_row:
+                try:
+                    exp_i = int(player_row["exp"] or 0)
+                except Exception:
+                    exp_i = int(player_row[0] or 0)
+
+            trade_rules = _trade_rules_ssot()
+            league_ctx = {
+                "sign_year": int(season_year_i),
+                "salary_cap": float(trade_rules.get("salary_cap") or 0.0),
+                "eaps": float(trade_rules.get("eaps") or 0.0),
+                "higher_max_criteria_by_player": trade_rules.get("higher_max_criteria_by_player"),
+                "higher_max_criteria_resolver": trade_rules.get("higher_max_criteria_resolver"),
+                "player_tx_history": trade_rules.get("player_tx_history"),
+            }
+            player_ctx = {
+                "player_id": str(pid),
+                "team_id": str(team_norm),
+                "exp": int(exp_i),
+                "sign_year": int(season_year_i),
+            }
+            ext_type = infer_extension_type(
+                player_ctx=player_ctx,
+                contract_ctx=contract,
+                request_type=str(extension_type or "").strip().upper() or None,
+            )
+            validate_extension_eligibility(
+                extension_type=str(ext_type),
+                player_ctx=player_ctx,
+                contract_ctx=contract,
+                league_ctx=league_ctx,
+                now_date_iso=str(signed_date_iso)[:10],
+            )
+            validate_extension_total_seasons(
+                current_start_year=int(start_year_existing),
+                current_years=int(years_existing),
+                added_years=int(years_i),
+                sign_year=int(season_year_i),
+                extension_type=str(ext_type),
+            )
+            first_year_salary = float(salary_norm.get(str(int(extend_start_year))) or 0.0)
+            prev_salary = float(salary_existing.get(str(int(extend_start_year - 1))) or 0.0)
+            first_limit = calc_extension_first_year_limit(
+                extension_type=str(ext_type),
+                salary_cap=float(trade_rules.get("salary_cap") or 0.0),
+                prev_salary=float(prev_salary),
+                eaps=float(trade_rules.get("eaps") or 0.0),
+                exp=int(exp_i),
+            )
+            max_first = float(first_limit.get("max_first_year") or 0.0)
+            min_first = float(first_limit.get("min_first_year") or 0.0)
+            if max_first > 0.0 and first_year_salary > max_first:
+                raise CapViolationError(
+                    code="EXTENSION_FIRST_YEAR_LIMIT_EXCEEDED",
+                    message="Extension first-year salary exceeds allowed limit.",
+                    details={
+                        "team_id": team_norm,
+                        "player_id": pid,
+                        "extension_type": str(ext_type),
+                        "first_year_salary": float(first_year_salary),
+                        "first_year_limit": dict(first_limit),
+                    },
+                )
+            if min_first > 0.0 and first_year_salary < min_first:
+                raise CapViolationError(
+                    code="EXTENSION_FIRST_YEAR_LIMIT_EXCEEDED",
+                    message="Extension first-year salary is below required minimum band.",
+                    details={
+                        "team_id": team_norm,
+                        "player_id": pid,
+                        "extension_type": str(ext_type),
+                        "first_year_salary": float(first_year_salary),
+                        "first_year_limit": dict(first_limit),
+                    },
+                )
+            fixed_raise_viol = validate_fixed_raise_curve(
+                salary_by_year=salary_norm,
+                first_year_salary=float(first_year_salary),
+                max_delta_pct=0.08,
+            )
+            if fixed_raise_viol:
+                raise CapViolationError(
+                    code="EXTENSION_FIXED_RAISE_LIMIT_EXCEEDED",
+                    message="Extension fixed raise curve exceeds allowed limit.",
+                    details={
+                        "team_id": team_norm,
+                        "player_id": pid,
+                        "extension_type": str(ext_type),
+                        "violations": list(fixed_raise_viol),
+                    },
+                )
+            self._enforce_salary_curve_ssot_on_commit(
+                salary_by_year=salary_norm,
+                contract_channel=str(contract_channel_u),
+                season_year=int(extend_start_year),
+                trade_rules=trade_rules,
+                max_raise_pct_override=0.08,
+                error_code="EXTENSION_RAISE_LIMIT_EXCEEDED",
+                error_message="Extension salary raise curve exceeds fixed anchor limit.",
+                error_details={
+                    "team_id": team_norm,
+                    "player_id": pid,
+                    "extension_type": str(ext_type),
+                },
+            )
+
             # Normalize new-extension options against the extension term only.
             normalized_new_options, _, option_years_sorted = _normalize_contract_options(
                 start_season_year=int(extend_start_year),
@@ -3296,6 +3511,26 @@ class LeagueService:
             ]
             if not contract.get("status"):
                 contract["status"] = "ACTIVE"
+            contract["contract_channel"] = str(contract_channel_u)
+            ext_meta = contract.get("extension_meta")
+            if not isinstance(ext_meta, Mapping):
+                ext_meta = {}
+            ext_meta = dict(ext_meta)
+            ext_meta.update(
+                {
+                    "extension_type": str(ext_type),
+                    "signed_at": str(signed_date_iso),
+                    "rule_version": "2026-03-27",
+                    "eligibility_snapshot": {
+                        "season_year": int(season_year_i),
+                        "exp": int(exp_i),
+                        "first_year_limit": dict(first_limit),
+                        "raise_rule": "ANCHOR_8_PERCENT",
+                        "max_total_seasons_at_sign": 6 if str(ext_type) in {"ROOKIE", "DVE"} else 5,
+                    },
+                }
+            )
+            contract["extension_meta"] = ext_meta
 
             # Keep this contract active; extension starts in future seasons.
             self._upsert_contract_records_in_cur(cur, {active_contract_id: contract})
@@ -3319,6 +3554,8 @@ class LeagueService:
                         "contract_id": active_contract_id,
                         "start_season_year": int(extend_start_year),
                         "years": years_i,
+                        "contract_channel": str(contract_channel_u),
+                        "extension_type": str(ext_type),
                     }
                 ],
             )
@@ -3338,6 +3575,10 @@ class LeagueService:
                 "start_season_year": int(extend_start_year),
                 "years": years_i,
                 "team_option_years": [int(y) for y in option_years_sorted] if option_years_sorted else [],
+                "contract_channel": str(contract_channel_u),
+                "extension_type": str(ext_type),
+                "first_year_limit_snapshot": dict(first_limit),
+                "raise_rule": "ANCHOR_8_PERCENT",
             },
         )
 
@@ -3491,6 +3732,15 @@ class LeagueService:
                 )
 
             for idx in pending_indices:
+                opt = contract["options"][idx]
+                validate_option_decision_window(
+                    option_type=str(opt.get("type") or "TEAM"),
+                    season_year=int(season_year_i),
+                    decision_date_iso=str(decision_date_iso),
+                    contract_meta=contract,
+                )
+
+            for idx in pending_indices:
                 apply_option_decision(contract, idx, decision_norm, decision_date_iso)
 
             recompute_contract_years_from_salary(contract)
@@ -3552,6 +3802,15 @@ class LeagueService:
             if not pending_indices:
                 raise ValueError(
                     f"No pending option found for contract_id={contract_id}, season_year={season_year_i}"
+                )
+
+            for idx in pending_indices:
+                opt = contract["options"][idx]
+                validate_option_decision_window(
+                    option_type=str(opt.get("type") or ""),
+                    season_year=int(season_year_i),
+                    decision_date_iso=str(decision_date_iso),
+                    contract_meta=contract,
                 )
 
             for idx in pending_indices:
@@ -3655,6 +3914,12 @@ class LeagueService:
                             continue
                         if str(opt.get("status") or "").upper() != "PENDING":
                             continue
+                        validate_option_decision_window(
+                            option_type=str(opt.get("type") or ""),
+                            season_year=int(to_year_i),
+                            decision_date_iso=str(decision_date_iso),
+                            contract_meta=contract,
+                        )
                         decision = policy_fn(opt, player_id, contract, game_state_stub)
                         apply_option_decision(contract, idx, decision, decision_date_iso)
                         option_events.append(
