@@ -261,7 +261,24 @@ def validate_option_decision_window(
             {"missing": "start_season_year"},
         )
 
+    # Primary path: explicit rookie option aliases (if caller preserves rich type).
+    rookie_window_kind: str | None = None
     if opt in _ROOKIE_OPTION_3RD:
+        rookie_window_kind = "ROOKIE_3RD"
+    elif opt in _ROOKIE_OPTION_4TH:
+        rookie_window_kind = "ROOKIE_4TH"
+    # Compatibility path: persisted options are often normalized to TEAM/PLAYER/ETO.
+    # In that case, infer rookie 3rd/4th option window from contract metadata.
+    elif opt == "TEAM":
+        ctype = str(contract_meta.get("contract_type") or "").strip().upper()
+        is_rookie_scale = ctype == "ROOKIE_SCALE" or _is_rookie_scale_first_round(contract_meta)
+        if is_rookie_scale:
+            if season_y == int(contract_start + 2):
+                rookie_window_kind = "ROOKIE_3RD"
+            elif season_y == int(contract_start + 3):
+                rookie_window_kind = "ROOKIE_4TH"
+
+    if rookie_window_kind == "ROOKIE_3RD":
         expected = contract_start + 2
         if season_y != expected:
             raise ContractNegotiationError(
@@ -271,7 +288,7 @@ def validate_option_decision_window(
             )
         window_start = _season_end(contract_start) + timedelta(days=1)
         window_end = _season_start(contract_start + 1)
-    elif opt in _ROOKIE_OPTION_4TH:
+    elif rookie_window_kind == "ROOKIE_4TH":
         expected = contract_start + 3
         if season_y != expected:
             raise ContractNegotiationError(

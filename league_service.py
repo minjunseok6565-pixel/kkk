@@ -3914,6 +3914,12 @@ class LeagueService:
                             continue
                         if str(opt.get("status") or "").upper() != "PENDING":
                             continue
+                        validate_option_decision_window(
+                            option_type=str(opt.get("type") or ""),
+                            season_year=int(to_year_i),
+                            decision_date_iso=str(decision_date_iso),
+                            contract_meta=contract,
+                        )
                         decision = policy_fn(opt, player_id, contract, game_state_stub)
                         apply_option_decision(contract, idx, decision, decision_date_iso)
                         option_events.append(
