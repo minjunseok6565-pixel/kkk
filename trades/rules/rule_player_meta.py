@@ -70,11 +70,15 @@ def build_rule_players_meta(
         "RE_SIGN",
         "SIGN_TWO_WAY",
         "RELEASE_TO_FA",
+        "WAIVE_TO_FA",
+        "STRETCH_TO_FA",
         # legacy spellings (dev)
         "signing",
         "re_sign_or_extend",
         "sign_two_way",
         "release_to_free_agency",
+        "waive_to_fa",
+        "stretch_to_fa",
     }
 
     # Trade tx payload type is "trade" (lowercase) in existing code.
