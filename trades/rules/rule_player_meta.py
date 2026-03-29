@@ -66,6 +66,7 @@ def build_rule_players_meta(
     # (We keep legacy spellings in the allow-list as a safety net during dev.)
     CONTRACT_TYPES = {
         "SIGN_FREE_AGENT",
+        "SIGN_FA_MINIMUM",
         "RE_SIGN",
         "SIGN_TWO_WAY",
         "RELEASE_TO_FA",
@@ -263,7 +264,7 @@ def build_rule_players_meta(
         if signed_date is None and unknown_signed_date is not None:
             signed_date = unknown_signed_date
 
-        signed_via_fa = (last_action_type == "SIGN_FREE_AGENT")
+        signed_via_fa = last_action_type in {"SIGN_FREE_AGENT", "SIGN_FA_MINIMUM"}
 
         # Acquisition computation:
         # - If currently FA: treat as not acquired via trade.
