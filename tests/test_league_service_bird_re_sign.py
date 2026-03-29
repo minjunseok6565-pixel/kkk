@@ -251,3 +251,74 @@ def test_sign_free_agent_with_minimum_channel_is_supported(tmp_path: Path) -> No
 
         assert event.type == "sign_free_agent"
         assert event.payload["to_team"] == "BOS"
+
+
+def test_sign_free_agent_releases_existing_cap_hold(tmp_path: Path) -> None:
+    _configure_state_for_contracts()
+    db_path = tmp_path / "svc_sign_fa_releases_hold.sqlite"
+
+    with LeagueRepo(str(db_path)) as repo:
+        repo.init_db()
+        _seed_player_for_re_sign(repo, pid="P100007", salary=8_000_000)
+        repo.upsert_team_cap_holds(
+            [{
+                "season_year": 2027,
+                "team_id": "BOS",
+                "player_id": "P100007",
+                "source_type": "BIRD",
+                "bird_type": "NON_BIRD",
+                "hold_amount": 9_000_000,
+                "is_released": 0,
+            }]
+        )
+
+        svc = LeagueService(repo)
+        event = svc.sign_free_agent(
+            "BOS",
+            "P100007",
+            signed_date="2027-07-01",
+            years=1,
+            salary_by_year={2027: 8_000_000},
+        )
+
+        assert event.type == "sign_free_agent"
+        holds = repo.list_team_cap_holds("BOS", 2027, active_only=False)
+        assert len(holds) == 1
+        assert int(holds[0]["is_released"]) == 1
+        assert holds[0]["released_reason"] == "SIGNED"
+
+
+def test_sign_free_agent_minimum_releases_existing_cap_hold(tmp_path: Path) -> None:
+    _configure_state_for_contracts()
+    db_path = tmp_path / "svc_sign_fa_minimum_releases_hold.sqlite"
+
+    with LeagueRepo(str(db_path)) as repo:
+        repo.init_db()
+        _seed_player_for_re_sign(repo, pid="P100008", salary=1_000_000)
+        repo.upsert_team_cap_holds(
+            [{
+                "season_year": 2027,
+                "team_id": "BOS",
+                "player_id": "P100008",
+                "source_type": "BIRD",
+                "bird_type": "NON_BIRD",
+                "hold_amount": 1_200_000,
+                "is_released": 0,
+            }]
+        )
+
+        svc = LeagueService(repo)
+        event = svc.sign_free_agent_with_channel(
+            "BOS",
+            "P100008",
+            contract_channel="MINIMUM",
+            signed_date="2027-07-01",
+            years=1,
+            salary_by_year={2027: 1_000_000},
+        )
+
+        assert event.type == "sign_free_agent"
+        holds = repo.list_team_cap_holds("BOS", 2027, active_only=False)
+        assert len(holds) == 1
+        assert int(holds[0]["is_released"]) == 1
+        assert holds[0]["released_reason"] == "SIGNED"

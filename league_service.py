@@ -2263,6 +2263,18 @@ class LeagueService:
             if season_salary is not None:
                 self._set_roster_salary_in_cur(cur, pid, int(float(season_salary)))
 
+            # If there is an active cap hold for this player/season, release it now.
+            try:
+                self.repo.release_cap_hold(
+                    player_id=pid,
+                    team_id=team_norm,
+                    season_year=int(start_season_year),
+                    reason="SIGNED",
+                    now_iso=signed_date_iso,
+                )
+            except Exception:
+                pass
+
             try:
                 cur.execute("DELETE FROM free_agents WHERE player_id=?;", (pid,))
             except sqlite3.OperationalError as exc:
@@ -2524,6 +2536,18 @@ class LeagueService:
             season_salary = salary_norm.get(str(int(start_season_year)))
             if season_salary is not None:
                 self._set_roster_salary_in_cur(cur, pid, int(float(season_salary)))
+
+            # If there is an active cap hold for this player/season, release it now.
+            try:
+                self.repo.release_cap_hold(
+                    player_id=pid,
+                    team_id=team_norm,
+                    season_year=int(start_season_year),
+                    reason="SIGNED",
+                    now_iso=signed_date_iso,
+                )
+            except Exception:
+                pass
 
             try:
                 cur.execute("DELETE FROM free_agents WHERE player_id=?;", (pid,))
