@@ -446,9 +446,13 @@ def _team_move_events_by_pid_since(
         "TRADE",
         "SIGN_FREE_AGENT",
         "RELEASE_TO_FA",
+        "WAIVE_TO_FA",
+        "STRETCH_TO_FA",
         # legacy/dev spellings (safety)
         "signing",
         "release_to_free_agency",
+        "waive_to_fa",
+        "stretch_to_fa",
     ]
     placeholders = ",".join(["?"] * len(tx_types))
 

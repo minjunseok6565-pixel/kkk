@@ -66,14 +66,19 @@ def build_rule_players_meta(
     # (We keep legacy spellings in the allow-list as a safety net during dev.)
     CONTRACT_TYPES = {
         "SIGN_FREE_AGENT",
+        "SIGN_FA_MINIMUM",
         "RE_SIGN",
         "SIGN_TWO_WAY",
         "RELEASE_TO_FA",
+        "WAIVE_TO_FA",
+        "STRETCH_TO_FA",
         # legacy spellings (dev)
         "signing",
         "re_sign_or_extend",
         "sign_two_way",
         "release_to_free_agency",
+        "waive_to_fa",
+        "stretch_to_fa",
     }
 
     # Trade tx payload type is "trade" (lowercase) in existing code.
@@ -263,7 +268,7 @@ def build_rule_players_meta(
         if signed_date is None and unknown_signed_date is not None:
             signed_date = unknown_signed_date
 
-        signed_via_fa = (last_action_type == "SIGN_FREE_AGENT")
+        signed_via_fa = last_action_type in {"SIGN_FREE_AGENT", "SIGN_FA_MINIMUM"}
 
         # Acquisition computation:
         # - If currently FA: treat as not acquired via trade.
